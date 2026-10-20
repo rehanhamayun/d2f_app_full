@@ -52,12 +52,12 @@ class HomeScreen extends StatelessWidget {
           const SizedBox(height: 14),
           // Headline
           Text(
-            'Good things.\nGoing places.',
+            'Parcels in motion.',
             style: AppTheme.display.copyWith(height: 1.1),
           ),
           const SizedBox(height: 6),
           Text(
-            'Send a little closer to home.',
+            'Register, scan and update every shipment from one desk.',
             style: AppTheme.body.copyWith(color: AppColors.textGrey),
           ),
           const SizedBox(height: 18),
@@ -74,8 +74,13 @@ class HomeScreen extends StatelessWidget {
                   child: _QuickCard(
                     color: AppColors.deepPurple,
                     title: 'Register\nparcel',
-                    subtitle: 'Register a parcel\nfor a customer.',
+                    subtitle: 'Create a record and print\nits shipping label.',
                     icon: Icons.inventory_2_rounded,
+                    art: const Positioned(
+                      right: -8,
+                      bottom: 12,
+                      child: _ParcelDrawing(size: 100),
+                    ),
                     onTap: onGoRegister,
                   ),
                 ),
@@ -89,8 +94,14 @@ class HomeScreen extends StatelessWidget {
                         child: _QuickCard(
                           color: AppColors.deepBlue,
                           title: 'Track parcel',
-                          subtitle: 'Scan or look up a parcel.',
+                          subtitle:
+                              'Scan the label or look\nup a tracking number.',
                           icon: Icons.qr_code_scanner_rounded,
+                          art: const Positioned(
+                            right: -2,
+                            bottom: 4,
+                            child: _ScanDrawing(size: 96),
+                          ),
                           onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -106,8 +117,14 @@ class HomeScreen extends StatelessWidget {
                         child: _QuickCard(
                           color: AppColors.deepTeal,
                           title: 'All parcels',
-                          subtitle: 'View status and history.',
+                          subtitle:
+                              'Every shipment, acting on\nits latest status.',
                           icon: Icons.inventory_2_outlined,
+                          art: const Positioned(
+                            right: -2,
+                            bottom: 4,
+                            child: _CrateStackDrawing(size: 96),
+                          ),
                           onTap: onGoActivity,
                           compact: true,
                         ),
@@ -293,6 +310,7 @@ class _QuickCard extends StatelessWidget {
   final String title;
   final String subtitle;
   final IconData icon;
+  final Widget? art;
   final VoidCallback onTap;
   final bool compact;
 
@@ -302,6 +320,7 @@ class _QuickCard extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     required this.onTap,
+    this.art,
     this.compact = false,
   });
 
@@ -329,12 +348,7 @@ class _QuickCard extends StatelessWidget {
                 ),
               ),
             ),
-            if (!compact)
-              const Positioned(
-                right: -8,
-                bottom: 12,
-                child: _ParcelDrawing(size: 100),
-              ),
+            if (art != null) art!,
             Padding(
               padding: EdgeInsets.all(compact ? 13 : 18),
               child: Column(
@@ -586,6 +600,246 @@ class _ParcelPainter extends CustomPainter {
     }
     canvas.drawLine(const Offset(58, 60), const Offset(80, 52), ink);
     canvas.drawLine(const Offset(58, 63), const Offset(74, 57), ink);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// Radar / scan-frame artwork for the tracking action: concentric rings
+/// sweeping a labelled scan frame — reads as "follow the parcel live".
+class _ScanDrawing extends StatelessWidget {
+  final double size;
+  const _ScanDrawing({required this.size});
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: size,
+    height: size,
+    child: CustomPaint(painter: _ScanPainter()),
+  );
+}
+
+class _ScanPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.scale(size.width / 100, size.height / 100);
+    final center = const Offset(52, 52);
+
+    // Faint concentric signal rings (largest first, behind the frame).
+    final rings = [46.0, 36.0, 26.0];
+    for (var i = 0; i < rings.length; i++) {
+      canvas.drawCircle(
+        center,
+        rings[i],
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.3 - i * .55
+          ..color = Colors.white.withValues(alpha: .30 - i * .08),
+      );
+    }
+
+    // Radar sweep wedge.
+    final sweep = Paint()
+      ..shader = SweepGradient(
+        colors: [
+          Colors.white.withValues(alpha: 0),
+          Colors.white.withValues(alpha: .32),
+        ],
+      ).createShader(Rect.fromCircle(center: center, radius: 46));
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(-.6);
+    canvas.drawArc(
+      Rect.fromCircle(center: Offset.zero, radius: 46),
+      0,
+      1.15,
+      true,
+      sweep,
+    );
+    canvas.restore();
+
+    // Label sheet (the parcel's live record) tilted in 3D perspective.
+    Path polygon(List<Offset> points) {
+      final p = Path()..moveTo(points.first.dx, points.first.dy);
+      for (final point in points.skip(1)) {
+        p.lineTo(point.dx, point.dy);
+      }
+      return p..close();
+    }
+
+    final sheet = polygon([
+      const Offset(30, 26),
+      const Offset(74, 16),
+      const Offset(80, 62),
+      const Offset(36, 74),
+    ]);
+    canvas.drawShadow(sheet, Colors.black.withValues(alpha: .45), 8, true);
+    canvas.drawPath(sheet, Paint()..color = Colors.white);
+    final labelLine = Paint()
+      ..color = AppColors.deepBlue.withValues(alpha: .85)
+      ..strokeWidth = 2.2
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(const Offset(39, 33), const Offset(66, 27), labelLine);
+    canvas.drawLine(const Offset(40, 40), const Offset(63, 35), labelLine);
+    // Tracking dashes across the sheet.
+    final dash = Paint()
+      ..color = AppColors.gold
+      ..strokeWidth = 2.6
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(const Offset(38, 52), Offset(58, 47.5), dash);
+    canvas.drawLine(const Offset(61.5, 46.8), Offset(64, 46.2), dash);
+
+    // Scan frame corners around the sheet.
+    final corner = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4
+      ..strokeCap = StrokeCap.round;
+    void cornerMark(Offset a, Offset b) => canvas.drawLine(a, b, corner);
+    cornerMark(const Offset(22, 22), const Offset(34, 19));
+    cornerMark(const Offset(85, 10), const Offset(87, 22));
+    cornerMark(const Offset(87, 55), const Offset(80, 66));
+    cornerMark(const Offset(32, 84), const Offset(42, 82));
+
+    // Signal dot.
+    canvas.drawCircle(
+      const Offset(20, 48),
+      3.4,
+      Paint()..color = AppColors.gold,
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// Isometric crate stack for the parcel-records action: a warehouse stack of
+/// three labelled boxes — one shelf view of every shipment on file.
+class _CrateStackDrawing extends StatelessWidget {
+  final double size;
+  const _CrateStackDrawing({required this.size});
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: size,
+    height: size,
+    child: CustomPaint(painter: _CrateStackPainter()),
+  );
+}
+
+class _CrateStackPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.scale(size.width / 100, size.height / 100);
+
+    Path polygon(List<Offset> points) {
+      final p = Path()..moveTo(points.first.dx, points.first.dy);
+      for (final point in points.skip(1)) {
+        p.lineTo(point.dx, point.dy);
+      }
+      return p..close();
+    }
+
+    void box(
+      Offset o,
+      double w,
+      double h, {
+      required Color top,
+      required Color front,
+      required Color side,
+      bool label = false,
+    }) {
+      final topFace = polygon([
+        o,
+        Offset(o.dx + w * .55, o.dy - w * .28),
+        Offset(o.dx + w * .95, o.dy - w * .28 + h * .24),
+        Offset(o.dx + w * .40, o.dy + h * .26),
+      ]);
+      final frontFace = polygon([
+        o,
+        Offset(o.dx + w * .40, o.dy + h * .26),
+        Offset(o.dx + w * .40, o.dy + h * .26 + h * .62),
+        Offset(o.dx, o.dy + h * .88),
+      ]);
+      final sideFace = polygon([
+        Offset(o.dx + w * .40, o.dy + h * .26),
+        Offset(o.dx + w * .95, o.dy - w * .28 + h * .24),
+        Offset(o.dx + w * .95, o.dy - w * .28 + h * .24 + h * .62),
+        Offset(o.dx + w * .40, o.dy + h * .88),
+      ]);
+      canvas.drawShadow(sideFace, Colors.black.withValues(alpha: .30), 6, true);
+      canvas.drawPath(topFace, Paint()..color = top);
+      canvas.drawPath(frontFace, Paint()..color = front);
+      canvas.drawPath(sideFace, Paint()..color = side);
+      if (label) {
+        final white = Paint()..color = Colors.white;
+        canvas.drawPath(
+          polygon([
+            Offset(o.dx + w * .06, o.dy + h * .34),
+            Offset(o.dx + w * .30, o.dy + h * .26),
+            Offset(o.dx + w * .30, o.dy + h * .66),
+            Offset(o.dx + w * .06, o.dy + h * .74),
+          ]),
+          white,
+        );
+        final ink = Paint()
+          ..color = AppColors.deepTeal.withValues(alpha: .8)
+          ..strokeWidth = 1.4
+          ..strokeCap = StrokeCap.round;
+        for (var i = 0; i < 3; i++) {
+          canvas.drawLine(
+            Offset(o.dx + w * .09, o.dy + h * (.40 + i * .09)),
+            Offset(o.dx + w * .27, o.dy + h * (.32 + i * .09)),
+            ink,
+          );
+        }
+      }
+    }
+
+    // Ground shadow.
+    canvas.drawOval(
+      Rect.fromLTWH(14, 86, 74, 10),
+      Paint()..color = Colors.black.withValues(alpha: .14),
+    );
+
+    // Bottom big crate, middle crate offset, small crate on top — solid stack.
+    box(
+      const Offset(16, 62),
+      46,
+      30,
+      top: const Color(0xFFF3D9A4),
+      front: const Color(0xFFE3AF6D),
+      side: const Color(0xFFEDC189),
+      label: true,
+    );
+    box(
+      const Offset(58, 58),
+      34,
+      22,
+      top: const Color(0xFFF6E3B8),
+      front: const Color(0xFFE8BA80),
+      side: const Color(0xFFF0C790),
+    );
+    box(
+      const Offset(30, 34),
+      36,
+      24,
+      top: const Color(0xFFEFCA92),
+      front: const Color(0xFFD9A463),
+      side: const Color(0xFFE4B375),
+      label: true,
+    );
+    box(
+      const Offset(64, 34),
+      26,
+      18,
+      top: const Color(0xFFF7E7C6),
+      front: const Color(0xFFEDC491),
+      side: const Color(0xFFF5D5A8),
+    );
     canvas.restore();
   }
 

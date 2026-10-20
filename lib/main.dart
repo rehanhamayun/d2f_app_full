@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -26,13 +24,7 @@ class D2FApp extends StatefulWidget {
 class _D2FAppState extends State<D2FApp> {
   bool _apiReady = false;
   int _stage = 0;
-  Timer? _first;
-  Timer? _second;
   bool _preparingArtwork = false;
-
-  // Branded intro stays under ~3.2s total; tapping any splash area skips it.
-  static const int _firstMs = 1400;
-  static const int _secondMs = 3200;
 
   @override
   void initState() {
@@ -48,40 +40,22 @@ class _D2FAppState extends State<D2FApp> {
     super.didChangeDependencies();
     if (_preparingArtwork) return;
     _preparingArtwork = true;
-    // Start the timed sequence after local artwork has decoded, so a cold
-    // launch never skips an illustration while the image cache warms up.
+    // Warm the local artwork so the intro pages play without decode hiccups.
+    // The intro owns its pacing entirely and hands over via onSkip.
     Future.wait([
       for (final asset in [
         'journey.jpg',
-        'warehouse.jpg',
         'login.jpg',
         'd2f_2.png',
         'd2f_3.png',
       ])
         precacheImage(AssetImage('assets/images/$asset'), context),
-    ]).then((_) {
-      if (!mounted) return;
-      _first = Timer(const Duration(milliseconds: _firstMs), () {
-        if (mounted) setState(() => _stage = 1);
-      });
-      _second = Timer(const Duration(milliseconds: _secondMs), () {
-        if (mounted) setState(() => _stage = 2);
-      });
-    });
+    ]);
   }
 
   void _skipSplash() {
     if (!mounted || _stage >= 2) return;
-    _first?.cancel();
-    _second?.cancel();
     setState(() => _stage = 2);
-  }
-
-  @override
-  void dispose() {
-    _first?.cancel();
-    _second?.cancel();
-    super.dispose();
   }
 
   @override

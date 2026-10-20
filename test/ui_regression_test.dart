@@ -130,7 +130,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('two splash stages transition smoothly into sign-in', (
+  testWidgets('splash Skip hands over to the sign-in screen instantly', (
     tester,
   ) async {
     FlutterSecureStorage.setMockInitialValues({});
@@ -141,7 +141,6 @@ void main() {
       await Future.wait([
         for (final asset in [
           'journey.jpg',
-          'warehouse.jpg',
           'login.jpg',
           'd2f_2.png',
           'd2f_3.png',
@@ -150,12 +149,45 @@ void main() {
       ]);
     });
     await tester.pump();
-    expect(tester.widget<SplashScreen>(find.byType(SplashScreen)).stage, 0);
-    await tester.pump(const Duration(milliseconds: 1400));
-    await tester.pump(const Duration(milliseconds: 650));
-    expect(tester.widget<SplashScreen>(find.byType(SplashScreen)).stage, 1);
-    await tester.pump(const Duration(milliseconds: 1800));
-    await tester.pump(const Duration(milliseconds: 650));
+    for (var i = 0; i < 8; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.text('Your parcels.\nHandled with care.'), findsOneWidget);
+    expect(find.text('Loading your journey...'), findsNothing);
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LoginScreen), findsOneWidget);
+    expect(find.byType(SplashScreen), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('splash auto-advances to the journey page and enters sign-in', (
+    tester,
+  ) async {
+    FlutterSecureStorage.setMockInitialValues({});
+    await tester.pumpWidget(const ProviderScope(child: D2FApp()));
+    await tester.pump();
+    await tester.runAsync(() async {
+      final context = tester.element(find.byType(SplashScreen));
+      await Future.wait([
+        for (final asset in [
+          'journey.jpg',
+          'login.jpg',
+          'd2f_2.png',
+          'd2f_3.png',
+        ])
+          precacheImage(AssetImage('assets/images/$asset'), context),
+      ]);
+    });
+    await tester.pump(const Duration(milliseconds: 2600)); // page turn
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(
+      find.text('Bridging distances.\nBringing people closer.'),
+      findsOneWidget,
+    );
+    await tester.pump(const Duration(milliseconds: 2600)); // hands over
+    await tester.pumpAndSettle();
     expect(find.byType(LoginScreen), findsOneWidget);
     expect(find.byType(SplashScreen), findsNothing);
     expect(tester.takeException(), isNull);
