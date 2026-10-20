@@ -35,14 +35,14 @@ class _SplashScreenState extends State<SplashScreen> {
 
   _SplashPage _pageWorkspace() => const _SplashPage(
     art: 'assets/images/login.jpg',
-    canvas: Color(0xFFFDFBF4), // blends with the artwork's own ivory
+    canvas: Color(0xFFFEFDF9), // matches the artwork's own near-white canvas
     headline: 'Your parcels.\nHandled with care.',
     caption: 'Preparing your workspace...',
   );
 
   _SplashPage _pageJourney() => const _SplashPage(
     art: 'assets/images/journey.jpg',
-    canvas: Color(0xFFFAF6EA), // blends with the artwork's own ivory
+    canvas: Color(0xFFFEFBF4), // matches the artwork's own near-white canvas
     headline: 'Bridging distances.\nBringing people closer.',
     caption: 'Loading your journey...',
   );

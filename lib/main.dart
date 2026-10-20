@@ -46,6 +46,8 @@ class _D2FAppState extends State<D2FApp> {
       for (final asset in [
         'journey.jpg',
         'login.jpg',
+        'login_hero.jpg',
+        'signup_hero.jpg',
         'd2f_2.png',
         'd2f_3.png',
       ])

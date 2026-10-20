@@ -124,6 +124,32 @@ class Api {
     }
   }
 
+  /// Creates a new staff account and stores the returned session token
+  /// (new accounts always stay remembered).
+  Future<User> signUp(
+    String fullName,
+    String email,
+    String password, {
+    String? phone,
+  }) async {
+    try {
+      final res = await _dio!.post(
+        '/auth/register',
+        data: {
+          'fullName': fullName.trim(),
+          'email': email.trim(),
+          'password': password,
+          if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim(),
+        },
+      );
+      _token = res.data['token'] as String;
+      await _storage.write(key: _tokenKey, value: _token!);
+      return User.fromJson(res.data['user'] as Map<String, dynamic>);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
   Future<User> me() async {
     try {
       final res = await _dio!.get('/auth/me');

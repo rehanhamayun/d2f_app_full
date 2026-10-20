@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/api.dart';
 import '../core/theme.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/common.dart';
+import 'signup_screen.dart';
 
-/// Staff sign-in (design screen 2).
+/// Staff sign-in (design v4): full-bleed navy travel artwork on top,
+/// "Welcome back." over the art, and a white sheet whose top corners sweep
+/// up like the reference. Labels above fields, coral CTA, email-keyboard safe.
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
@@ -74,324 +78,260 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      // Tapping empty space updates focus and reliably hides the keyboard.
-      body: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => FocusScope.of(context).unfocus(),
-        child: BrandedBackdrop(
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final width = constraints.maxWidth.clamp(0.0, 440.0);
-                  final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
-                  final maxH = constraints.maxHeight;
-                  // Illustration shrinks gracefully on short screens and hides
-                  // entirely while the keyboard is up, without scale transforms
-                  // around the form itself (field taps stay reliable).
-                  final heroH = keyboard
-                      ? 0.0
-                      : (maxH - 568).clamp(120.0, 320.0);
-                  return SingleChildScrollView(
-                    physics: const ClampingScrollPhysics(),
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(minHeight: maxH),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          if (!keyboard) ...[
-                            Row(
-                              children: [
-                                const BrandLogo(fontSize: 25, light: true),
-                                const Spacer(),
-                                IconButton(
-                                  tooltip: 'Connection settings',
-                                  onPressed: _editServerDialog,
-                                  icon: const Icon(
-                                    Icons.tune_rounded,
-                                    color: Colors.white70,
-                                    size: 20,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              height: heroH,
-                              child: _illustration(height: heroH),
-                            ),
-                            const SizedBox(height: 18),
-                          ],
-                          _signInSection(width: width, keyboard: keyboard),
-                          if (!keyboard) ...[
-                            const SizedBox(height: 14),
-                            TextButton(
-                              onPressed: _contactAdminDialog,
-                              style: TextButton.styleFrom(
-                                foregroundColor: Colors.white70,
-                              ),
-                              child: const Text.rich(
-                                TextSpan(
-                                  text: 'Need a staff account? ',
-                                  children: [
-                                    TextSpan(
-                                      text: 'Contact D2F',
-                                      style: TextStyle(
-                                        color: Color(0xFFFFD075),
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                style: TextStyle(fontSize: 12),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _illustration({required double height}) {
-    final compact = height < 190;
-    return Container(
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF294A75), Color(0xFF18395F)],
-        ),
-        borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: Colors.white12),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x33000000),
-            blurRadius: 18,
-            offset: Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(18),
-              child: FittedBox(
-                // Text only — no editable text inside, so this transform is safe.
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 220),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'A little closer\nto home.',
-                        style: AppTheme.heading.copyWith(
-                          color: Colors.white,
-                          fontSize: compact ? 21 : 26,
-                          height: 1.15,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      const Text(
-                        'OMAHA  →  LOMÉ',
-                        style: TextStyle(
-                          color: Color(0xFFFFD075),
-                          fontSize: 9,
-                          letterSpacing: 1.4,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          SizedBox(
-            width: 132,
-            height: double.infinity,
-            child: Image.asset(
-              'assets/images/login.jpg',
-              fit: BoxFit.cover,
-              alignment: Alignment.centerLeft,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _signInSection({required double width, required bool keyboard}) {
-    return Center(
-      child: Container(
-        constraints: BoxConstraints(maxWidth: width.clamp(0.0, 440.0)),
-        padding: EdgeInsets.all(keyboard ? 18 : 22),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF183454), Color(0xFF102741)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: Colors.white12),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0xFF07162E),
-              offset: Offset(0, 6),
-              blurRadius: 0,
-            ),
-            BoxShadow(
-              color: Color(0x44000000),
-              offset: Offset(0, 16),
-              blurRadius: 24,
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      // Light status-bar icons over the blue artwork.
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        backgroundColor: AppColors.navy,
+        body: Stack(
+          fit: StackFit.expand,
           children: [
-            Text(
-              'Welcome back.',
-              style: AppTheme.heading.copyWith(
-                color: Colors.white,
-                fontSize: keyboard ? 23 : 29,
-                letterSpacing: -.8,
-              ),
+            Image.asset(
+              'assets/images/login_hero.jpg',
+              fit: BoxFit.cover,
+              alignment: const Alignment(0, .5),
             ),
-            if (!keyboard) ...[
-              const SizedBox(height: 6),
-              const Text(
-                'Sign in to your D2F workspace.',
-                style: TextStyle(color: Color(0xFFB7C9DF), fontSize: 12),
-              ),
-            ],
-            SizedBox(height: keyboard ? 14 : 22),
-            const Text(
-              'Email address',
-              style: TextStyle(
-                color: Color(0xFFC8D7E8),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
+            const DecoratedBox(
+              decoration: BoxDecoration(color: Color(0x260B1B46)),
             ),
-            const SizedBox(height: 7),
-            TextField(
-              key: const ValueKey('staff-email'),
-              controller: _email,
-              autofillHints: const [AutofillHints.username],
-              autocorrect: false,
-              keyboardType: TextInputType.emailAddress,
-              textInputAction: TextInputAction.next,
-              decoration: const InputDecoration(
-                hintText: 'Email address',
-                prefixIcon: Icon(Icons.alternate_email_rounded),
-              ),
-            ),
-            const SizedBox(height: 14),
-            const Text(
-              'Password',
-              style: TextStyle(
-                color: Color(0xFFC8D7E8),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 7),
-            TextField(
-              key: const ValueKey('staff-password'),
-              controller: _password,
-              autofillHints: const [AutofillHints.password],
-              obscureText: _obscure,
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => _submit(),
-              decoration: InputDecoration(
-                hintText: 'Password',
-                prefixIcon: const Icon(Icons.lock_outline_rounded),
-                suffixIcon: IconButton(
-                  tooltip: _obscure ? 'Show password' : 'Hide password',
-                  onPressed: () => setState(() => _obscure = !_obscure),
-                  icon: Icon(
-                    _obscure
-                        ? Icons.visibility_outlined
-                        : Icons.visibility_off_outlined,
-                  ),
+            GestureDetector(
+              // Tapping empty space updates focus and reliably hides the keyboard.
+              behavior: HitTestBehavior.opaque,
+              onTap: () => FocusScope.of(context).unfocus(),
+              child: SafeArea(
+                top: false,
+                bottom: false,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final keyboard =
+                        MediaQuery.viewInsetsOf(context).bottom > 0;
+                    final maxH = constraints.maxHeight;
+                    // Give the artwork a generous, edge-to-edge portion of the
+                    // viewport. The form sheet scrolls independently on short
+                    // screens and yields the space back to the keyboard.
+                    final heroH = keyboard
+                        ? 0.0
+                        : (maxH * .44).clamp(260.0, 420.0);
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (heroH > 0)
+                          _Hero(
+                            height: heroH,
+                            onServer: _editServerDialog,
+                            onServerVisible: !keyboard,
+                          ),
+                        Expanded(
+                          child: Container(
+                            // Bright white sheet with the reference's big top curve.
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: .96),
+                              borderRadius: BorderRadius.only(
+                                topLeft: Radius.circular(34),
+                                topRight: Radius.circular(34),
+                              ),
+                            ),
+                            padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+                            child: SingleChildScrollView(
+                              physics: const ClampingScrollPhysics(),
+                              child: _form(maxH),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                SizedBox(
-                  width: 22,
-                  height: 32,
-                  child: Checkbox(
-                    value: _remember,
-                    activeColor: AppColors.gold,
-                    checkColor: AppColors.navy,
-                    side: const BorderSide(color: Color(0xFFA4BAD5)),
-                    onChanged: (v) => setState(() => _remember = v ?? true),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  'Remember me',
-                  style: TextStyle(color: Colors.white, fontSize: 12),
-                ),
-                const Spacer(),
-                TextButton(
-                  onPressed: _forgotPasswordDialog,
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFFFFD075),
-                    padding: const EdgeInsets.only(left: 4),
-                  ),
-                  child: const Text(
-                    'Forgot password?',
-                    style: TextStyle(fontSize: 11),
-                  ),
-                ),
-              ],
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppColors.coralSoft,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  _error!,
-                  style: const TextStyle(
-                    color: Color(0xFFB3281D),
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
-                ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            PrimaryButton(
-              label: 'Sign In',
-              loading: _loading,
-              onPressed: _loading ? null : _submit,
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _form(double maxH) {
+    final dense = maxH < 760;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _Field(
+          fieldKey: const ValueKey('staff-email'),
+          label: 'Email address',
+          icon: Icons.mail_outline_rounded,
+          controller: _email,
+          autofillHints: const [AutofillHints.username],
+          keyboardType: TextInputType.emailAddress,
+          textInputAction: TextInputAction.next,
+          hint: 'you@example.com',
+        ),
+        SizedBox(height: dense ? 10 : 14),
+        _Field(
+          fieldKey: const ValueKey('staff-password'),
+          label: 'Password',
+          icon: Icons.lock_outline_rounded,
+          controller: _password,
+          autofillHints: const [AutofillHints.password],
+          obscureText: _obscure,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _submit(),
+          hint: 'Enter your password',
+          suffix: IconButton(
+            tooltip: _obscure ? 'Show password' : 'Hide password',
+            onPressed: () => setState(() => _obscure = !_obscure),
+            icon: Icon(
+              _obscure
+                  ? Icons.visibility_outlined
+                  : Icons.visibility_off_outlined,
+              size: 20,
+              color: AppColors.textGrey,
+            ),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Row(
+          children: [
+            const Text(
+              'Remember me',
+              style: TextStyle(
+                color: AppColors.navy,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(width: 2),
+            SizedBox(
+              width: 20,
+              height: 26,
+              child: Checkbox(
+                value: _remember,
+                activeColor: AppColors.coral,
+                checkColor: Colors.white,
+                side: const BorderSide(color: AppColors.border, width: 1.3),
+                onChanged: (v) => setState(() => _remember = v ?? true),
+              ),
+            ),
+            const Spacer(),
+            TextButton(
+              onPressed: _forgotPasswordDialog,
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.blue,
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(44, 34),
+              ),
+              child: const Text(
+                'Forgot password?',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.coralSoft,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              _error!,
+              style: const TextStyle(
+                color: Color(0xFFB3281D),
+                fontSize: 12,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+        PrimaryButton(
+          label: 'Sign In',
+          loading: _loading,
+          onPressed: _loading ? null : _submit,
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            const Expanded(child: _Hairline()),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Text(
+                'or continue with',
+                style: TextStyle(
+                  color: AppColors.textGrey,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: .1,
+                ),
+              ),
+            ),
+            const Expanded(child: _Hairline()),
+          ],
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton(
+          onPressed: _googleHintDialog,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.navy,
+            backgroundColor: Colors.white,
+            side: const BorderSide(color: AppColors.border, width: 1.2),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            padding: const EdgeInsets.symmetric(vertical: 12),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const _GoogleG(size: 19),
+              const SizedBox(width: 10),
+              Text(
+                'Sign in with Google',
+                style: TextStyle(
+                  color: AppColors.navy,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -.1,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        Center(
+          child: TextButton(
+            onPressed: _loading
+                ? null
+                : () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const SignupScreen(),
+                    ),
+                  ),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.textGrey,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            ),
+            child: const Text.rich(
+              TextSpan(
+                text: 'New to D2F? ',
+                children: [
+                  TextSpan(
+                    text: 'Create account',
+                    style: TextStyle(
+                      color: AppColors.blue,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -471,10 +411,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
-  void _contactAdminDialog() {
+  void _googleHintDialog() {
     _infoDialog(
-      'Create an account',
-      'Staff accounts are provisioned by the D2F Admin. Write to info@d2fshipping.com to request access.',
+      'Google sign-in',
+      'Staff workspaces sign in with email accounts today. Google sign-in arrives with the upcoming customer app.',
     );
   }
 
@@ -507,4 +447,270 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       ),
     );
   }
+}
+
+/// Hero header: full-bleed artwork, D2F wordmark on top, headline below.
+class _Hero extends StatelessWidget {
+  final double height;
+  final VoidCallback onServer;
+  final bool onServerVisible;
+
+  const _Hero({
+    required this.height,
+    required this.onServer,
+    required this.onServerVisible,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: height,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Bottom scrim keeps the headline legible over the sea artwork.
+          const Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [
+                    Color(0x880B1B46),
+                    Color(0x140B1B46),
+                    Colors.transparent,
+                  ],
+                  stops: [0, .38, .68],
+                ),
+              ),
+            ),
+          ),
+          // Top scrim for the wordmark.
+          const Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0x330B1B46), Colors.transparent],
+                  stops: [0, .4],
+                ),
+              ),
+            ),
+          ),
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(22, 6, 12, 0),
+              child: Row(
+                children: [
+                  const BrandLogo(fontSize: 24, light: true),
+                  const Spacer(),
+                  if (onServerVisible)
+                    IconButton(
+                      tooltip: 'Connection settings',
+                      onPressed: onServer,
+                      icon: const Icon(
+                        Icons.tune_rounded,
+                        color: Colors.white70,
+                        size: 20,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            left: 24,
+            right: 20,
+            bottom: 16,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Welcome back.',
+                  style: AppTheme.heading.copyWith(
+                    color: Colors.white,
+                    fontSize: 30,
+                    letterSpacing: -.9,
+                    height: 1.05,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  'Your shipments, one tap away.',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: .85),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Labelled input used across the auth sheets.
+class _Field extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final TextEditingController controller;
+  final Key? fieldKey;
+  final List<String>? autofillHints;
+  final TextInputType? keyboardType;
+  final TextInputAction? textInputAction;
+  final bool obscureText;
+  final ValueChanged<String>? onSubmitted;
+  final String hint;
+  final Widget? suffix;
+
+  const _Field({
+    this.fieldKey,
+    required this.label,
+    required this.icon,
+    required this.controller,
+    this.autofillHints,
+    this.keyboardType,
+    this.textInputAction,
+    this.obscureText = false,
+    this.onSubmitted,
+    required this.hint,
+    this.suffix,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: AppColors.navy,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -.1,
+          ),
+        ),
+        const SizedBox(height: 7),
+        TextField(
+          key: fieldKey,
+          controller: controller,
+          autofillHints: autofillHints,
+          autocorrect: false,
+          keyboardType: keyboardType,
+          textInputAction: textInputAction,
+          obscureText: obscureText,
+          enableSuggestions: !obscureText,
+          obscuringCharacter: '●',
+          onSubmitted: onSubmitted,
+          decoration: InputDecoration(
+            hintText: hint,
+            prefixIcon: Icon(icon, size: 20),
+            prefixIconColor: AppColors.navy,
+            suffixIcon: suffix,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 13,
+            ),
+            isDense: true,
+            filled: true,
+            fillColor: const Color(0xFFFBFCFE),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(15)),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Soft grey divider used by the "or continue with" row.
+class _Hairline extends StatelessWidget {
+  const _Hairline();
+
+  @override
+  Widget build(BuildContext context) =>
+      Container(height: 1, color: AppColors.border);
+}
+
+/// The multicolour Google "G", hand-painted (no external package).
+class _GoogleG extends StatelessWidget {
+  final double size;
+  const _GoogleG({required this.size});
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: size,
+    height: size,
+    child: CustomPaint(painter: _GoogleGPainter()),
+  );
+}
+
+class _GoogleGPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stroke = size.width * .175;
+    final r = (size.width - stroke) / 2;
+    final rect = Rect.fromCircle(
+      center: Offset(size.width / 2, size.height / 2),
+      radius: r,
+    );
+    Paint seg(Color c) => Paint()
+      ..color = c
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke;
+
+    // Canvas: 0° = right, 90° = bottom, sweep clockwise.
+    canvas.drawArc(
+      rect,
+      _deg(190),
+      _deg(130),
+      false,
+      seg(const Color(0xFF4285F4)),
+    ); // left/top-left
+    canvas.drawArc(
+      rect,
+      _deg(320),
+      _deg(70),
+      false,
+      seg(const Color(0xFFEA4335)),
+    ); // top
+    canvas.drawArc(
+      rect,
+      _deg(30),
+      _deg(60),
+      false,
+      seg(const Color(0xFF34A853)),
+    ); // bottom-right
+    canvas.drawArc(
+      rect,
+      _deg(90),
+      _deg(100),
+      false,
+      seg(const Color(0xFFFBBC05)),
+    ); // bottom-left
+    // The blue crossbar sweeping into the centre from the ring's right side.
+    final h = size.height / 2;
+    final bar = Paint()..color = const Color(0xFF4285F4);
+    canvas.drawRect(
+      Rect.fromLTWH(
+        size.width / 2 - stroke * .1,
+        h - stroke / 2,
+        size.width / 2 + stroke * .6,
+        stroke,
+      ),
+      bar,
+    );
+  }
+
+  static double _deg(double d) => d * 3.1415926535897932 / 180;
+
+  @override
+  bool shouldRepaint(covariant _GoogleGPainter oldDelegate) => false;
 }

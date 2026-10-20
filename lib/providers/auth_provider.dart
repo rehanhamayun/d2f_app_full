@@ -34,6 +34,18 @@ class AuthController extends AsyncNotifier<User?> {
     return user;
   }
 
+  /// Creates a new account and immediately establishes the session.
+  Future<User> signUp(
+    String fullName,
+    String email,
+    String password, {
+    String? phone,
+  }) async {
+    final user = await Api.I.signUp(fullName, email, password, phone: phone);
+    state = AsyncData(user);
+    return user;
+  }
+
   Future<void> updateProfile(String name, String? phone) async {
     state = AsyncData(await Api.I.updateProfile(fullName: name, phone: phone));
   }
