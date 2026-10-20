@@ -5,10 +5,9 @@ import 'package:flutter/material.dart';
 import '../core/theme.dart';
 import '../widgets/common.dart';
 
-/// Light, scrollable intro (design reference v3): two swipeable pages with
-/// large brand artwork, tagline, decorative blobs and a coral "journey" pill.
-/// No determinate loading bar; the user can swipe, tap Get Started or let the
-/// pages auto-advance into the app.
+/// Editorial intro (design reference v3): clean ivory canvas, decorative
+/// brand blobs, free-flowing artwork (no card frames, borders or shadows)
+/// and two swipeable pages that auto-advance into the workspace.
 class SplashScreen extends StatefulWidget {
   final int stage;
   final VoidCallback? onSkip;
@@ -22,7 +21,6 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
-  static const _ivory = Color(0xFFFCF8F1);
   static const _autoAdvance = Duration(milliseconds: 2600);
 
   final PageController _pages = PageController();
@@ -35,14 +33,16 @@ class _SplashScreenState extends State<SplashScreen> {
   Iterable<_SplashPage> get _pagesData =>
       _interactive ? [_pageWorkspace(), _pageJourney()] : [_pageJourney()];
 
-  _SplashPage _pageWorkspace() => _SplashPage(
+  _SplashPage _pageWorkspace() => const _SplashPage(
     art: 'assets/images/login.jpg',
+    canvas: Color(0xFFFDFBF4), // blends with the artwork's own ivory
     headline: 'Your parcels.\nHandled with care.',
     caption: 'Preparing your workspace...',
   );
 
-  _SplashPage _pageJourney() => _SplashPage(
+  _SplashPage _pageJourney() => const _SplashPage(
     art: 'assets/images/journey.jpg',
+    canvas: Color(0xFFFAF6EA), // blends with the artwork's own ivory
     headline: 'Bridging distances.\nBringing people closer.',
     caption: 'Loading your journey...',
   );
@@ -97,8 +97,10 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     final pages = _pagesData.toList(growable: false);
+    // Scaffold tone follows the visible page so swipes never show a seam.
+    final canvas = pages[_page.clamp(0, pages.length - 1)].canvas;
     return Scaffold(
-      backgroundColor: _ivory,
+      backgroundColor: canvas,
       body: NotificationListener<ScrollNotification>(
         onNotification: (n) {
           if (n is ScrollStartNotification && n.dragDetails != null) {
@@ -172,7 +174,7 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 }
 
-/// One full intro page, styled after the approved D2F artwork.
+/// One full intro page: logo, edge-to-edge artwork, tagline and journey pill.
 class _SplashPageView extends StatelessWidget {
   final _SplashPage data;
   final bool last;
@@ -180,113 +182,207 @@ class _SplashPageView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: GestureDetector(
-        // Tapping the final page also enters the app (modern quick entry).
-        onTap:
-            last &&
-                (context
-                        .findAncestorStateOfType<_SplashScreenState>()
-                        ?.widget
-                        .onSkip !=
-                    null)
-            ? () => context
-                  .findAncestorStateOfType<_SplashScreenState>()
-                  ?.widget
-                  .onSkip
-                  ?.call()
-            : null,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(26, 10, 26, 64),
-          child: Column(
-            children: [
-              _CornerArt(),
-              const SizedBox(height: 6),
-              const BrandLogo(fontSize: 34, light: false),
-              const SizedBox(height: 18),
-              Expanded(
-                child: TweenAnimationBuilder<double>(
-                  tween: Tween(begin: .96, end: 1),
-                  duration: const Duration(milliseconds: 900),
-                  curve: Curves.easeOutCubic,
-                  builder: (context, value, child) =>
-                      Transform.scale(scale: value, child: child),
-                  child: Container(
-                    clipBehavior: Clip.antiAlias,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(34),
-                      border: Border.all(color: Colors.white, width: 3),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: .10),
-                          blurRadius: 30,
-                          offset: const Offset(0, 18),
-                        ),
-                      ],
+    return GestureDetector(
+      // Tapping the final page also enters the app (modern quick entry).
+      onTap:
+          last &&
+              (context
+                      .findAncestorStateOfType<_SplashScreenState>()
+                      ?.widget
+                      .onSkip !=
+                  null)
+          ? () => context
+                .findAncestorStateOfType<_SplashScreenState>()
+                ?.widget
+                .onSkip
+                ?.call()
+          : null,
+      child: Stack(
+        children: [
+          // Per-page soft-ivory canvas, blended with the artwork's own tone.
+          Positioned.fill(child: ColoredBox(color: data.canvas)),
+          // ── Decorative brand shapes (no cards, no shadows) ──────────────
+          const Positioned(
+            top: -70,
+            left: -55,
+            child: _Circle(96, AppColors.coral),
+          ),
+          Positioned(
+            top: 74,
+            left: 26,
+            child: Transform.rotate(
+              angle: -.8,
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.gold, width: 1.6),
+                ),
+              ),
+            ),
+          ),
+          const Positioned(
+            top: 120,
+            right: 44,
+            child: _Circle(9, AppColors.coral),
+          ),
+          const Positioned(
+            top: 150,
+            right: 30,
+            child: _Circle(5, AppColors.gold),
+          ),
+          // Soft clouds.
+          const Positioned(top: 210, left: -26, child: _Cloud(width: 84)),
+          const Positioned(top: 330, right: -34, child: _Cloud(width: 110)),
+          // Bottom-right gold blob + coral flourish, echoing the artwork.
+          const Positioned(
+            bottom: -90,
+            right: -60,
+            child: _Circle(180, Color(0xFFF5C24B)),
+          ),
+          Positioned.fill(child: CustomPaint(painter: _CurvePainter())),
+
+          // ── Content ──────────────────────────────────────────────────────
+          SafeArea(
+            child: Column(
+              children: [
+                const SizedBox(height: 22),
+                // Wordmark with the little gold plane from the artwork.
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const BrandLogo(fontSize: 30, light: false),
+                    const SizedBox(width: 4),
+                    Transform.rotate(
+                      angle: .45,
+                      child: const Icon(
+                        Icons.flight_rounded,
+                        color: AppColors.gold,
+                        size: 22,
+                      ),
                     ),
-                    child: Image.asset(data.art, fit: BoxFit.contain),
+                  ],
+                ),
+                Expanded(
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0, end: 1),
+                    duration: const Duration(milliseconds: 700),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, value, child) => Opacity(
+                      opacity: value,
+                      child: Transform.translate(
+                        offset: Offset(0, (1 - value) * 14),
+                        child: child,
+                      ),
+                    ),
+                    // Free-flowing artwork: full-bleed, no frame, no shadow.
+                    child: Image.asset(
+                      data.art,
+                      fit: BoxFit.contain,
+                      width: double.infinity,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                data.headline,
-                textAlign: TextAlign.center,
-                style: AppTheme.display.copyWith(
-                  fontSize: 27,
-                  height: 1.16,
-                  letterSpacing: -.9,
+                Text(
+                  data.headline,
+                  textAlign: TextAlign.center,
+                  style: AppTheme.display.copyWith(
+                    fontSize: 27,
+                    height: 1.16,
+                    letterSpacing: -.9,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              const _GoldSwoosh(width: 150),
-              const SizedBox(height: 16),
-              const _JourneyPill(),
-              const SizedBox(height: 10),
-              Text(
-                data.caption,
-                style: AppTheme.caption.copyWith(
-                  color: const Color(0xFF8A93A5),
-                  fontWeight: FontWeight.w600,
+                const SizedBox(height: 8),
+                const _GoldSwoosh(width: 150),
+                const SizedBox(height: 16),
+                const _JourneyPill(),
+                const SizedBox(height: 10),
+                Text(
+                  data.caption,
+                  style: AppTheme.caption.copyWith(
+                    color: const Color(0xFF8A93A5),
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 74),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
 }
 
-/// Header row area reserved for decorative blobs (mirrors the artwork).
-class _CornerArt extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) => const SizedBox(
-    height: 26,
-    child: Align(
-      alignment: Alignment.centerLeft,
-      child: Row(
-        children: [
-          SizedBox(width: 4),
-          _Blob(color: AppColors.coral, size: 22),
-          SizedBox(width: 6),
-          _Blob(color: AppColors.gold, size: 12),
-        ],
-      ),
-    ),
-  );
-}
-
-class _Blob extends StatelessWidget {
-  final Color color;
+/// Flat brand circle (flat fill — deliberately shadow-free).
+class _Circle extends StatelessWidget {
   final double size;
-  const _Blob({required this.color, required this.size});
+  final Color color;
+  const _Circle(this.size, this.color);
   @override
   Widget build(BuildContext context) => Container(
     width: size,
     height: size,
     decoration: BoxDecoration(color: color, shape: BoxShape.circle),
   );
+}
+
+/// Soft cream cloud silhouette.
+class _Cloud extends StatelessWidget {
+  final double width;
+  const _Cloud({required this.width});
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: width,
+    height: width * .34,
+    child: CustomPaint(painter: _CloudPainter()),
+  );
+}
+
+class _CloudPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = const Color(0xFFF6EDDE);
+    final h = size.height;
+    canvas.drawCircle(Offset(size.width * .22, h * .68), h * .46, paint);
+    canvas.drawCircle(Offset(size.width * .45, h * .42), h * .62, paint);
+    canvas.drawCircle(Offset(size.width * .72, h * .66), h * .44, paint);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(0, h * .62, size.width, h * .38),
+        Radius.circular(h * .2),
+      ),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// Thin coral flourish tucked into the lower-left corner, clear of text.
+class _CurvePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = AppColors.coral.withValues(alpha: .85)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2
+      ..strokeCap = StrokeCap.round;
+    final path = Path()
+      ..moveTo(size.width * .025, size.height * .962)
+      ..quadraticBezierTo(
+        size.width * .055,
+        size.height * .902,
+        size.width * .115,
+        size.height * .944,
+      );
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 /// Hand-painted style gold underline stroke.
@@ -368,8 +464,10 @@ class _JourneyPill extends StatelessWidget {
 
 class _SplashPage {
   final String art, headline, caption;
+  final Color canvas;
   const _SplashPage({
     required this.art,
+    required this.canvas,
     required this.headline,
     required this.caption,
   });
