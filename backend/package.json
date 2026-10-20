@@ -1,0 +1,27 @@
+{
+  "name": "d2f-backend",
+  "version": "1.0.0",
+  "description": "D2F Global shipping platform backend (Milestone 1: staff parcel foundation)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node src/index.js",
+    "start": "node src/index.js",
+    "db:up": "docker compose up -d",
+    "migrate": "prisma migrate dev",
+    "seed": "prisma db seed",
+    "test": "node --test test/*.test.js"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "prisma": "^6.19.3"
+  }
+}

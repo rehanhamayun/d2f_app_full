@@ -1,0 +1,147 @@
+// D2F Shipping — Prisma schema (Milestone 1: staff parcel foundation)
+// Conceptual model per project memory section 8.2, scoped to M1.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Organizations: D2F and permitted partner orgs (future SaaS-ready)
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  users     User[]
+  locations Location[]
+}
+
+// Locations: Omaha warehouse, Lomé facility, etc.
+model Location {
+  id             String       @id @default(uuid())
+  organizationId String
+  name           String
+  code           String // e.g. OMA-1, LOME-1
+  city           String?
+  country        String?
+  timezone       String       @default("America/Chicago")
+  createdAt      DateTime     @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  users        User[]
+  parcels      Parcel[]
+
+  @@unique([organizationId, code])
+}
+
+// Users: staff, customers, drivers. Roles enforced by backend middleware.
+// M1 focuses on STAFF; role enums ready for M2/M3 expansion.
+enum Role {
+  ADMIN
+  STAFF
+  CUSTOMER
+  DRIVER
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  phone        String?
+  role         Role     @default(STAFF)
+  organizationId String?
+  locationId   String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  location     Location?     @relation(fields: [locationId], references: [id])
+
+  parcelsCreated Parcel[] @relation("parcelsCreatedBy")
+  events         TrackingEvent[]
+}
+
+// Customers: shipping/billing identity associated with parcels
+model Customer {
+  id          String   @id @default(uuid())
+  displayName String
+  email       String?
+  phone       String?
+  address     String?
+  city        String?
+  country     String?
+  createdAt   DateTime @default(now())
+
+  parcels Parcel[]
+}
+
+// Parcels: permanent UUID + public tracking ID
+model Parcel {
+  id           String   @id @default(uuid()) // permanent internal UUID
+  trackingId   String   @unique // public D2F tracking ID (D2F-YYYY-NNNNNN)
+  customerId   String // shipper
+  recipientName String
+  recipientPhone String?
+  recipientAddress String?
+  packageType  String // BOX, BARREL, TV, APPLIANCE, FURNITURE, PALLET, VEHICLE...
+  weightKg     Float
+  origin       String
+  destination  String
+  method       String   @default("SEA") // AIR | SEA | ROAD
+  notes        String?
+  status       String   @default("RECEIVED")
+  createdById  String
+  locationId   String?
+  clientRequestId String? @unique // idempotency key: guards duplicate submissions on retry
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  customer   Customer        @relation(fields: [customerId], references: [id])
+  createdBy  User            @relation("parcelsCreatedBy", fields: [createdById], references: [id])
+  location   Location?       @relation(fields: [locationId], references: [id])
+  events     TrackingEvent[] @relation("parcelEvents")
+  trackingIndex TrackingIndex?
+}
+
+// trackingIndex equivalent: unique public tracking ID lookup + QR payload
+model TrackingIndex {
+  trackingId String @id
+  parcelId   String @unique
+  createdAt  DateTime @default(now())
+
+  parcel Parcel @relation(fields: [parcelId], references: [id])
+}
+
+// Timestamped, traceable event history
+model TrackingEvent {
+  id        String   @id @default(uuid())
+  parcelId  String
+  status    String
+  note      String?
+  location  String?
+  actorId   String?
+  createdAt DateTime @default(now())
+
+  parcel Parcel @relation("parcelEvents", fields: [parcelId], references: [id])
+  actor  User?  @relation(fields: [actorId], references: [id])
+
+  @@index([parcelId, createdAt])
+}
+
+// Audit log for material actions (M1: registration + status updates)
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String
+  detail    String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+}

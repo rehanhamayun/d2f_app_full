@@ -1,0 +1,17 @@
+{
+  "checkedAt": "2026-10-20T08:31:42.341Z",
+  "api": "https://d2f-api-production.up.railway.app",
+  "checks": [
+    "HTTPS health + PostgreSQL",
+    "unauthenticated access denied",
+    "staff sign-in",
+    "customer creation",
+    "parcel UUID + tracking ID",
+    "idempotent retry",
+    "forward status update",
+    "timestamped history + actor",
+    "backward update denied"
+  ],
+  "parcelId": "915fec9c-105c-4276-bf3c-d495cb0384ea",
+  "trackingId": "D2F-2026-000104"
+}
