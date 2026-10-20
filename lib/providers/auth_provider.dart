@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/api.dart';
@@ -5,8 +7,19 @@ import '../models/models.dart';
 
 /// Global session state. `null` = signed out, `User` = signed in.
 class AuthController extends AsyncNotifier<User?> {
+  /// Bounded startup: a remembered session restores within this window or the
+  /// sign-in screen appears quickly. A slow network can then never hold the
+  /// splash screen for up to Dio's 30s connect timeout.
+  static const Duration _restoreWindow = Duration(seconds: 5);
+
   @override
-  Future<User?> build() => Api.I.restoreSession();
+  Future<User?> build() async {
+    if (Api.I.sessionToken == null) return null; // instant sign-in screen
+    return Api.I.restoreSession().timeout(
+      _restoreWindow,
+      onTimeout: () => null, // fall through to the sign-in screen
+    );
+  }
 
   /// Signs in; on failure resets to signed-out and rethrows so the
   /// login screen can display the server's message.

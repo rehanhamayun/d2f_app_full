@@ -151,10 +151,10 @@ void main() {
     });
     await tester.pump();
     expect(tester.widget<SplashScreen>(find.byType(SplashScreen)).stage, 0);
-    await tester.pump(const Duration(milliseconds: 2800));
+    await tester.pump(const Duration(milliseconds: 1400));
     await tester.pump(const Duration(milliseconds: 650));
     expect(tester.widget<SplashScreen>(find.byType(SplashScreen)).stage, 1);
-    await tester.pump(const Duration(milliseconds: 2150));
+    await tester.pump(const Duration(milliseconds: 1800));
     await tester.pump(const Duration(milliseconds: 650));
     expect(find.byType(LoginScreen), findsOneWidget);
     expect(find.byType(SplashScreen), findsNothing);

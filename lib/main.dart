@@ -30,6 +30,10 @@ class _D2FAppState extends State<D2FApp> {
   Timer? _second;
   bool _preparingArtwork = false;
 
+  // Branded intro stays under ~3.2s total; tapping any splash area skips it.
+  static const int _firstMs = 1400;
+  static const int _secondMs = 3200;
+
   @override
   void initState() {
     super.initState();
@@ -57,13 +61,20 @@ class _D2FAppState extends State<D2FApp> {
         precacheImage(AssetImage('assets/images/$asset'), context),
     ]).then((_) {
       if (!mounted) return;
-      _first = Timer(const Duration(milliseconds: 2800), () {
+      _first = Timer(const Duration(milliseconds: _firstMs), () {
         if (mounted) setState(() => _stage = 1);
       });
-      _second = Timer(const Duration(milliseconds: 5600), () {
+      _second = Timer(const Duration(milliseconds: _secondMs), () {
         if (mounted) setState(() => _stage = 2);
       });
     });
+  }
+
+  void _skipSplash() {
+    if (!mounted || _stage >= 2) return;
+    _first?.cancel();
+    _second?.cancel();
+    setState(() => _stage = 2);
   }
 
   @override
@@ -92,6 +103,7 @@ class _D2FAppState extends State<D2FApp> {
             : SplashScreen(
                 key: ValueKey('splash-$_stage'),
                 stage: _stage.clamp(0, 1),
+                onSkip: _apiReady ? _skipSplash : null,
               ),
       ),
     );

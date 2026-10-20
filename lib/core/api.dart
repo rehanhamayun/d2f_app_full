@@ -50,6 +50,10 @@ class Api {
     return (o == null || o.isEmpty) ? defaultBaseUrl : o;
   }
 
+  /// Configured JWT (null when there is no remembered session). Lets the auth
+  /// provider skip restore work entirely for fresh installs.
+  String? get sessionToken => _token;
+
   Dio _buildDio() {
     final d = Dio(
       BaseOptions(
