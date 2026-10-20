@@ -22,22 +22,22 @@ ShippingMethod shippingMethodFrom(String? s) {
 
 extension ShippingMethodX on ShippingMethod {
   String get label => switch (this) {
-        ShippingMethod.AIR => 'Air',
-        ShippingMethod.SEA => 'Sea',
-        ShippingMethod.ROAD => 'Road',
-      };
+    ShippingMethod.AIR => 'Air',
+    ShippingMethod.SEA => 'Sea',
+    ShippingMethod.ROAD => 'Road',
+  };
 
   String get tagline => switch (this) {
-        ShippingMethod.AIR => 'Fast & reliable',
-        ShippingMethod.SEA => 'Cost-effective',
-        ShippingMethod.ROAD => 'Wide coverage',
-      };
+    ShippingMethod.AIR => 'Fast & reliable',
+    ShippingMethod.SEA => 'Cost-effective',
+    ShippingMethod.ROAD => 'Wide coverage',
+  };
 
   IconData get icon => switch (this) {
-        ShippingMethod.AIR => Icons.flight_takeoff_rounded,
-        ShippingMethod.SEA => Icons.directions_boat_rounded,
-        ShippingMethod.ROAD => Icons.local_shipping_rounded,
-      };
+    ShippingMethod.AIR => Icons.flight_takeoff_rounded,
+    ShippingMethod.SEA => Icons.directions_boat_rounded,
+    ShippingMethod.ROAD => Icons.local_shipping_rounded,
+  };
 }
 
 /// Canonical M1 statuses (forward-only lifecycle, enforced server-side).
@@ -60,47 +60,47 @@ const Map<String, List<String>> kAllowedTransitions = {
 };
 
 String statusLabel(String status) => switch (status) {
-      'RECEIVED' => 'Received',
-      'PROCESSING' => 'Processing',
-      'IN_TRANSIT' => 'In Transit',
-      'ARRIVED_LOME' => 'Arrived in Lomé',
-      'READY_FOR_PICKUP' => 'Ready for Pickup',
-      'DELIVERED' => 'Delivered',
-      _ => status,
-    };
+  'RECEIVED' => 'Received',
+  'PROCESSING' => 'Processing',
+  'IN_TRANSIT' => 'In Transit',
+  'ARRIVED_LOME' => 'Arrived in Lomé',
+  'READY_FOR_PICKUP' => 'Ready for Pickup',
+  'DELIVERED' => 'Delivered',
+  _ => status,
+};
 
 /// Compact chip labels for tight list rows.
 String statusShortLabel(String status) => switch (status) {
-      'RECEIVED' => 'Received',
-      'PROCESSING' => 'Processing',
-      'IN_TRANSIT' => 'In Transit',
-      'ARRIVED_LOME' => 'Arrived',
-      'READY_FOR_PICKUP' => 'Ready',
-      'DELIVERED' => 'Delivered',
-      _ => status,
-    };
+  'RECEIVED' => 'Received',
+  'PROCESSING' => 'Processing',
+  'IN_TRANSIT' => 'In Transit',
+  'ARRIVED_LOME' => 'Arrived',
+  'READY_FOR_PICKUP' => 'Ready',
+  'DELIVERED' => 'Delivered',
+  _ => status,
+};
 
 /// Short operational sub-label shown under chips / list cards.
 String statusSubLabel(String status) => switch (status) {
-      'RECEIVED' => 'At warehouse (USA)',
-      'PROCESSING' => 'Being prepared for shipment',
-      'IN_TRANSIT' => 'On the way to West Africa',
-      'ARRIVED_LOME' => 'Arrived at Lomé facility',
-      'READY_FOR_PICKUP' => 'Ready for pickup',
-      'DELIVERED' => 'Picked up / delivered',
-      _ => '',
-    };
+  'RECEIVED' => 'At warehouse (USA)',
+  'PROCESSING' => 'Being prepared for shipment',
+  'IN_TRANSIT' => 'On the way to West Africa',
+  'ARRIVED_LOME' => 'Arrived at Lomé facility',
+  'READY_FOR_PICKUP' => 'Ready for pickup',
+  'DELIVERED' => 'Picked up / delivered',
+  _ => '',
+};
 
 /// Friendly customer-safe headline for the detail header.
 String statusHeadline(String status) => switch (status) {
-      'RECEIVED' => 'Your parcel is registered at our warehouse.',
-      'PROCESSING' => 'Your parcel is being prepared for shipment.',
-      'IN_TRANSIT' => 'Your package is on the way to West Africa. Arriving soon!',
-      'ARRIVED_LOME' => 'Your parcel has arrived at our Lomé facility.',
-      'READY_FOR_PICKUP' => 'Your parcel is ready at the pickup location.',
-      'DELIVERED' => 'Package successfully delivered to the recipient.',
-      _ => '',
-    };
+  'RECEIVED' => 'Your parcel is registered at our warehouse.',
+  'PROCESSING' => 'Your parcel is being prepared for shipment.',
+  'IN_TRANSIT' => 'Your package is on the way to West Africa. Arriving soon!',
+  'ARRIVED_LOME' => 'Your parcel has arrived at our Lomé facility.',
+  'READY_FOR_PICKUP' => 'Your parcel is ready at the pickup location.',
+  'DELIVERED' => 'Package successfully delivered to the recipient.',
+  _ => '',
+};
 
 // ── Models ───────────────────────────────────────────────────────────────────
 
@@ -109,6 +109,7 @@ class User {
   final String email;
   final String fullName;
   final UserRole role;
+  final String? phone;
   final String? organizationName;
   final String? locationName;
 
@@ -117,6 +118,7 @@ class User {
     required this.email,
     required this.fullName,
     required this.role,
+    this.phone,
     this.organizationName,
     this.locationName,
   });
@@ -124,13 +126,14 @@ class User {
   bool get isStaff => role == UserRole.STAFF || role == UserRole.ADMIN;
 
   factory User.fromJson(Map<String, dynamic> j) => User(
-        id: j['id'] as String,
-        email: j['email'] as String,
-        fullName: j['fullName'] as String,
-        role: userRoleFrom(j['role'] as String?),
-        organizationName: j['organizationName'] as String?,
-        locationName: j['locationName'] as String?,
-      );
+    id: j['id'] as String,
+    email: j['email'] as String,
+    fullName: j['fullName'] as String,
+    role: userRoleFrom(j['role'] as String?),
+    phone: j['phone'] as String?,
+    organizationName: j['organizationName'] as String?,
+    locationName: j['locationName'] as String?,
+  );
 }
 
 class Customer {
@@ -155,15 +158,17 @@ class Customer {
   });
 
   factory Customer.fromJson(Map<String, dynamic> j) => Customer(
-        id: j['id'] as String,
-        displayName: j['displayName'] as String? ?? '',
-        email: j['email'] as String?,
-        phone: j['phone'] as String?,
-        address: j['address'] as String?,
-        city: j['city'] as String?,
-        country: j['country'] as String?,
-        createdAt: j['createdAt'] == null ? null : DateTime.tryParse(j['createdAt'] as String),
-      );
+    id: j['id'] as String,
+    displayName: j['displayName'] as String? ?? '',
+    email: j['email'] as String?,
+    phone: j['phone'] as String?,
+    address: j['address'] as String?,
+    city: j['city'] as String?,
+    country: j['country'] as String?,
+    createdAt: j['createdAt'] == null
+        ? null
+        : DateTime.tryParse(j['createdAt'] as String),
+  );
 }
 
 class TrackingEvent {
@@ -184,13 +189,13 @@ class TrackingEvent {
   });
 
   factory TrackingEvent.fromJson(Map<String, dynamic> j) => TrackingEvent(
-        id: j['id'] as String,
-        status: j['status'] as String,
-        note: j['note'] as String?,
-        location: j['location'] as String?,
-        actorName: (j['actor'] as Map<String, dynamic>?)?['fullName'] as String?,
-        createdAt: DateTime.tryParse(j['createdAt'] as String) ?? DateTime.now(),
-      );
+    id: j['id'] as String,
+    status: j['status'] as String,
+    note: j['note'] as String?,
+    location: j['location'] as String?,
+    actorName: (j['actor'] as Map<String, dynamic>?)?['fullName'] as String?,
+    createdAt: DateTime.tryParse(j['createdAt'] as String) ?? DateTime.now(),
+  );
 }
 
 class Parcel {
@@ -233,26 +238,30 @@ class Parcel {
   });
 
   factory Parcel.fromJson(Map<String, dynamic> j) => Parcel(
-        id: j['id'] as String,
-        trackingId: j['trackingId'] as String,
-        customerId: j['customerId'] as String,
-        recipientName: j['recipientName'] as String? ?? '',
-        recipientPhone: j['recipientPhone'] as String?,
-        recipientAddress: j['recipientAddress'] as String?,
-        packageType: j['packageType'] as String? ?? 'OTHER',
-        weightKg: (j['weightKg'] as num?)?.toDouble() ?? 0,
-        origin: j['origin'] as String? ?? '',
-        destination: j['destination'] as String? ?? '',
-        method: shippingMethodFrom(j['method'] as String?),
-        notes: j['notes'] as String?,
-        status: j['status'] as String? ?? 'RECEIVED',
-        createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ?? DateTime.now(),
-        updatedAt: DateTime.tryParse(j['updatedAt'] as String? ?? '') ?? DateTime.now(),
-        customer: j['customer'] == null ? null : Customer.fromJson(j['customer'] as Map<String, dynamic>),
-        events: (j['events'] as List<dynamic>? ?? [])
-            .map((e) => TrackingEvent.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
+    id: j['id'] as String,
+    trackingId: j['trackingId'] as String,
+    customerId: j['customerId'] as String,
+    recipientName: j['recipientName'] as String? ?? '',
+    recipientPhone: j['recipientPhone'] as String?,
+    recipientAddress: j['recipientAddress'] as String?,
+    packageType: j['packageType'] as String? ?? 'OTHER',
+    weightKg: (j['weightKg'] as num?)?.toDouble() ?? 0,
+    origin: j['origin'] as String? ?? '',
+    destination: j['destination'] as String? ?? '',
+    method: shippingMethodFrom(j['method'] as String?),
+    notes: j['notes'] as String?,
+    status: j['status'] as String? ?? 'RECEIVED',
+    createdAt:
+        DateTime.tryParse(j['createdAt'] as String? ?? '') ?? DateTime.now(),
+    updatedAt:
+        DateTime.tryParse(j['updatedAt'] as String? ?? '') ?? DateTime.now(),
+    customer: j['customer'] == null
+        ? null
+        : Customer.fromJson(j['customer'] as Map<String, dynamic>),
+    events: (j['events'] as List<dynamic>? ?? [])
+        .map((e) => TrackingEvent.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
 
   /// Country flag emoji derived from the destination string.
   String get destinationFlag {
@@ -269,17 +278,17 @@ class Parcel {
   }
 
   String get packageTypeLabel => switch (packageType) {
-        'BOX' => 'Box',
-        'BARREL' => 'Barrel',
-        'TV' => 'TV / Electronics',
-        'APPLIANCE' => 'Appliance',
-        'FURNITURE' => 'Furniture',
-        'PALLET' => 'Pallet',
-        'VEHICLE' => 'Vehicle',
-        'DOCUMENTS' => 'Documents',
-        'OTHER' => 'Other',
-        _ => packageType,
-      };
+    'BOX' => 'Box',
+    'BARREL' => 'Barrel',
+    'TV' => 'TV / Electronics',
+    'APPLIANCE' => 'Appliance',
+    'FURNITURE' => 'Furniture',
+    'PALLET' => 'Pallet',
+    'VEHICLE' => 'Vehicle',
+    'DOCUMENTS' => 'Documents',
+    'OTHER' => 'Other',
+    _ => packageType,
+  };
 }
 
 // ── Reference data (dropdowns) ──────────────────────────────────────────────

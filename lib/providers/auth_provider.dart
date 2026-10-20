@@ -21,6 +21,10 @@ class AuthController extends AsyncNotifier<User?> {
     return user;
   }
 
+  Future<void> updateProfile(String name, String? phone) async {
+    state = AsyncData(await Api.I.updateProfile(fullName: name, phone: phone));
+  }
+
   Future<void> signOut() async {
     await Api.I.signOut();
     state = const AsyncData(null);

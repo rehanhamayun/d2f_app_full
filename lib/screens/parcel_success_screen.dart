@@ -5,6 +5,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../core/theme.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
+import 'label_preview_screen.dart';
 import 'parcel_detail_screen.dart';
 
 /// "Parcel Registered Successfully!" (design screen 6) with tracking ID,
@@ -170,7 +171,8 @@ class ParcelSuccessScreen extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             SectionCard(
-              tint: AppColors.goldSoft,
+              tint: AppColors.deepTeal,
+              dark: true,
               child: Row(
                 children: [
                   Expanded(
@@ -235,6 +237,16 @@ class ParcelSuccessScreen extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             OutlineButton2(
+              label: 'Save or share label',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => LabelPreviewScreen(parcel: parcel),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            OutlineButton2(
               label: 'Register Another Parcel',
               onPressed: () => Navigator.pop(context, 'another'),
             ),
@@ -284,7 +296,7 @@ class _SummaryCell extends StatelessWidget {
           Text(
             label,
             style: const TextStyle(
-              color: AppColors.textGrey,
+              color: Color(0xFFBED3DD),
               fontSize: 9.5,
               fontWeight: FontWeight.w800,
               letterSpacing: 0.5,
@@ -295,7 +307,7 @@ class _SummaryCell extends StatelessWidget {
           Text(
             value,
             style: const TextStyle(
-              color: AppColors.navy,
+              color: Colors.white,
               fontSize: 14.5,
               fontWeight: FontWeight.w900,
             ),
@@ -306,7 +318,7 @@ class _SummaryCell extends StatelessWidget {
           if (sub != null)
             Text(
               sub!,
-              style: const TextStyle(color: AppColors.textGrey, fontSize: 10.5),
+              style: const TextStyle(color: Color(0xFFBED3DD), fontSize: 10.5),
               textAlign: TextAlign.center,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,

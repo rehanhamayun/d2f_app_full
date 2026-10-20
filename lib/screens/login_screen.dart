@@ -15,7 +15,7 @@ class LoginScreen extends ConsumerStatefulWidget {
 }
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
-  final _email = TextEditingController(text: 'staff@d2fshipping.com');
+  final _email = TextEditingController();
   final _password = TextEditingController();
   bool _obscure = true;
   bool _remember = true;
@@ -48,7 +48,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         // Roles outside M1 scope cannot enter the staff app.
         await ref.read(authControllerProvider.notifier).signOut();
         setState(() {
-          _error = 'This build is for Staff accounts. Customer and Driver portals arrive in later milestones.';
+          _error = 'This account does not have access to the staff workspace. Please contact D2F for assistance.';
           _loading = false;
         });
         return;
@@ -74,271 +74,346 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
     return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
-              shrinkWrap: true,
-              children: [
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: BrandLogo(fontSize: 32),
-                ),
-                const SizedBox(height: 30),
-                const ScreenIntro(
-                  title: 'Welcome back.',
-                  subtitle: 'Your next shipment starts here.',
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Sign in to manage your shipments and track parcels.',
-                  style: AppTheme.body.copyWith(
-                    color: AppColors.textGrey,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 28),
-
-                const Text('Email address', style: AppTheme.caption),
-                const SizedBox(height: 8),
-                // Email
-                TextField(
-                  controller: _email,
-                  autofillHints: const [AutofillHints.username],
-                  autocorrect: false,
-                  keyboardType: TextInputType.emailAddress,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    hintText: 'Email address',
-                    prefixIcon: Icon(Icons.mail_outline_rounded),
-                  ),
-                ),
-                const SizedBox(height: 14),
-
-                const Text('Password', style: AppTheme.caption),
-                const SizedBox(height: 8),
-                // Password
-                TextField(
-                  controller: _password,
-                  autofillHints: const [AutofillHints.password],
-                  obscureText: _obscure,
-                  textInputAction: TextInputAction.done,
-                  onSubmitted: (_) => _submit(),
-                  decoration: InputDecoration(
-                    hintText: 'Password',
-                    prefixIcon: const Icon(Icons.lock_outline_rounded),
-                    suffixIcon: IconButton(
-                      tooltip: _obscure ? 'Show password' : 'Hide password',
-                      onPressed: () => setState(() => _obscure = !_obscure),
-                      icon: Icon(
-                        _obscure
-                            ? Icons.visibility_outlined
-                            : Icons.visibility_off_outlined,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                Row(
-                  children: [
-                    SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: Checkbox(
-                        value: _remember,
-                        activeColor: AppColors.navy,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        onChanged: (v) => setState(() => _remember = v ?? true),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Text('Remember me', style: AppTheme.body),
-                    const Spacer(),
-                    GestureDetector(
-                      onTap: () => _forgotPasswordDialog(),
-                      child: const Text(
-                        'Forgot password?',
-                        style: TextStyle(
-                          color: AppColors.blue,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13.5,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-
-                if (_error != null) ...[
-                  const SizedBox(height: 14),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.coralSoft,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
+      body: BrandedBackdrop(
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final width = constraints.maxWidth.clamp(0.0, 440.0);
+                return Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 440),
+                    child: Column(
                       children: [
-                        const Icon(
-                          Icons.error_outline_rounded,
-                          color: AppColors.coral,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _error!,
-                            style: const TextStyle(
-                              color: AppColors.coral,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
+                        if (!keyboard) ...[
+                          Row(
+                            children: [
+                              const BrandLogo(fontSize: 25, light: true),
+                              const Spacer(),
+                              IconButton(
+                                tooltip: 'Connection settings',
+                                onPressed: _editServerDialog,
+                                icon: const Icon(
+                                  Icons.tune_rounded,
+                                  color: Colors.white70,
+                                  size: 20,
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 20),
-
-                PrimaryButton(
-                  label: 'Sign In',
-                  loading: _loading,
-                  onPressed: _submit,
-                ),
-                const SizedBox(height: 12),
-
-                // Backend address (editable pre-login so a physical phone can
-                // point at the demo server: LAN IP or adb reverse 127.0.0.1).
-                Center(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: _editServerDialog,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 6,
-                        horizontal: 10,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.dns_rounded,
-                            size: 16,
-                            color: AppColors.textGrey,
-                          ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
-                              'Server: ${Uri.tryParse(Api.I.currentBaseUrl)?.host ?? Api.I.currentBaseUrl}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppTheme.caption.copyWith(
-                                color: AppColors.textGrey,
+                          const SizedBox(height: 12),
+                          Expanded(
+                            flex: constraints.maxHeight < 700 ? 2 : 3,
+                            child: Container(
+                              clipBehavior: Clip.antiAlias,
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFF294A75),
+                                    Color(0xFF18395F),
+                                  ],
+                                ),
+                                borderRadius: BorderRadius.circular(26),
+                                border: Border.all(color: Colors.white12),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Color(0x33000000),
+                                    blurRadius: 18,
+                                    offset: Offset(0, 8),
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(18),
+                                      child: FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        alignment: Alignment.centerLeft,
+                                        child: SizedBox(
+                                          width: width * .44,
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'A little closer\nto home.',
+                                                style: AppTheme.heading
+                                                    .copyWith(
+                                                      color: Colors.white,
+                                                      fontSize:
+                                                          constraints
+                                                                  .maxHeight <
+                                                              700
+                                                          ? 21
+                                                          : 26,
+                                                      height: 1.15,
+                                                    ),
+                                              ),
+                                              const SizedBox(height: 10),
+                                              const Text(
+                                                'OMAHA  →  LOMÉ',
+                                                style: TextStyle(
+                                                  color: Color(0xFFFFD075),
+                                                  fontSize: 9,
+                                                  letterSpacing: 1.4,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: width * .38,
+                                    height: double.infinity,
+                                    child: Image.asset(
+                                      'assets/images/login.jpg',
+                                      fit: BoxFit.cover,
+                                      alignment: Alignment.centerLeft,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
-                          const SizedBox(width: 4),
-                          const Icon(
-                            Icons.edit_rounded,
-                            size: 13,
-                            color: AppColors.blue,
+                          const SizedBox(height: 18),
+                        ],
+                        Expanded(
+                          flex: keyboard ? 1 : 7,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.center,
+                            child: SizedBox(
+                              width: width,
+                              child: Container(
+                                padding: EdgeInsets.all(keyboard ? 18 : 22),
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    colors: [
+                                      Color(0xFF183454),
+                                      Color(0xFF102741),
+                                    ],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  ),
+                                  borderRadius: BorderRadius.circular(28),
+                                  border: Border.all(color: Colors.white12),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Color(0xFF07162E),
+                                      offset: Offset(0, 6),
+                                      blurRadius: 0,
+                                    ),
+                                    BoxShadow(
+                                      color: Color(0x44000000),
+                                      offset: Offset(0, 16),
+                                      blurRadius: 24,
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      'Welcome back.',
+                                      style: AppTheme.heading.copyWith(
+                                        color: Colors.white,
+                                        fontSize: keyboard ? 23 : 29,
+                                        letterSpacing: -.8,
+                                      ),
+                                    ),
+                                    if (!keyboard) ...[
+                                      const SizedBox(height: 6),
+                                      const Text(
+                                        'Sign in to your D2F workspace.',
+                                        style: TextStyle(
+                                          color: Color(0xFFB7C9DF),
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                    SizedBox(height: keyboard ? 14 : 22),
+                                    const Text(
+                                      'Email address',
+                                      style: TextStyle(
+                                        color: Color(0xFFC8D7E8),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 7),
+                                    TextField(
+                                      key: const ValueKey('staff-email'),
+                                      controller: _email,
+                                      autofillHints: const [
+                                        AutofillHints.username,
+                                      ],
+                                      autocorrect: false,
+                                      keyboardType: TextInputType.emailAddress,
+                                      textInputAction: TextInputAction.next,
+                                      decoration: const InputDecoration(
+                                        hintText: 'Email address',
+                                        prefixIcon: Icon(
+                                          Icons.alternate_email_rounded,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 14),
+                                    const Text(
+                                      'Password',
+                                      style: TextStyle(
+                                        color: Color(0xFFC8D7E8),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 7),
+                                    TextField(
+                                      key: const ValueKey('staff-password'),
+                                      controller: _password,
+                                      autofillHints: const [
+                                        AutofillHints.password,
+                                      ],
+                                      obscureText: _obscure,
+                                      textInputAction: TextInputAction.done,
+                                      onSubmitted: (_) => _submit(),
+                                      decoration: InputDecoration(
+                                        hintText: 'Password',
+                                        prefixIcon: const Icon(
+                                          Icons.lock_outline_rounded,
+                                        ),
+                                        suffixIcon: IconButton(
+                                          tooltip: _obscure
+                                              ? 'Show password'
+                                              : 'Hide password',
+                                          onPressed: () => setState(
+                                            () => _obscure = !_obscure,
+                                          ),
+                                          icon: Icon(
+                                            _obscure
+                                                ? Icons.visibility_outlined
+                                                : Icons.visibility_off_outlined,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      children: [
+                                        SizedBox(
+                                          width: 22,
+                                          height: 32,
+                                          child: Checkbox(
+                                            value: _remember,
+                                            activeColor: AppColors.gold,
+                                            checkColor: AppColors.navy,
+                                            side: const BorderSide(
+                                              color: Color(0xFFA4BAD5),
+                                            ),
+                                            onChanged: (v) => setState(
+                                              () => _remember = v ?? true,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        const Text(
+                                          'Remember me',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        const Spacer(),
+                                        TextButton(
+                                          onPressed: _forgotPasswordDialog,
+                                          style: TextButton.styleFrom(
+                                            foregroundColor: const Color(
+                                              0xFFFFD075,
+                                            ),
+                                            padding: const EdgeInsets.only(
+                                              left: 4,
+                                            ),
+                                          ),
+                                          child: const Text(
+                                            'Forgot password?',
+                                            style: TextStyle(fontSize: 11),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    if (_error != null) ...[
+                                      const SizedBox(height: 8),
+                                      Container(
+                                        padding: const EdgeInsets.all(10),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.coralSoft,
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          _error!,
+                                          style: const TextStyle(
+                                            color: Color(0xFFB3281D),
+                                            fontSize: 12,
+                                            height: 1.4,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                    const SizedBox(height: 12),
+                                    PrimaryButton(
+                                      label: 'Sign In',
+                                      loading: _loading,
+                                      onPressed: _loading ? null : _submit,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (!keyboard) ...[
+                          const SizedBox(height: 14),
+                          TextButton(
+                            onPressed: _contactAdminDialog,
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.white70,
+                            ),
+                            child: const Text.rich(
+                              TextSpan(
+                                text: 'Need a staff account? ',
+                                children: [
+                                  TextSpan(
+                                    text: 'Contact D2F',
+                                    style: TextStyle(
+                                      color: Color(0xFFFFD075),
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              style: TextStyle(fontSize: 12),
+                            ),
                           ),
                         ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                ExpansionTile(
-                  tilePadding: EdgeInsets.zero,
-                  childrenPadding: const EdgeInsets.only(bottom: 16),
-                  shape: const Border(),
-                  collapsedShape: const Border(),
-                  title: const Text(
-                    'Other sign-in options',
-                    style: AppTheme.caption,
-                  ),
-                  subtitle: const Text(
-                    'Planned for a future release',
-                    style: TextStyle(color: AppColors.textGrey, fontSize: 10),
-                  ),
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _SocialButton(
-                            icon: const Icon(
-                              Icons.g_mobiledata_rounded,
-                              size: 30,
-                              color: AppColors.navy,
-                            ),
-                            label: 'Google',
-                            onTap: () =>
-                                showComingSoon(context, 'Google sign-in'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _SocialButton(
-                            icon: const Icon(
-                              Icons.apple_rounded,
-                              size: 24,
-                              color: AppColors.navy,
-                            ),
-                            label: 'Apple',
-                            onTap: () =>
-                                showComingSoon(context, 'Apple sign-in'),
-                          ),
-                        ),
                       ],
                     ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-
-                Center(
-                  child: GestureDetector(
-                    onTap: () => _contactAdminDialog(),
-                    child: Text.rich(
-                      TextSpan(
-                        text: "Don't have an account? ",
-                        style: AppTheme.body.copyWith(
-                          color: AppColors.textGrey,
-                          fontSize: 14,
-                        ),
-                        children: const [
-                          TextSpan(
-                            text: 'Contact Admin.',
-                            style: TextStyle(
-                              color: AppColors.blue,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   ),
-                ),
-                const SizedBox(height: 24),
-                ClipRRect(
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(24),
-                  ),
-                  child: const ReferenceArt(
-                    'login',
-                    height: 210,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ],
+                );
+              },
             ),
           ),
         ),
@@ -418,7 +493,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   void _forgotPasswordDialog() {
     _infoDialog(
       'Password reset',
-      'For Milestone 1, ask the D2F Admin to reset your staff password. Self-service recovery arrives with the customer portal (Milestone 3).',
+      'Contact your D2F administrator at info@d2fshipping.com to reset your staff password.',
     );
   }
 
@@ -452,47 +527,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 color: AppColors.coral,
                 fontWeight: FontWeight.w800,
               ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SocialButton extends StatelessWidget {
-  final Widget icon;
-  final String label;
-  final VoidCallback onTap;
-
-  const _SocialButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton(
-      onPressed: onTap,
-      style: OutlinedButton.styleFrom(
-        backgroundColor: Colors.white,
-        foregroundColor: AppColors.navy,
-        side: const BorderSide(color: AppColors.border),
-        padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 8),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          icon,
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              label,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
             ),
           ),
         ],

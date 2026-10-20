@@ -1,0 +1,15 @@
+{
+  "checkedAt": "2026-10-20T14:06:12.926Z",
+  "api": "https://d2f-api-production.up.railway.app",
+  "checks": [
+    "private credentials accepted",
+    "original development password rejected",
+    "emulator-created UUID retrieved over hosted HTTPS",
+    "processing status persisted",
+    "two actor/timestamp events persisted",
+    "existing non-QA shipment preserved across deployment",
+    "PostgreSQL health connected"
+  ],
+  "parcelId": "17fe5d64-7e46-4b94-9f93-ec61babfb243",
+  "trackingId": "D2F-2026-000110"
+}

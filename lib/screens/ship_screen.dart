@@ -101,7 +101,15 @@ class ShipScreenState extends State<ShipScreen> {
     if (created == null) return;
     await _loadCustomers();
     if (!mounted) return;
-    setState(() => _customer = created);
+    setState(() {
+      // The refreshed dropdown owns fresh Customer instances. Select that exact
+      // entry so creating a customer immediately associates it with this parcel.
+      _customer = _customers.firstWhere(
+        (c) => c.id == created.id,
+        orElse: () => created,
+      );
+      if (!_customers.any((c) => c.id == created.id)) _customers.add(created);
+    });
   }
 
   Future<void> _save() async {
@@ -185,9 +193,7 @@ class ShipScreenState extends State<ShipScreen> {
           // App bar row (tab variant, centered title)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-            child: const Center(
-              child: Text('Register New Parcel', style: AppTheme.sectionTitle),
-            ),
+            child: const D2FHomeHeader(),
           ),
           Expanded(
             child: Form(
@@ -204,7 +210,8 @@ class ShipScreenState extends State<ShipScreen> {
 
                   // ── Customer Information ──────────────────────────────
                   SectionCard(
-                    tint: AppColors.coralSoft,
+                    dark: true,
+                    tint: AppColors.deepPurple,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -226,6 +233,9 @@ class ShipScreenState extends State<ShipScreen> {
                                       color: AppColors.gold,
                                     )
                                   : DropdownButtonFormField<Customer>(
+                                      key: ValueKey(
+                                        'customer-${_customer?.id ?? 'none'}',
+                                      ),
                                       isExpanded: true,
                                       initialValue: _customer,
                                       items: [
@@ -305,7 +315,8 @@ class ShipScreenState extends State<ShipScreen> {
 
                   // ── Recipient Information ─────────────────────────────
                   SectionCard(
-                    tint: AppColors.blueSoft,
+                    dark: true,
+                    tint: AppColors.deepBlue,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -324,7 +335,7 @@ class ShipScreenState extends State<ShipScreen> {
                               const Text(
                                 'Recipient Name',
                                 style: TextStyle(
-                                  color: AppColors.navy,
+                                  color: Colors.white,
                                   fontWeight: FontWeight.w700,
                                   fontSize: 13,
                                 ),
@@ -351,7 +362,7 @@ class ShipScreenState extends State<ShipScreen> {
                               const Text(
                                 'Phone Number',
                                 style: TextStyle(
-                                  color: AppColors.navy,
+                                  color: Colors.white,
                                   fontWeight: FontWeight.w700,
                                   fontSize: 13,
                                 ),
@@ -376,7 +387,7 @@ class ShipScreenState extends State<ShipScreen> {
                         const Text(
                           'Address',
                           style: TextStyle(
-                            color: AppColors.navy,
+                            color: Colors.white,
                             fontWeight: FontWeight.w700,
                             fontSize: 13,
                           ),
@@ -399,7 +410,8 @@ class ShipScreenState extends State<ShipScreen> {
 
                   // ── Shipment Details ─────────────────────────────────
                   SectionCard(
-                    tint: AppColors.goldSoft,
+                    dark: true,
+                    tint: AppColors.deepTeal,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -418,7 +430,7 @@ class ShipScreenState extends State<ShipScreen> {
                               const Text(
                                 'Origin',
                                 style: TextStyle(
-                                  color: AppColors.navy,
+                                  color: Colors.white,
                                   fontWeight: FontWeight.w700,
                                   fontSize: 13,
                                 ),
@@ -451,7 +463,7 @@ class ShipScreenState extends State<ShipScreen> {
                               const Text(
                                 'Destination',
                                 style: TextStyle(
-                                  color: AppColors.navy,
+                                  color: Colors.white,
                                   fontWeight: FontWeight.w700,
                                   fontSize: 13,
                                 ),
@@ -486,7 +498,7 @@ class ShipScreenState extends State<ShipScreen> {
                         const Text(
                           'Shipping Method',
                           style: TextStyle(
-                            color: AppColors.navy,
+                            color: Colors.white,
                             fontWeight: FontWeight.w700,
                             fontSize: 13,
                           ),
@@ -518,7 +530,7 @@ class ShipScreenState extends State<ShipScreen> {
                                   const Text(
                                     'Package Type',
                                     style: TextStyle(
-                                      color: AppColors.navy,
+                                      color: Colors.white,
                                       fontWeight: FontWeight.w700,
                                       fontSize: 13,
                                     ),
@@ -612,7 +624,7 @@ class ShipScreenState extends State<ShipScreen> {
                                   const Text(
                                     'Weight (kg)',
                                     style: TextStyle(
-                                      color: AppColors.navy,
+                                      color: Colors.white,
                                       fontWeight: FontWeight.w700,
                                       fontSize: 13,
                                     ),
@@ -649,7 +661,7 @@ class ShipScreenState extends State<ShipScreen> {
                           TextSpan(
                             text: 'Description / Notes ',
                             style: const TextStyle(
-                              color: AppColors.navy,
+                              color: Colors.white,
                               fontWeight: FontWeight.w700,
                               fontSize: 13,
                             ),
@@ -727,10 +739,20 @@ class _SectionHeader extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: AppTheme.sectionTitle.copyWith(fontSize: 15)),
+              Text(
+                title,
+                style: AppTheme.sectionTitle.copyWith(
+                  fontSize: 15,
+                  color: Colors.white,
+                ),
+              ),
               Text(
                 subtitle,
-                style: AppTheme.caption.copyWith(fontSize: 11, height: 1.4),
+                style: AppTheme.caption.copyWith(
+                  fontSize: 11,
+                  height: 1.4,
+                  color: const Color(0xFFBFD0E4),
+                ),
               ),
             ],
           ),

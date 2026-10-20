@@ -72,7 +72,7 @@ class HomeScreen extends StatelessWidget {
                 Expanded(
                   flex: 5,
                   child: _QuickCard(
-                    color: AppColors.coral,
+                    color: AppColors.deepPurple,
                     title: 'Register\nparcel',
                     subtitle: 'Register a parcel\nfor a customer.',
                     icon: Icons.inventory_2_rounded,
@@ -87,7 +87,7 @@ class HomeScreen extends StatelessWidget {
                       // Track Parcel (blue card) → Scan / lookup
                       Expanded(
                         child: _QuickCard(
-                          color: AppColors.blue,
+                          color: AppColors.deepBlue,
                           title: 'Track parcel',
                           subtitle: 'Scan or look up a parcel.',
                           icon: Icons.qr_code_scanner_rounded,
@@ -104,7 +104,7 @@ class HomeScreen extends StatelessWidget {
                       // Parcel records are the third primary M1 action.
                       Expanded(
                         child: _QuickCard(
-                          color: AppColors.gold,
+                          color: AppColors.deepTeal,
                           title: 'All parcels',
                           subtitle: 'View status and history.',
                           icon: Icons.inventory_2_outlined,
@@ -158,6 +158,32 @@ class HomeScreen extends StatelessWidget {
           ),
           const SizedBox(height: 22),
 
+          const Text('More from D2F', style: AppTheme.sectionTitle),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _FutureService(
+                  title: 'Marketplace',
+                  icon: Icons.storefront_outlined,
+                  color: AppColors.deepPurple,
+                  art: 'parcel',
+                  onTap: () => showComingSoon(context, 'D2F Marketplace'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _FutureService(
+                  title: 'Buy For Me',
+                  icon: Icons.shopping_bag_outlined,
+                  color: AppColors.deepTeal,
+                  art: 'success',
+                  onTap: () => showComingSoon(context, 'Buy For Me'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
           const Text('Every parcel, connected.', style: AppTheme.sectionTitle),
           const SizedBox(height: 12),
           const SectionCard(
@@ -281,8 +307,7 @@ class _QuickCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dark = color == AppColors.gold;
-    final foreground = dark ? AppColors.navy : Colors.white;
+    const foreground = Colors.white;
     return LiftedSurface(
       color: color,
       child: InkWell(
@@ -566,4 +591,76 @@ class _ParcelPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _FutureService extends StatelessWidget {
+  final String title, art;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+  const _FutureService({
+    required this.title,
+    required this.art,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+  @override
+  Widget build(BuildContext context) => Material(
+    color: color,
+    borderRadius: BorderRadius.circular(22),
+    clipBehavior: Clip.antiAlias,
+    child: InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(15),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: const Color(0xFFFFD18A), size: 25),
+                const Spacer(),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: ReferenceArt(
+                    art,
+                    width: 52,
+                    height: 48,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white12,
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: const Text(
+                'COMING SOON',
+                style: TextStyle(
+                  color: Color(0xFFFFD18A),
+                  fontSize: 8,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: .9,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }

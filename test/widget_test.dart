@@ -61,7 +61,10 @@ void main() {
     });
 
     test('status transitions map matches backend contract', () {
-      expect(kAllowedTransitions['RECEIVED'], containsAll(['PROCESSING', 'IN_TRANSIT']));
+      expect(
+        kAllowedTransitions['RECEIVED'],
+        containsAll(['PROCESSING', 'IN_TRANSIT']),
+      );
       expect(kAllowedTransitions['DELIVERED'], isEmpty);
     });
   });

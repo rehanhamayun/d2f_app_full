@@ -50,7 +50,16 @@ class _StaffShellState extends State<StaffShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _index, children: _tabs),
+      body: DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFFE9F0F9), Color(0xFFEDE9F3), Color(0xFFE8F1F3)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: IndexedStack(index: _index, children: _tabs),
+      ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: Colors.white,
@@ -72,7 +81,7 @@ class _StaffShellState extends State<StaffShell> {
                 _item(0, CupertinoIcons.house, 'Home'),
                 _item(1, CupertinoIcons.cube_box, 'Ship'),
                 _item(2, CupertinoIcons.square_list, 'Activity'),
-                _item(3, CupertinoIcons.person, 'Account'),
+                _item(3, CupertinoIcons.person, 'Profile'),
               ],
             ),
           ),

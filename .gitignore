@@ -57,3 +57,8 @@ windows/flutter/ephemeral/
 android/.gradle/
 android/.kotlin/
 android/local.properties
+
+# Private Android signing material
+android/key.properties
+*.jks
+*.keystore

@@ -50,7 +50,7 @@ async function main() {
     create: {
       email: 'staff@d2fshipping.com',
       passwordHash: staffHash,
-      fullName: 'Warehouse Staff',
+      fullName: 'D2F Operations',
       role: 'STAFF',
       organizationId: org.id,
       locationId: omaha.id,
@@ -63,12 +63,17 @@ async function main() {
     create: {
       email: 'admin@d2fshipping.com',
       passwordHash: adminHash,
-      fullName: 'D2F Admin',
+      fullName: 'D2F Administrator',
       role: 'ADMIN',
       organizationId: org.id,
       locationId: omaha.id,
     },
   });
+
+  if (process.env.NODE_ENV === 'production' && process.env.SEED_DEMO_DATA !== 'true') {
+    console.log('D2F organization, locations and authorized accounts are ready.');
+    return;
+  }
 
   // ── Sample customers ──────────────────────────────────────────────────────
   const koffi = await prisma.customer.upsert({

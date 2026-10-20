@@ -45,6 +45,17 @@ test('M1: authentication, permissions, concurrent retries, tracking and history'
       createdUsers.push(user.id);
       assert.equal((await request('/parcels',{token:jwt.sign({id:user.id,role:'STAFF'},JWT_SECRET)})).status,401);
     });
+    await t.test('profile edits persist without allowing role or email changes',async()=>{
+      const user=await prisma.user.create({data:{email:`profile-${suffix}@example.com`,fullName:'QA profile fixture',passwordHash:'unused',role:'STAFF'}});
+      createdUsers.push(user.id);
+      const ownToken=jwt.sign({id:user.id,role:'STAFF'},JWT_SECRET);
+      assert.equal((await request('/auth/me',{method:'PATCH',data:{fullName:'Unauthorized'}})).status,401);
+      assert.equal((await request('/auth/me',{token:ownToken,method:'PATCH',data:{fullName:' '}})).status,400);
+      const result=await request('/auth/me',{token:ownToken,method:'PATCH',data:{fullName:'Updated profile',phone:'+1 402 555 0100',role:'ADMIN',email:'other@example.com'}});
+      assert.equal(result.status,200);assert.equal(result.body.user.role,'STAFF');assert.equal(result.body.user.email,user.email);
+      const saved=(await request('/auth/me',{token:ownToken})).body.user;
+      assert.equal(saved.fullName,'Updated profile');assert.equal(saved.phone,'+1 402 555 0100');
+    });
     let parcel;
     await t.test('concurrent retries create exactly one parcel with a stable UUID and tracking ID',async()=>{
       const results=await Promise.all(Array.from({length:3},()=>request('/parcels',{token,method:'POST',data:input})));

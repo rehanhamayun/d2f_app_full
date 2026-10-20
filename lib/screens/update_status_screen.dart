@@ -69,7 +69,7 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
     final updatedOn = DateFormat('MMMM d, yyyy').format(p.updatedAt);
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: D2FAppBar(
         title: const Text('Update Parcel Status'),
         leading: IconButton(
           tooltip: 'Back',
@@ -85,9 +85,9 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFFCCECFF), Color(0xFFDCD8FF)],
+                colors: [Color(0xFF164D60), Color(0xFF10324B)],
               ),
-              border: Border.all(color: const Color(0xFFD7EAF9)),
+              border: Border.all(color: const Color(0xFF315C70)),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Column(
@@ -96,7 +96,7 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
                 const Text(
                   'SHIPMENT UPDATE  /  CURRENT STATUS',
                   style: TextStyle(
-                    color: AppColors.textGrey,
+                    color: Color(0xFFB8D0DF),
                     fontSize: 10.5,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0.8,
@@ -105,13 +105,16 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
                 const SizedBox(height: 6),
                 Text(
                   statusLabel(p.status),
-                  style: AppTheme.heading.copyWith(fontSize: 30),
+                  style: AppTheme.heading.copyWith(
+                    fontSize: 30,
+                    color: Colors.white,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   statusHeadline(p.status),
                   style: AppTheme.body.copyWith(
-                    color: AppColors.navy.withValues(alpha: 0.7),
+                    color: Colors.white.withValues(alpha: 0.75),
                     height: 1.4,
                   ),
                 ),
@@ -121,10 +124,15 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
                     Icon(
                       Icons.calendar_today_rounded,
                       size: 13,
-                      color: AppColors.textGrey,
+                      color: Color(0xFFB8D0DF),
                     ),
                     const SizedBox(width: 5),
-                    Text('Updated on $updatedOn', style: AppTheme.caption),
+                    Text(
+                      'Updated on $updatedOn',
+                      style: AppTheme.caption.copyWith(
+                        color: const Color(0xFFB8D0DF),
+                      ),
+                    ),
                   ],
                 ),
               ],

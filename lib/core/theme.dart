@@ -5,7 +5,10 @@ import 'package:flutter/material.dart';
 class AppColors {
   AppColors._();
 
-  static const cream = Color(0xFFF5F8FF); // app canvas
+  static const cream = Color(0xFFEDF2F9); // app canvas
+  static const deepBlue = Color(0xFF12365C);
+  static const deepTeal = Color(0xFF104D55);
+  static const deepPurple = Color(0xFF45315D);
   static const navy = Color(0xFF0B1B46); // headings / primary text
   static const textGrey = Color(0xFF6B7280); // secondary text
   static const border = Color(0xFFDFE7F3); // card hairline
@@ -134,14 +137,15 @@ class AppTheme {
         ),
       ),
       appBarTheme: const AppBarTheme(
-        backgroundColor: AppColors.cream,
+        backgroundColor: AppColors.navy,
+        foregroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
-        iconTheme: IconThemeData(color: AppColors.navy),
+        iconTheme: IconThemeData(color: Colors.white),
         titleTextStyle: TextStyle(
           fontFamily: 'PlusJakartaSans',
-          color: AppColors.navy,
+          color: Colors.white,
           fontSize: 18,
           fontWeight: FontWeight.w800,
         ),

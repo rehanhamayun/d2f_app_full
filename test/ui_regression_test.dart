@@ -1,3 +1,6 @@
+import 'package:d2f_application/main.dart';
+import 'package:d2f_application/screens/splash_screen.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:d2f_application/core/theme.dart';
 import 'package:d2f_application/models/models.dart';
 import 'package:d2f_application/screens/home_screen.dart';
@@ -92,9 +95,17 @@ void main() {
           isNull,
           reason: '${screen.runtimeType} at $size',
         );
-        final scrollable = find.byType(Scrollable).first;
-        await tester.drag(scrollable, const Offset(0, -550));
-        await tester.pumpAndSettle();
+        if (screen is LoginScreen) {
+          expect(
+            find.byType(ListView),
+            findsNothing,
+            reason: 'Sign-in fits without a page scroll',
+          );
+        } else {
+          final scrollable = find.byType(Scrollable).first;
+          await tester.drag(scrollable, const Offset(0, -550));
+          await tester.pumpAndSettle();
+        }
         expect(
           tester.takeException(),
           isNull,
@@ -103,6 +114,53 @@ void main() {
       }
     });
   }
+
+  testWidgets('sign-in fits a compact screen while the keyboard is open', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    tester.view.viewInsets = const FakeViewPadding(bottom: 320);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(wrap(const LoginScreen(), scale: 1.2));
+    await tester.pumpAndSettle();
+    expect(find.byType(ListView), findsNothing);
+    expect(find.byKey(const ValueKey('staff-email')), findsOneWidget);
+    expect(find.byKey(const ValueKey('staff-password')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('two splash stages transition smoothly into sign-in', (
+    tester,
+  ) async {
+    FlutterSecureStorage.setMockInitialValues({});
+    await tester.pumpWidget(const ProviderScope(child: D2FApp()));
+    await tester.pump();
+    await tester.runAsync(() async {
+      final context = tester.element(find.byType(SplashScreen));
+      await Future.wait([
+        for (final asset in [
+          'journey.jpg',
+          'warehouse.jpg',
+          'login.jpg',
+          'd2f_2.png',
+          'd2f_3.png',
+        ])
+          precacheImage(AssetImage('assets/images/$asset'), context),
+      ]);
+    });
+    await tester.pump();
+    expect(tester.widget<SplashScreen>(find.byType(SplashScreen)).stage, 0);
+    await tester.pump(const Duration(milliseconds: 2800));
+    await tester.pump(const Duration(milliseconds: 650));
+    expect(tester.widget<SplashScreen>(find.byType(SplashScreen)).stage, 1);
+    await tester.pump(const Duration(milliseconds: 2150));
+    await tester.pump(const Duration(milliseconds: 650));
+    expect(find.byType(LoginScreen), findsOneWidget);
+    expect(find.byType(SplashScreen), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets(
     'timeline shows recorded events and does not invent skipped stages',

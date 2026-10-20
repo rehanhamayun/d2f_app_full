@@ -8,7 +8,8 @@ import '../models/models.dart';
 /// Brand wordmark: "D2F Global" + golden plane, per the approved screens.
 class BrandLogo extends StatelessWidget {
   final double fontSize;
-  const BrandLogo({super.key, this.fontSize = 24});
+  final bool light;
+  const BrandLogo({super.key, this.fontSize = 24, this.light = false});
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +35,7 @@ class BrandLogo extends StatelessWidget {
             Text(
               'D2F Global',
               style: TextStyle(
-                color: AppColors.navy,
+                color: light ? Colors.white : AppColors.navy,
                 fontSize: fontSize * .83,
                 fontWeight: FontWeight.w800,
                 letterSpacing: -.7,
@@ -291,12 +292,14 @@ class SectionCard extends StatelessWidget {
   final EdgeInsets padding;
   final Color tint;
   final bool raised;
+  final bool dark;
   const SectionCard({
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(16),
     this.tint = const Color(0xFFF2F6FF),
     this.raised = false,
+    this.dark = false,
   });
 
   @override
@@ -305,12 +308,16 @@ class SectionCard extends StatelessWidget {
       padding: padding,
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [Colors.white, tint],
+          colors: dark
+              ? [tint, Color.lerp(tint, Colors.black, .18)!]
+              : [Colors.white, tint],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Color.lerp(tint, AppColors.blue, .12)!),
+        border: Border.all(
+          color: dark ? Colors.white12 : Color.lerp(tint, AppColors.blue, .12)!,
+        ),
         boxShadow: [
           if (raised)
             BoxShadow(
@@ -358,7 +365,15 @@ class InfoTile extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: bg,
+          gradient: LinearGradient(
+            colors: [
+              Color.lerp(iconColor, AppColors.navy, .65)!,
+              Color.lerp(iconColor, AppColors.navy, .85)!,
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          border: Border.all(color: Colors.white12),
           borderRadius: BorderRadius.circular(16),
         ),
         child: Row(
@@ -380,7 +395,7 @@ class InfoTile extends StatelessWidget {
                   Text(
                     label.toUpperCase(),
                     style: const TextStyle(
-                      color: AppColors.textGrey,
+                      color: Color(0xFFBDCEE1),
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.6,
@@ -390,7 +405,7 @@ class InfoTile extends StatelessWidget {
                   Text(
                     value,
                     style: const TextStyle(
-                      color: AppColors.navy,
+                      color: Colors.white,
                       fontSize: 14,
                       fontWeight: FontWeight.w800,
                     ),
@@ -402,7 +417,7 @@ class InfoTile extends StatelessWidget {
                     Text(
                       sub!,
                       style: const TextStyle(
-                        color: AppColors.textGrey,
+                        color: Color(0xFFBDCEE1),
                         fontSize: 11,
                       ),
                       maxLines: 1,
@@ -490,7 +505,7 @@ void showComingSoon(BuildContext context, String feature) {
         ],
       ),
       content: Text(
-        '$feature is planned for a later milestone of the D2F rollout. This build focuses on the Milestone 1 staff parcel foundation.',
+        '$feature is coming to D2F. We’ll let you know when it is available. Your shipping tools are ready to use.',
         style: AppTheme.body.copyWith(color: AppColors.textGrey, height: 1.4),
       ),
       actions: [
@@ -530,44 +545,60 @@ class D2FHomeHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        const BrandLogo(),
-        IconButton(
-          tooltip: 'Staff guide',
-          onPressed:
-              onBell ??
-              () => showDialog<void>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text(
-                    'Your staff workspace',
-                    style: AppTheme.sectionTitle,
-                  ),
-                  content: const Text(
-                    'Register parcels in Ship, scan or enter a tracking number to find a parcel, and use Activity to review records. Open a parcel to update its status and view its timestamped history.',
-                    style: AppTheme.body,
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text('Got it'),
-                    ),
-                  ],
-                ),
-              ),
-          style: IconButton.styleFrom(
-            backgroundColor: Colors.white,
-            side: const BorderSide(color: AppColors.border),
-          ),
-          icon: const Icon(
-            CupertinoIcons.question_circle,
-            color: AppColors.navy,
-            size: 23,
-          ),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 9, 8, 9),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF163E6D), Color(0xFF0A2243)],
         ),
-      ],
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x22132B50),
+            blurRadius: 20,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const BrandLogo(light: true),
+          IconButton(
+            tooltip: 'Staff guide',
+            onPressed:
+                onBell ??
+                () => showDialog<void>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text(
+                      'Your staff workspace',
+                      style: AppTheme.sectionTitle,
+                    ),
+                    content: const Text(
+                      'Register parcels in Ship, scan or enter a tracking number to find a parcel, and use Activity to review records. Open a parcel to update its status and view its timestamped history.',
+                      style: AppTheme.body,
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('Got it'),
+                      ),
+                    ],
+                  ),
+                ),
+            style: IconButton.styleFrom(
+              backgroundColor: Colors.white12,
+              side: const BorderSide(color: Colors.white12),
+            ),
+            icon: const Icon(
+              CupertinoIcons.question_circle,
+              color: Colors.white,
+              size: 23,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -613,12 +644,12 @@ class ScreenIntro extends StatelessWidget {
     padding: const EdgeInsets.all(18),
     decoration: BoxDecoration(
       gradient: const LinearGradient(
-        colors: [Color(0xFFE1F1FF), Color(0xFFF0EFFF)],
+        colors: [Color(0xFF163E6D), Color(0xFF102A4C)],
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
       ),
       borderRadius: BorderRadius.circular(24),
-      border: Border.all(color: const Color(0xFFD9E8FC)),
+      border: Border.all(color: const Color(0xFF30547B)),
     ),
     child: Row(
       children: [
@@ -626,15 +657,30 @@ class ScreenIntro extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: AppTheme.display),
+              Text(
+                title,
+                style: AppTheme.display.copyWith(color: Colors.white),
+              ),
               const SizedBox(height: 8),
-              Text(subtitle, style: AppTheme.caption.copyWith(height: 1.5)),
+              Text(
+                subtitle,
+                style: AppTheme.caption.copyWith(
+                  color: const Color(0xFFBBD0E9),
+                  height: 1.5,
+                ),
+              ),
             ],
           ),
         ),
         if (art != null) ...[
           const SizedBox(width: 8),
-          SizedBox(width: 134, child: ReferenceArt(art!)),
+          Transform.rotate(
+            angle: -.07,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: SizedBox(width: 118, child: ReferenceArt(art!)),
+            ),
+          ),
         ],
       ],
     ),
@@ -712,6 +758,84 @@ class LiftedSurface extends StatelessWidget {
           ),
         ),
         child: child,
+      ),
+    ),
+  );
+}
+
+class BrandedBackdrop extends StatelessWidget {
+  final Widget child;
+  const BrandedBackdrop({super.key, required this.child});
+  @override
+  Widget build(BuildContext context) => AnnotatedRegion<SystemUiOverlayStyle>(
+    value: SystemUiOverlayStyle.light,
+    child: Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF163C70), Color(0xFF091C3C), Color(0xFF17294F)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            top: -120,
+            right: -100,
+            child: _orb(const Color(0xFF2687FF), 310),
+          ),
+          Positioned(
+            bottom: -140,
+            left: -100,
+            child: _orb(const Color(0xFF27517C), 320),
+          ),
+          Positioned(
+            top: 120,
+            left: -80,
+            child: _orb(const Color(0xFF9B622A), 160),
+          ),
+          Positioned.fill(child: child),
+        ],
+      ),
+    ),
+  );
+  Widget _orb(Color color, double size) => Container(
+    width: size,
+    height: size,
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      gradient: RadialGradient(
+        colors: [color.withValues(alpha: .28), color.withValues(alpha: 0)],
+      ),
+    ),
+  );
+}
+
+class D2FAppBar extends StatelessWidget implements PreferredSizeWidget {
+  final Widget title;
+  final List<Widget>? actions;
+  final Widget? leading;
+  const D2FAppBar({super.key, required this.title, this.actions, this.leading});
+  @override
+  Size get preferredSize => const Size.fromHeight(68);
+  @override
+  Widget build(BuildContext context) => AppBar(
+    title: title,
+    actions: actions,
+    leading: leading,
+    backgroundColor: Colors.transparent,
+    foregroundColor: Colors.white,
+    systemOverlayStyle: SystemUiOverlayStyle.light,
+    centerTitle: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(bottom: Radius.circular(22)),
+    ),
+    flexibleSpace: Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF163D6C), Color(0xFF10284C), Color(0xFF164553)],
+        ),
+        borderRadius: BorderRadius.vertical(bottom: Radius.circular(22)),
       ),
     ),
   );

@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { prisma } from '../db.js';
 
 import { JWT_SECRET } from '../config.js';
+import { authenticate } from '../middleware/auth.js';
 const TOKEN_TTL = '12h';
 
 const router = Router();
@@ -48,6 +49,7 @@ router.post('/login', async (req, res, next) => {
         email: user.email,
         fullName: user.fullName,
         role: user.role,
+        phone: user.phone,
         organizationName: user.organization?.name ?? null,
         locationName: user.location?.name ?? null,
       },
@@ -85,6 +87,7 @@ router.get('/me', async (req, res, next) => {
         email: user.email,
         fullName: user.fullName,
         role: user.role,
+        phone: user.phone,
         organizationName: user.organization?.name ?? null,
         locationName: user.location?.name ?? null,
       },
@@ -92,6 +95,21 @@ router.get('/me', async (req, res, next) => {
   } catch (e) {
     next(e);
   }
+});
+
+// Only the account owner can update their display name and contact phone.
+router.patch('/me', authenticate, async (req, res, next) => {
+  try {
+    const { fullName, phone } = req.body || {};
+    if (typeof fullName !== 'string' || !fullName.trim() || fullName.trim().length > 120)
+      return res.status(400).json({ error: 'Enter a name between 1 and 120 characters.' });
+    if (phone != null && (typeof phone !== 'string' || phone.length > 40))
+      return res.status(400).json({ error: 'Enter a valid contact phone number.' });
+    const user = await prisma.user.update({ where: { id: req.user.id },
+      data: { fullName: fullName.trim(), phone: phone?.trim() || null }, include: { organization: true, location: true } });
+    res.json({ user: { id: user.id, email: user.email, fullName: user.fullName, phone: user.phone, role: user.role,
+      organizationName: user.organization?.name ?? null, locationName: user.location?.name ?? null } });
+  } catch (error) { next(error); }
 });
 
 export default router;

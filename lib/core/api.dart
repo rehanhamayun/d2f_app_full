@@ -24,7 +24,7 @@ class Api {
 
   static const String defaultBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:4000',
+    defaultValue: 'https://d2f-api-production.up.railway.app',
   );
 
   static const _tokenKey = 'd2f_jwt';
@@ -126,6 +126,26 @@ class Api {
       return User.fromJson(res.data['user'] as Map<String, dynamic>);
     } on DioException catch (e) {
       throw _map(e);
+    }
+  }
+
+  Future<User> updateProfile({required String fullName, String? phone}) async {
+    try {
+      final response = await _dio!.patch(
+        '/auth/me',
+        data: {'fullName': fullName, 'phone': phone},
+      );
+      return User.fromJson(response.data['user'] as Map<String, dynamic>);
+    } on DioException catch (error) {
+      throw _map(error);
+    }
+  }
+
+  Future<bool> connectionHealthy() async {
+    try {
+      return (await _dio!.get('/health')).data['database'] == 'connected';
+    } catch (_) {
+      return false;
     }
   }
 
@@ -283,12 +303,12 @@ class Api {
         e.type == DioExceptionType.sendTimeout ||
         e.type == DioExceptionType.receiveTimeout) {
       return ApiException(
-        'Connection timed out. Check the server URL in Account.',
+        'Connection timed out. Check the server URL in Profile.',
       );
     }
     if (e.type == DioExceptionType.connectionError) {
       return ApiException(
-        'Cannot reach the D2F server (${e.requestOptions.baseUrl}). Check the server URL in Account.',
+        'Cannot reach the D2F server (${e.requestOptions.baseUrl}). Check the server URL in Profile.',
       );
     }
     final data = e.response?.data;

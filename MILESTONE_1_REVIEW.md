@@ -1,43 +1,52 @@
 # D2F Milestone 1 review
 
-Reviewed 20 October 2026 against the Milestone 1 section of `design/screens/D2F_Shipping_Complete_AI_Project_Memory.md`.
+Reviewed 20 October 2026 against the Milestone 1 section of `design/screens/D2F_Shipping_Complete_AI_Project_Memory.md` and the UI/label requests in this development session.
 
-## Functional deliverables
+## Software requirements
 
-| Milestone 1 requirement | Implementation and verification |
+| M1 deliverable | Implementation |
 | --- | --- |
-| Installable Android test APK | Release APK built with the supplied D2F launcher artwork and the hosted HTTPS API address. Emulator installation is checked separately from real-phone acceptance. |
-| Staff login and permission-aware access | Staff/admin workspace, persistent session, sign-out and optional remembered sign-in. Failed sign-in retains its form and error. Backend rejects unauthenticated, disabled, customer and driver access to staff parcel/customer endpoints. |
-| Parcel intake | Existing/new customer, recipient name/phone/address, package type, positive weight, origin/destination, AIR/SEA/ROAD and notes. Mobile journey exercises Sea selection and the saved parcel. |
-| Permanent UUID and unique public D2F tracking ID | Both stored in PostgreSQL. Concurrent registrations receive distinct tracking IDs; concurrent retries of one request return one parcel. |
-| QR/barcode, lookup and stored history | QR and Code128 use the saved tracking ID. Camera scanning remains implemented. Manual lookup, detail tabs and forward status updates with actor/location/time are exercised. Concurrent updates cannot add duplicate lifecycle events. Physical optical scanning still requires a phone. |
-| Working connected backend | Express/Prisma API and PostgreSQL deployed in Railway project `production_house`, in Managing Consultant’s Pro workspace. The app targets HTTPS and runs independently of the development computer. |
+| Installable Android APK | Universal release APK with D2F launcher artwork, bundled fonts, live HTTPS configuration and a private release signing key. |
+| Working staff login and permission-aware access | Staff/admin workspace, secure stored session, optional remembered sign-in, sign-out and disabled/non-staff rejection. Failed sign-in keeps its form and error. Roles are enforced on the server. |
+| Parcel creation | Existing/new customer, recipient/contact/address, package type, positive weight, AIR/SEA/ROAD, origin/destination and notes. Newly added customers remain selected. |
+| Permanent UUID and unique tracking ID | Stored in PostgreSQL. Registration and tracking-number allocation are transactional. Concurrent retries return one parcel; distinct registrations receive unique IDs. |
+| QR/barcode, lookup and history | Both codes use the saved tracking ID. Camera scanning and manual lookup are implemented. Recorded events show actor, local time, note and location. Forward transitions are validated server-side; concurrent updates do not duplicate lifecycle events. |
+| Connected backend | Live Express/Prisma API with persistent PostgreSQL in Railway project `production_house`, Managing Consultant’s Pro workspace. The mobile app works independently of the development computer. |
 
-## Hosting
+## Requested additions delivered in this pass
+
+- Two timed, animated splash designs using the supplied shipping illustrations; artwork preloads before the transition timers start.
+- Sign-in fits the screen, including a compact screen with the keyboard open, without a page scroll.
+- Dark navy, teal and plum cards, selective raised edges/shadows, colorful branded app bars, shipping images, Material/Cupertino icons and bundled Plus Jakarta Sans.
+- Profile displays the signed-in account, assigned organization/location and connection status. Name/contact edits persist; role/email remain protected.
+- Marketplace **A** and Buy For Me **D** appear as **Coming soon**. No ordering/payment workflow is presented as functional.
+- 4×6 PDF labels can be previewed, saved through Android’s document picker, shared and sent to the system print service. Reprinting keeps the same parcel identity.
+- Product-facing development/demo wording removed. Production startup no longer seeds sample customers or shipments.
+
+## Hosting and access
 
 - API: https://d2f-api-production.up.railway.app
-- Database: Railway PostgreSQL with a persistent volume and private API-to-database connection.
 - Project: https://railway.com/project/1e2a3396-5f6f-4ddc-9a9b-4186cbd49396
-- One API replica, API sleeping enabled, API and database each limited to 0.5 vCPU / 0.5 GB RAM.
-- This uses the existing **Pro plan**, as subsequently requested. Usage is metered; it is not a free-tier deployment. No plan was upgraded and no billing settings were changed.
-- The hosted test database is initialized with demo users/customers/parcels. The local development database remains separate and intact.
-- Login details are in `.local/TESTING_ACCESS.md`, excluded from source control and deployment uploads. Signing and database secrets are not included in the APK.
+- PostgreSQL has a persistent volume and private API-to-database access; no public database TCP proxy.
+- One API replica with sleeping enabled; API/database each have a 0.5 vCPU / 0.5 GB ceiling.
+- Uses the existing **Pro subscription**, as requested. Usage is metered; this is not free-tier hosting. No plan upgrade was made.
+- Bootstrap development passwords were replaced with private generated credentials. Access: `.local/ACCESS_DETAILS.md`. Private signing credentials: `.local/android-signing.json`. These files and the signing key are excluded from source control, deployments and APK assets.
+- Local development data remains separate. Hosted sample/automated-check records are removed after verification; non-test shipments are preserved. A private shipping-data backup is retained in `.local/backups/`.
 
-## Evidence
+## Verification
 
-- `flutter test`: compact layout checks at 360dp/412dp and 120% text size, search submission, recorded-event timeline and existing model/status-contract checks.
-- `cd backend && npm test`: real local PostgreSQL checks for authentication, role enforcement, concurrent registration/retries and status history. Only the test’s own fixtures are removed.
-- `design/verification-v2/hosted-api-check.json`: real hosted HTTPS checks including sign-in, customer creation, parcel registration/retry, status update, history and rejected backward update.
-- `design/verification-v2/`: Android captures from the mobile journey against the hosted backend.
+- Flutter model, responsive UI, keyboard fit, tracking-search, recorded-event timeline, splash sequencing, PDF identity/dimensions and Android document-save bridge checks.
+- Backend integration checks run inside the Railway API service against real PostgreSQL: authentication, role/disabled-account enforcement, protected profile edits, concurrent intake/retries, unique tracking IDs and atomic status history.
+- PDF rendered and visually inspected. Page size is 288×432 points (4×6 inches). Both QR and Code128 were independently decoded to the original tracking number.
+- Android emulator journey and screenshots: `design/verification-v3/`. This uses the actual hosted HTTPS backend and creates identifiable QA fixtures.
+- `flutter analyze` retains only the existing seven enum-name style notices; no analyzer errors or warnings.
 
-## Acceptance still required
+## Acceptance and scope limits
 
-The implemented M1 software workflow can be demonstrated. This review does **not** certify client acceptance or payment eligibility. The project memory separately requires:
+The six M1 software deliverables are implemented. Formal M1 acceptance still requires D2F to install/use the APK on a physical Android phone, scan a printed code, confirm persistence after reopening and provide written acceptance. The emulator cannot certify physical camera/label/printer behavior. Standard PDF/system print support does not certify every thermal printer or direct Bluetooth/ZPL integration.
 
-1. D2F installs and uses the APK on a real Android phone, including scanning a printed parcel QR/barcode.
-2. D2F reviews the demonstration and provides affirmative written acceptance.
-3. Source/current configuration is handed over in D2F-owned accounts/repository. A D2F-owned GitHub handover has not been verified in this workspace.
+D2F-owned source/account handover has not been verified. The existing Flutter + custom Express/PostgreSQL architecture differs from the original FlutterFlow/Firebase specification; D2F’s written approval of that architecture change remains to be recorded. This review does not certify payment eligibility or client acceptance.
 
-The existing project uses Flutter plus a custom Express/PostgreSQL backend. The project memory originally describes FlutterFlow/Firebase; the README already records that the architecture change needs D2F’s written approval. This pass retains the existing architecture.
+Containers/manifests, customer/driver portals, admin web, invoices/payments, Air Traveller, WhatsApp and working marketplace commerce remain later scope. The label enhancement was added now at the user’s explicit request.
 
-4×6 printing, containers/manifests, customer/driver portals, invoices/payments, Air Traveller and WhatsApp remain outside M1 and are not represented as working features in this staff build.
+Local development note: the pre-existing Docker VM reported PostgreSQL file I/O errors during a local rerun. No local database reset or unrelated container restart was performed; the revised backend suite passed against Railway using isolated fixtures that it removed.

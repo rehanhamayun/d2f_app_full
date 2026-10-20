@@ -5,6 +5,7 @@ import '../core/api.dart';
 import '../core/theme.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
+import 'label_preview_screen.dart';
 import '../widgets/timeline.dart';
 import 'update_status_screen.dart';
 
@@ -57,7 +58,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     final parcel = _parcel;
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: D2FAppBar(
         title: const Text('Parcel Details'),
         leading: IconButton(
           tooltip: 'Back',
@@ -65,6 +66,17 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
+          if (parcel != null)
+            IconButton(
+              tooltip: 'Shipping label',
+              icon: const Icon(Icons.description_outlined),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => LabelPreviewScreen(parcel: parcel),
+                ),
+              ),
+            ),
           if (parcel != null)
             IconButton(
               icon: const Icon(Icons.copy_rounded, size: 20),
@@ -113,11 +125,11 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
-                  colors: [Color(0xFFCCECFF), Color(0xFFDCD8FF)],
+                  colors: [Color(0xFF173F6D), Color(0xFF0D294A)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-                border: Border.all(color: const Color(0xFFD7EAF9)),
+                border: Border.all(color: const Color(0xFF31567D)),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Column(
@@ -126,7 +138,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                   const Text(
                     'TRACKING NUMBER',
                     style: TextStyle(
-                      color: AppColors.textGrey,
+                      color: Color(0xFFBFD0E5),
                       fontSize: 12.5,
                       fontWeight: FontWeight.w600,
                     ),
@@ -138,7 +150,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                         child: Text(
                           parcel.trackingId,
                           style: const TextStyle(
-                            color: AppColors.navy,
+                            color: Colors.white,
                             fontSize: 23,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.4,
@@ -153,7 +165,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                         ),
                         icon: const Icon(
                           Icons.copy_rounded,
-                          color: AppColors.blue,
+                          color: Colors.white,
                         ),
                       ),
                     ],
@@ -167,7 +179,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                       Text(
                         statusHeadline(parcel.status),
                         style: AppTheme.body.copyWith(
-                          color: AppColors.navy.withValues(alpha: 0.75),
+                          color: Colors.white.withValues(alpha: 0.75),
                           fontSize: 13.5,
                           height: 1.4,
                         ),
@@ -180,7 +192,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                       Icon(
                         Icons.calendar_today_rounded,
                         size: 13,
-                        color: AppColors.textGrey,
+                        color: Color(0xFFBFD0E5),
                       ),
                       const SizedBox(width: 5),
                       Text('Updated on $refreshedAt', style: AppTheme.caption),

@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/api.dart';
@@ -7,7 +10,7 @@ import 'providers/auth_provider.dart';
 import 'screens/staff_only_gate.dart';
 import 'screens/login_screen.dart';
 import 'screens/staff_shell.dart';
-import 'widgets/common.dart';
+import 'screens/splash_screen.dart';
 
 void main() {
   runApp(const ProviderScope(child: D2FApp()));
@@ -22,6 +25,10 @@ class D2FApp extends StatefulWidget {
 
 class _D2FAppState extends State<D2FApp> {
   bool _apiReady = false;
+  int _stage = 0;
+  Timer? _first;
+  Timer? _second;
+  bool _preparingArtwork = false;
 
   @override
   void initState() {
@@ -33,27 +40,73 @@ class _D2FAppState extends State<D2FApp> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_preparingArtwork) return;
+    _preparingArtwork = true;
+    // Start the timed sequence after local artwork has decoded, so a cold
+    // launch never skips an illustration while the image cache warms up.
+    Future.wait([
+      for (final asset in [
+        'journey.jpg',
+        'warehouse.jpg',
+        'login.jpg',
+        'd2f_2.png',
+        'd2f_3.png',
+      ])
+        precacheImage(AssetImage('assets/images/$asset'), context),
+    ]).then((_) {
+      if (!mounted) return;
+      _first = Timer(const Duration(milliseconds: 2800), () {
+        if (mounted) setState(() => _stage = 1);
+      });
+      _second = Timer(const Duration(milliseconds: 5600), () {
+        if (mounted) setState(() => _stage = 2);
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _first?.cancel();
+    _second?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'D2F Global',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.build(),
-      home: _apiReady
-          ? const _RootSwitch()
-          : const SplashScreen(), // brief warm-up while storage initializes
+      builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+        value: SystemUiOverlayStyle.dark,
+        child: child!,
+      ),
+      home: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 600),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        child: _apiReady && _stage == 2
+            ? const _RootSwitch(key: ValueKey('application'))
+            : SplashScreen(
+                key: ValueKey('splash-$_stage'),
+                stage: _stage.clamp(0, 1),
+              ),
+      ),
     );
   }
 }
 
 /// Root gate: routes based on the global auth session.
 class _RootSwitch extends ConsumerWidget {
-  const _RootSwitch();
+  const _RootSwitch({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authControllerProvider);
     return auth.when(
-      loading: () => const SplashScreen(),
+      loading: () => const SplashScreen(stage: 1),
       error: (e, _) => const LoginScreen(),
       data: (user) {
         if (user == null) return const LoginScreen();
@@ -62,71 +115,4 @@ class _RootSwitch extends ConsumerWidget {
       },
     );
   }
-}
-
-/// Branded splash screen (design screen 1).
-class SplashScreen extends StatelessWidget {
-  const SplashScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        children: [
-          Positioned(
-            top: -80,
-            left: -80,
-            child: _blob(AppColors.coral.withValues(alpha: 0.15), 220),
-          ),
-          Positioned(
-            bottom: -60,
-            right: -60,
-            child: _blob(AppColors.gold.withValues(alpha: 0.18), 200),
-          ),
-          Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const BrandLogo(fontSize: 40),
-                const SizedBox(height: 32),
-                const Flexible(
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 28),
-                    child: ReferenceArt('journey', height: 330),
-                  ),
-                ),
-                const SizedBox(height: 28),
-                Text(
-                  'Bridging distances.\nBringing people closer.',
-                  textAlign: TextAlign.center,
-                  style: AppTheme.heading.copyWith(
-                    fontSize: 24,
-                    letterSpacing: -.8,
-                  ),
-                ),
-                const SizedBox(height: 60),
-                const SizedBox(
-                  width: 220,
-                  child: LinearProgressIndicator(
-                    minHeight: 8,
-                    borderRadius: BorderRadius.all(Radius.circular(6)),
-                    backgroundColor: Color(0xFFF1E4D2),
-                    color: AppColors.coral,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                const Text('Loading your journey…', style: AppTheme.caption),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _blob(Color color, double size) => Container(
-    width: size,
-    height: size,
-    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-  );
 }

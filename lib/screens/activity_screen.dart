@@ -211,7 +211,10 @@ class ActivityScreenState extends State<ActivityScreen> {
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [Colors.white, v.tileBg.withValues(alpha: .55)],
+            colors: [
+              Color.lerp(v.tileIcon, AppColors.navy, .66)!,
+              Color.lerp(v.tileIcon, AppColors.navy, .88)!,
+            ],
             begin: Alignment.centerLeft,
             end: Alignment.centerRight,
           ),
@@ -219,7 +222,7 @@ class ActivityScreenState extends State<ActivityScreen> {
           border: Border.all(color: v.tileIcon.withValues(alpha: .18)),
           boxShadow: [
             BoxShadow(
-              color: AppColors.navy.withValues(alpha: 0.03),
+              color: Colors.white.withValues(alpha: 0.03),
               blurRadius: 8,
               offset: const Offset(0, 3),
             ),
@@ -246,7 +249,7 @@ class ActivityScreenState extends State<ActivityScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: AppColors.navy,
+                      color: Colors.white,
                       fontSize: 14,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -.3,
@@ -266,7 +269,7 @@ class ActivityScreenState extends State<ActivityScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            color: AppColors.textGrey,
+                            color: Color(0xFFB8CAE0),
                             fontSize: 12,
                           ),
                         ),
@@ -288,7 +291,7 @@ class ActivityScreenState extends State<ActivityScreen> {
                       Icon(
                         Icons.calendar_today_rounded,
                         size: 10,
-                        color: AppColors.textGrey,
+                        color: Color(0xFFB8CAE0),
                       ),
                       const SizedBox(width: 4),
                       Flexible(
@@ -298,7 +301,7 @@ class ActivityScreenState extends State<ActivityScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            color: AppColors.textGrey,
+                            color: Color(0xFFB8CAE0),
                             fontSize: 10.5,
                           ),
                         ),
@@ -311,7 +314,7 @@ class ActivityScreenState extends State<ActivityScreen> {
             const SizedBox(width: 6),
             const Icon(
               Icons.chevron_right_rounded,
-              color: AppColors.textGrey,
+              color: Color(0xFFB8CAE0),
               size: 20,
             ),
           ],
