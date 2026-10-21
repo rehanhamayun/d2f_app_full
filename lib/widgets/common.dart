@@ -4,48 +4,16 @@ import 'package:flutter/services.dart';
 
 import '../core/theme.dart';
 import '../models/models.dart';
+import 'reference_widgets.dart';
 
 /// Brand wordmark: "D2F Global" + golden plane, per the approved screens.
 class BrandLogo extends StatelessWidget {
   final double fontSize;
   final bool light;
   const BrandLogo({super.key, this.fontSize = 24, this.light = false});
-
   @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      label: 'D2F Global',
-      image: true,
-      child: ExcludeSemantics(
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(fontSize * .42),
-              child: Image.asset(
-                fontSize >= 32
-                    ? 'assets/images/d2f_3.png'
-                    : 'assets/images/d2f_2.png',
-                width: fontSize * 1.65,
-                height: fontSize * 1.65,
-                filterQuality: FilterQuality.high,
-              ),
-            ),
-            const SizedBox(width: 9),
-            Text(
-              'D2F Global',
-              style: TextStyle(
-                color: light ? Colors.white : AppColors.navy,
-                fontSize: fontSize * .83,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -.7,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) =>
+      BrandWordmark(fontSize: fontSize, light: light);
 }
 
 /// Coral pill button with the circular arrow badge, per designs.
@@ -68,18 +36,7 @@ class PrimaryButton extends StatelessWidget {
       width: double.infinity,
       height: 56,
       child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: enabled
-              ? [
-                  BoxShadow(
-                    color: AppColors.coral.withValues(alpha: .18),
-                    blurRadius: 18,
-                    offset: const Offset(0, 7),
-                  ),
-                ]
-              : [],
-        ),
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(18)),
         child: FilledButton(
           onPressed: enabled ? onPressed : null,
           style: FilledButton.styleFrom(
@@ -122,7 +79,7 @@ class PrimaryButton extends StatelessWidget {
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(
-                        CupertinoIcons.arrow_right,
+                        Icons.arrow_forward_rounded,
                         color: AppColors.coral,
                         size: 20,
                       ),
@@ -167,12 +124,14 @@ class D2FSearchField extends StatefulWidget {
   final String hint;
   final TextEditingController? controller;
   final ValueChanged<String>? onSubmit;
+  final bool compact;
 
   const D2FSearchField({
     super.key,
     required this.hint,
     this.controller,
     this.onSubmit,
+    this.compact = false,
   });
 
   @override
@@ -193,48 +152,57 @@ class _D2FSearchFieldState extends State<D2FSearchField> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(30),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.navy.withValues(alpha: 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(16)),
       child: TextField(
         controller: _controller,
         textInputAction: TextInputAction.search,
         onSubmitted: widget.onSubmit,
         style: AppTheme.body,
         decoration: InputDecoration(
+          isDense: widget.compact,
+          contentPadding: widget.compact
+              ? const EdgeInsets.symmetric(horizontal: 12)
+              : null,
           hintText: widget.hint,
           prefixIcon: const Icon(Icons.search_rounded, color: AppColors.navy),
+          prefixIconConstraints: widget.compact
+              ? const BoxConstraints.tightFor(width: 40, height: 40)
+              : null,
+          suffixIconConstraints: widget.compact
+              ? const BoxConstraints.tightFor(width: 40, height: 40)
+              : null,
           suffixIcon: Padding(
-            padding: const EdgeInsets.all(6),
+            padding: EdgeInsets.all(widget.compact ? 2 : 6),
             child: IconButton(
               tooltip: 'Search parcels',
               onPressed: () => widget.onSubmit?.call(_controller.text),
-              style: IconButton.styleFrom(backgroundColor: AppColors.gold),
+              style: IconButton.styleFrom(
+                backgroundColor: AppColors.gold,
+                minimumSize: widget.compact
+                    ? const Size(36, 36)
+                    : const Size(48, 48),
+                maximumSize: widget.compact
+                    ? const Size(36, 36)
+                    : const Size(48, 48),
+              ),
               icon: const Icon(
-                CupertinoIcons.arrow_right,
+                Icons.arrow_forward_rounded,
                 color: AppColors.navy,
                 size: 18,
               ),
             ),
           ),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30),
-            borderSide: BorderSide.none,
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: AppColors.border),
           ),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30),
-            borderSide: BorderSide.none,
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: AppColors.border),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30),
-            borderSide: const BorderSide(color: AppColors.gold, width: 1.2),
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: AppColors.blue, width: 1.2),
           ),
         ),
       ),
@@ -291,50 +259,27 @@ class SectionCard extends StatelessWidget {
   final Widget child;
   final EdgeInsets padding;
   final Color tint;
-  final bool raised;
-  final bool dark;
+  final bool raised, dark;
   const SectionCard({
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(16),
-    this.tint = const Color(0xFFF2F6FF),
+    this.tint = Colors.white,
     this.raised = false,
     this.dark = false,
   });
-
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: padding,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: dark
-              ? [tint, Color.lerp(tint, Colors.black, .18)!]
-              : [Colors.white, tint],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: dark ? Colors.white12 : Color.lerp(tint, AppColors.blue, .12)!,
-        ),
-        boxShadow: [
-          if (raised)
-            BoxShadow(
-              color: Color.lerp(tint, AppColors.blue, .18)!,
-              offset: const Offset(0, 5),
-              blurRadius: 0,
-            ),
-          BoxShadow(
-            color: AppColors.navy.withValues(alpha: raised ? .12 : .035),
-            blurRadius: 22,
-            offset: Offset(0, raised ? 10 : 4),
-          ),
-        ],
+  Widget build(BuildContext context) => Material(
+    color: tint,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AppSpacing.radius),
+      side: BorderSide(
+        color: dark ? Colors.white12 : AppColors.border.withValues(alpha: .65),
       ),
-      child: child,
-    );
-  }
+    ),
+    clipBehavior: Clip.antiAlias,
+    child: Padding(padding: padding, child: child),
+  );
 }
 
 /// Small tinted info tile (Shipment Information grid / summary rows).
@@ -365,15 +310,7 @@ class InfoTile extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              Color.lerp(iconColor, AppColors.navy, .65)!,
-              Color.lerp(iconColor, AppColors.navy, .85)!,
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          border: Border.all(color: Colors.white12),
+          color: bg,
           borderRadius: BorderRadius.circular(16),
         ),
         child: Row(
@@ -382,7 +319,7 @@ class InfoTile extends StatelessWidget {
               width: 38,
               height: 38,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.navy,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(icon, color: iconColor, size: 20),
@@ -395,7 +332,7 @@ class InfoTile extends StatelessWidget {
                   Text(
                     label.toUpperCase(),
                     style: const TextStyle(
-                      color: Color(0xFFBDCEE1),
+                      color: AppColors.textGrey,
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.6,
@@ -405,11 +342,11 @@ class InfoTile extends StatelessWidget {
                   Text(
                     value,
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: AppColors.navy,
                       fontSize: 14,
                       fontWeight: FontWeight.w800,
                     ),
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                   if (sub != null) ...[
@@ -417,10 +354,10 @@ class InfoTile extends StatelessWidget {
                     Text(
                       sub!,
                       style: const TextStyle(
-                        color: Color(0xFFBDCEE1),
+                        color: AppColors.textGrey,
                         fontSize: 11,
                       ),
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ],
@@ -541,66 +478,60 @@ void copyToClipboard(
 /// Brand header with a quick guide to the working staff tools.
 class D2FHomeHeader extends StatelessWidget {
   final VoidCallback? onBell;
-  const D2FHomeHeader({super.key, this.onBell});
-
+  final String actionTooltip;
+  final bool dense;
+  const D2FHomeHeader({
+    super.key,
+    this.onBell,
+    this.actionTooltip = 'Shipment activity',
+    this.dense = false,
+  });
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 9, 8, 9),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF163E6D), Color(0xFF0A2243)],
+  Widget build(BuildContext context) => Row(
+    children: [
+      Expanded(
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: BrandLogo(fontSize: dense ? 20 : 24),
         ),
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x22132B50),
-            blurRadius: 20,
-            offset: Offset(0, 8),
-          ),
-        ],
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          const BrandLogo(light: true),
-          IconButton(
-            tooltip: 'Staff guide',
-            onPressed:
-                onBell ??
-                () => showDialog<void>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text(
-                      'Your staff workspace',
-                      style: AppTheme.sectionTitle,
-                    ),
-                    content: const Text(
-                      'Register parcels in Ship, scan or enter a tracking number to find a parcel, and use Activity to review records. Open a parcel to update its status and view its timestamped history.',
-                      style: AppTheme.body,
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        child: const Text('Got it'),
-                      ),
-                    ],
-                  ),
+      IconButton(
+        tooltip: onBell != null ? actionTooltip : 'Shipping guide',
+        constraints: dense
+            ? const BoxConstraints.tightFor(width: 28, height: 28)
+            : null,
+        padding: dense ? EdgeInsets.zero : null,
+        onPressed:
+            onBell ??
+            () => showDialog<void>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: const Text(
+                  'Your shipping workspace',
+                  style: AppTheme.sectionTitle,
                 ),
-            style: IconButton.styleFrom(
-              backgroundColor: Colors.white12,
-              side: const BorderSide(color: Colors.white12),
+                content: const Text(
+                  'Register parcels in Ship, scan or enter a tracking number to find a parcel, and use Activity to review records. Open a parcel to update its status and view its recorded history.',
+                  style: AppTheme.body,
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Got it'),
+                  ),
+                ],
+              ),
             ),
-            icon: const Icon(
-              CupertinoIcons.question_circle,
-              color: Colors.white,
-              size: 23,
-            ),
-          ),
-        ],
+        icon: Icon(
+          onBell != null
+              ? Icons.notifications_none_rounded
+              : CupertinoIcons.question_circle,
+          color: AppColors.navy,
+          size: 25,
+        ),
       ),
-    );
-  }
+    ],
+  );
 }
 
 /// Illustration assets extracted from the supplied design references.
@@ -643,13 +574,9 @@ class ScreenIntro extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(18),
     decoration: BoxDecoration(
-      gradient: const LinearGradient(
-        colors: [Color(0xFF163E6D), Color(0xFF102A4C)],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ),
+      color: AppColors.blueSoft,
       borderRadius: BorderRadius.circular(24),
-      border: Border.all(color: const Color(0xFF30547B)),
+      border: Border.all(color: AppColors.blueSoft),
     ),
     child: Row(
       children: [
@@ -659,13 +586,13 @@ class ScreenIntro extends StatelessWidget {
             children: [
               Text(
                 title,
-                style: AppTheme.display.copyWith(color: Colors.white),
+                style: AppTheme.display.copyWith(color: AppColors.navy),
               ),
               const SizedBox(height: 8),
               Text(
                 subtitle,
                 style: AppTheme.caption.copyWith(
-                  color: const Color(0xFFBBD0E9),
+                  color: AppColors.textGrey,
                   height: 1.5,
                 ),
               ),
@@ -678,7 +605,10 @@ class ScreenIntro extends StatelessWidget {
             angle: -.07,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(18),
-              child: SizedBox(width: 118, child: ReferenceArt(art!)),
+              child: SizedBox(
+                width: MediaQuery.sizeOf(context).width < 360 ? 78 : 104,
+                child: ReferenceArt(art!),
+              ),
             ),
           ),
         ],
@@ -713,7 +643,7 @@ class FormFieldPair extends StatelessWidget {
   );
 }
 
-/// A small amount of depth on primary action and summary cards.
+/// Shared material surface for action cards and summaries.
 class LiftedSurface extends StatelessWidget {
   final Color color;
   final Widget child;
@@ -722,44 +652,14 @@ class LiftedSurface extends StatelessWidget {
     super.key,
     required this.color,
     required this.child,
-    this.radius = 22,
+    this.radius = 18,
   });
   @override
-  Widget build(BuildContext context) => DecoratedBox(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(radius),
-      boxShadow: [
-        BoxShadow(
-          color: Color.lerp(color, AppColors.navy, .22)!,
-          offset: const Offset(0, 5),
-          blurRadius: 0,
-        ),
-        BoxShadow(
-          color: color.withValues(alpha: .23),
-          offset: const Offset(0, 12),
-          blurRadius: 22,
-        ),
-      ],
-    ),
-    child: Material(
-      color: color,
-      borderRadius: BorderRadius.circular(radius),
-      clipBehavior: Clip.antiAlias,
-      child: Ink(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              Color.lerp(color, Colors.white, .16)!,
-              color,
-              Color.lerp(color, AppColors.navy, .12)!,
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: child,
-      ),
-    ),
+  Widget build(BuildContext context) => Material(
+    color: color,
+    borderRadius: BorderRadius.circular(radius),
+    clipBehavior: Clip.antiAlias,
+    child: child,
   );
 }
 
@@ -768,46 +668,8 @@ class BrandedBackdrop extends StatelessWidget {
   const BrandedBackdrop({super.key, required this.child});
   @override
   Widget build(BuildContext context) => AnnotatedRegion<SystemUiOverlayStyle>(
-    value: SystemUiOverlayStyle.light,
-    child: Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFF163C70), Color(0xFF091C3C), Color(0xFF17294F)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            top: -120,
-            right: -100,
-            child: _orb(const Color(0xFF2687FF), 310),
-          ),
-          Positioned(
-            bottom: -140,
-            left: -100,
-            child: _orb(const Color(0xFF27517C), 320),
-          ),
-          Positioned(
-            top: 120,
-            left: -80,
-            child: _orb(const Color(0xFF9B622A), 160),
-          ),
-          Positioned.fill(child: child),
-        ],
-      ),
-    ),
-  );
-  Widget _orb(Color color, double size) => Container(
-    width: size,
-    height: size,
-    decoration: BoxDecoration(
-      shape: BoxShape.circle,
-      gradient: RadialGradient(
-        colors: [color.withValues(alpha: .28), color.withValues(alpha: 0)],
-      ),
-    ),
+    value: SystemUiOverlayStyle.dark,
+    child: ColoredBox(color: AppColors.cream, child: child),
   );
 }
 
@@ -817,26 +679,15 @@ class D2FAppBar extends StatelessWidget implements PreferredSizeWidget {
   final Widget? leading;
   const D2FAppBar({super.key, required this.title, this.actions, this.leading});
   @override
-  Size get preferredSize => const Size.fromHeight(68);
+  Size get preferredSize => const Size.fromHeight(58);
   @override
   Widget build(BuildContext context) => AppBar(
     title: title,
     actions: actions,
     leading: leading,
-    backgroundColor: Colors.transparent,
-    foregroundColor: Colors.white,
-    systemOverlayStyle: SystemUiOverlayStyle.light,
+    backgroundColor: AppColors.cream,
+    foregroundColor: AppColors.navy,
+    systemOverlayStyle: SystemUiOverlayStyle.dark,
     centerTitle: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(bottom: Radius.circular(22)),
-    ),
-    flexibleSpace: Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFF163D6C), Color(0xFF10284C), Color(0xFF164553)],
-        ),
-        borderRadius: BorderRadius.vertical(bottom: Radius.circular(22)),
-      ),
-    ),
   );
 }

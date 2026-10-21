@@ -5,102 +5,137 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/api.dart';
 import 'core/theme.dart';
 import 'providers/auth_provider.dart';
-import 'screens/staff_only_gate.dart';
 import 'screens/login_screen.dart';
+import 'screens/signup_screen.dart';
+import 'screens/role_workspace_screen.dart';
 import 'screens/staff_shell.dart';
 import 'screens/splash_screen.dart';
 
-void main() {
-  runApp(const ProviderScope(child: D2FApp()));
-}
+void main() => runApp(const ProviderScope(child: D2FApp()));
 
 class D2FApp extends StatefulWidget {
   const D2FApp({super.key});
-
   @override
   State<D2FApp> createState() => _D2FAppState();
 }
 
 class _D2FAppState extends State<D2FApp> {
   bool _apiReady = false;
-  int _stage = 0;
-  bool _preparingArtwork = false;
-
+  String? _startupError;
   @override
   void initState() {
     super.initState();
-    // Initialize secure storage + dio before the auth controller runs.
-    Api.I.init().then((_) {
-      if (mounted) setState(() => _apiReady = true);
-    });
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    try {
+      await Api.I.init();
+      if (mounted) {
+        setState(() {
+          _apiReady = true;
+          _startupError = null;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _startupError =
+              'Could not open secure storage. Please try again.',
+        );
+      }
+    }
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_preparingArtwork) return;
-    _preparingArtwork = true;
-    // Warm the local artwork so the intro pages play without decode hiccups.
-    // The intro owns its pacing entirely and hands over via onSkip.
-    Future.wait([
-      for (final asset in [
-        'journey.jpg',
-        'login.jpg',
-        'login_hero.jpg',
-        'signup_hero.jpg',
-        'd2f_2.png',
-        'd2f_3.png',
-      ])
-        precacheImage(AssetImage('assets/images/$asset'), context),
-    ]);
-  }
-
-  void _skipSplash() {
-    if (!mounted || _stage >= 2) return;
-    setState(() => _stage = 2);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'D2F Global',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.build(),
-      builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
-        value: SystemUiOverlayStyle.dark,
-        child: child!,
-      ),
-      home: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 600),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        child: _apiReady && _stage == 2
-            ? const _RootSwitch(key: ValueKey('application'))
-            : SplashScreen(
-                key: ValueKey('splash-$_stage'),
-                stage: _stage.clamp(0, 1),
-                onSkip: _apiReady ? _skipSplash : null,
+  Widget build(BuildContext context) => MaterialApp(
+    title: 'D2F Shipping',
+    debugShowCheckedModeBanner: false,
+    theme: AppTheme.build(),
+    builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.dark,
+      child: ColoredBox(
+        color: const Color(0xFFF0EFEA),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: AppSpacing.maxWidth),
+            child: LayoutBuilder(
+              builder: (context, constraints) => MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  size: Size(
+                    constraints.maxWidth,
+                    MediaQuery.sizeOf(context).height,
+                  ),
+                ),
+                child: child!,
               ),
+            ),
+          ),
+        ),
       ),
-    );
-  }
+    ),
+    home: _apiReady
+        ? const _RootSwitch()
+        : _startupError == null
+        ? const SplashScreen()
+        : Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_startupError!),
+                  TextButton(
+                    onPressed: _initialize,
+                    child: const Text('Try again'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+  );
 }
 
-/// Root gate: routes based on the global auth session.
-class _RootSwitch extends ConsumerWidget {
-  const _RootSwitch({super.key});
+enum _Entry { welcome, login, signup }
 
+class _RootSwitch extends ConsumerStatefulWidget {
+  const _RootSwitch();
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_RootSwitch> createState() => _RootSwitchState();
+}
+
+class _RootSwitchState extends ConsumerState<_RootSwitch> {
+  _Entry _entry = _Entry.welcome;
+  @override
+  Widget build(BuildContext context) {
+    ref.listen(authControllerProvider, (previous, next) {
+      if (previous?.valueOrNull != null &&
+          next is AsyncData &&
+          next.valueOrNull == null) {
+        setState(() => _entry = _Entry.login);
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    });
     final auth = ref.watch(authControllerProvider);
+    Widget signedOut() => switch (_entry) {
+      _Entry.welcome => SplashScreen(
+        onSkip: () => setState(() => _entry = _Entry.login),
+        onCreateAccount: () => setState(() => _entry = _Entry.signup),
+      ),
+      _Entry.login => LoginScreen(
+        onBack: () => setState(() => _entry = _Entry.welcome),
+      ),
+      _Entry.signup => SignupScreen(
+        onBack: () => setState(() => _entry = _Entry.welcome),
+      ),
+    };
     return auth.when(
-      loading: () => const SplashScreen(stage: 1),
-      error: (e, _) => const LoginScreen(),
-      data: (user) {
-        if (user == null) return const LoginScreen();
-        if (user.isStaff) return const StaffShell();
-        return const StaffOnlyGate();
-      },
+      loading: () => const SplashScreen(),
+      error: (error, stack) => signedOut(),
+      data: (user) => user == null
+          ? signedOut()
+          : user.isStaff
+          ? const StaffShell()
+          : const RoleWorkspaceScreen(),
     );
   }
 }

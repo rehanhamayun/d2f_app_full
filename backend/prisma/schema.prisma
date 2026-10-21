@@ -53,7 +53,8 @@ model User {
   passwordHash String
   fullName     String
   phone        String?
-  role         Role     @default(STAFF)
+  role         Role     @default(CUSTOMER)
+  authVersion  Int      @default(0)
   organizationId String?
   locationId   String?
   isActive     Boolean  @default(true)
@@ -64,6 +65,43 @@ model User {
 
   parcelsCreated Parcel[] @relation("parcelsCreatedBy")
   events         TrackingEvent[]
+  socialIdentities SocialIdentity[]
+  passwordResets PasswordReset[]
+}
+
+model SocialIdentity {
+  id       String @id @default(uuid())
+  provider String
+  subject  String
+  userId   String
+  user     User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, subject])
+}
+
+model PasswordReset {
+  id          String @id @default(uuid())
+  userId      String?
+  user        User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash    String
+  authVersion Int
+  attempts    Int @default(0)
+  expiresAt   DateTime
+  @@index([expiresAt])
+}
+
+// The browser callback and the app's polling request may hit different replicas.
+model SocialLoginFlow {
+  id         String @id @default(uuid())
+  provider   String
+  secretHash String
+  stateHash  String @unique
+  nonce      String
+  verifier   String
+  status     String @default("pending")
+  userId     String?
+  error      String?
+  expiresAt  DateTime
+  @@index([expiresAt])
 }
 
 // Customers: shipping/billing identity associated with parcels

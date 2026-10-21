@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 
 import '../models/models.dart';
+import '../core/theme.dart';
 import '../widgets/common.dart';
 import '../services/parcel_label.dart';
 
@@ -50,7 +51,7 @@ class _LabelPreviewScreenState extends State<LabelPreviewScreen> {
                   height: 20,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: Colors.white,
+                    color: AppColors.navy,
                   ),
                 )
               : const Icon(Icons.download_rounded),

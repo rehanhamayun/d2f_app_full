@@ -152,7 +152,7 @@ void main() {
     for (var i = 0; i < 8; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
-    expect(find.text('Your parcels.\nHandled with care.'), findsOneWidget);
+    expect(find.text('Bridging distances.\nBringing people closer.'), findsOneWidget);
     expect(find.text('Loading your journey...'), findsNothing);
     await tester.tap(find.text('Skip'));
     await tester.pumpAndSettle();
@@ -162,36 +162,17 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('splash auto-advances to the journey page and enters sign-in', (
-    tester,
-  ) async {
+  testWidgets('splash stays until the user chooses an action', (tester) async {
     FlutterSecureStorage.setMockInitialValues({});
     await tester.pumpWidget(const ProviderScope(child: D2FApp()));
-    await tester.pump();
-    await tester.runAsync(() async {
-      final context = tester.element(find.byType(SplashScreen));
-      await Future.wait([
-        for (final asset in [
-          'journey.jpg',
-          'login.jpg',
-          'd2f_2.png',
-          'd2f_3.png',
-        ])
-          precacheImage(AssetImage('assets/images/$asset'), context),
-      ]);
-    });
-    await tester.pump(const Duration(milliseconds: 2600)); // page turn
-    await tester.pump(const Duration(milliseconds: 700));
-    expect(
-      find.text('Bridging distances.\nBringing people closer.'),
-      findsOneWidget,
-    );
-    await tester.pump(const Duration(milliseconds: 2600)); // hands over
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 10));
+    expect(find.byType(SplashScreen), findsOneWidget);
+    expect(find.byType(LoginScreen), findsNothing);
+    await tester.tap(find.text('Sign In'));
     await tester.pumpAndSettle();
     expect(find.byType(LoginScreen), findsOneWidget);
-    expect(find.byType(SplashScreen), findsNothing);
     expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets(

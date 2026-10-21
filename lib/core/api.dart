@@ -124,29 +124,126 @@ class Api {
     }
   }
 
-  /// Creates a new staff account and stores the returned session token
+  /// Creates a role-aware account and stores the returned session token
   /// (new accounts always stay remembered).
   Future<User> signUp(
     String fullName,
     String email,
     String password, {
     String? phone,
+    UserRole role = UserRole.CUSTOMER,
+    String? invitation,
   }) async {
     try {
+      // Older deployments registered everybody as staff. Check capabilities
+      // before submitting any account details to that legacy endpoint.
+      try {
+        final capabilities = await _dio!.get('/auth/config');
+        if (capabilities.data['registrationVersion'] != 2) {
+          throw ApiException(
+            'The D2F server needs an update before account creation is available.',
+          );
+        }
+      } on DioException catch (error) {
+        if (error.response?.statusCode == 404) {
+          throw ApiException(
+            'The D2F server needs an update before account creation is available.',
+          );
+        }
+        rethrow;
+      }
       final res = await _dio!.post(
         '/auth/register',
         data: {
           'fullName': fullName.trim(),
           'email': email.trim(),
           'password': password,
+          'role': role.name,
+          'invitation': ?invitation,
           if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim(),
         },
       );
+      final user = User.fromJson(res.data['user'] as Map<String, dynamic>);
+      if (user.role != role) {
+        throw ApiException(
+          'The server returned an unexpected account role. Please contact D2F support.',
+        );
+      }
       _token = res.data['token'] as String;
       await _storage.write(key: _tokenKey, value: _token!);
-      return User.fromJson(res.data['user'] as Map<String, dynamic>);
+      return user;
     } on DioException catch (e) {
       throw _map(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> startSocialSignIn(String provider) async {
+    try {
+      final response = await _dio!.post('/auth/social/$provider/start');
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (error) {
+      throw _map(error);
+    }
+  }
+
+  Future<User?> completeSocialSignIn(
+    String id,
+    String secret, {
+    bool Function()? isActive,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/auth/social/status',
+        data: {'id': id, 'secret': secret},
+      );
+      if (response.data['pending'] == true || isActive?.call() == false) {
+        return null;
+      }
+      _token = response.data['token'] as String;
+      await _storage.write(key: _tokenKey, value: _token!);
+      return User.fromJson(
+        Map<String, dynamic>.from(response.data['user'] as Map),
+      );
+    } on DioException catch (error) {
+      throw _map(error);
+    }
+  }
+
+  Future<String> requestPasswordReset(String email) async {
+    try {
+      final response = await _dio!.post(
+        '/auth/password/forgot',
+        data: {'email': email},
+      );
+      return response.data['ticket'] as String;
+    } on DioException catch (error) {
+      throw _map(error);
+    }
+  }
+
+  Future<void> resetPassword(
+    String ticket,
+    String code,
+    String password,
+  ) async {
+    try {
+      await _dio!.post(
+        '/auth/password/reset',
+        data: {'ticket': ticket, 'code': code, 'password': password},
+      );
+    } on DioException catch (error) {
+      throw _map(error);
+    }
+  }
+
+  Future<Map<String, dynamic>> trackShipment(String trackingId) async {
+    try {
+      final response = await _dio!.get(
+        '/tracking/${Uri.encodeComponent(trackingId.trim())}',
+      );
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (error) {
+      throw _map(error);
     }
   }
 

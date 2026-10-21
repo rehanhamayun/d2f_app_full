@@ -9,7 +9,9 @@ import 'parcel_detail_screen.dart';
 
 /// Parcels list (design screen 8) — search, status filter chips, cards.
 class ActivityScreen extends StatefulWidget {
-  const ActivityScreen({super.key});
+  final Future<List<Parcel>> Function({String? q})? loadParcels;
+  final Future<Map<String, int>> Function()? loadStats;
+  const ActivityScreen({super.key, this.loadParcels, this.loadStats});
 
   @override
   State<ActivityScreen> createState() => ActivityScreenState();
@@ -56,8 +58,9 @@ class ActivityScreenState extends State<ActivityScreen> {
     });
     try {
       final results = await Future.wait([
-        Api.I.parcels(q: _query.isEmpty ? null : _query),
-        Api.I.parcelStats(),
+        widget.loadParcels?.call(q: _query.isEmpty ? null : _query) ??
+            Api.I.parcels(q: _query.isEmpty ? null : _query),
+        widget.loadStats?.call() ?? Api.I.parcelStats(),
       ]);
       if (!mounted) return;
       setState(() {
@@ -137,7 +140,7 @@ class ActivityScreenState extends State<ActivityScreen> {
                               vertical: 8,
                             ),
                             decoration: BoxDecoration(
-                              color: selected ? AppColors.navy : Colors.white,
+                              color: selected ? AppColors.blue : Colors.white,
                               borderRadius: BorderRadius.circular(20),
                               border: selected
                                   ? null
@@ -210,23 +213,9 @@ class ActivityScreenState extends State<ActivityScreen> {
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              Color.lerp(v.tileIcon, AppColors.navy, .66)!,
-              Color.lerp(v.tileIcon, AppColors.navy, .88)!,
-            ],
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-          ),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: v.tileIcon.withValues(alpha: .18)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.white.withValues(alpha: 0.03),
-              blurRadius: 8,
-              offset: const Offset(0, 3),
-            ),
-          ],
+          color: AppColors.navy,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border),
         ),
         child: Row(
           children: [
@@ -249,7 +238,7 @@ class ActivityScreenState extends State<ActivityScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: AppColors.navy,
                       fontSize: 14,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -.3,
@@ -269,7 +258,7 @@ class ActivityScreenState extends State<ActivityScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            color: Color(0xFFB8CAE0),
+                            color: AppColors.textGrey,
                             fontSize: 12,
                           ),
                         ),
@@ -291,7 +280,7 @@ class ActivityScreenState extends State<ActivityScreen> {
                       Icon(
                         Icons.calendar_today_rounded,
                         size: 10,
-                        color: Color(0xFFB8CAE0),
+                        color: AppColors.textGrey,
                       ),
                       const SizedBox(width: 4),
                       Flexible(
@@ -301,7 +290,7 @@ class ActivityScreenState extends State<ActivityScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            color: Color(0xFFB8CAE0),
+                            color: AppColors.textGrey,
                             fontSize: 10.5,
                           ),
                         ),
@@ -314,7 +303,7 @@ class ActivityScreenState extends State<ActivityScreen> {
             const SizedBox(width: 6),
             const Icon(
               Icons.chevron_right_rounded,
-              color: Color(0xFFB8CAE0),
+              color: AppColors.textGrey,
               size: 20,
             ),
           ],

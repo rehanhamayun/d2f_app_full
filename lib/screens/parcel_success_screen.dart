@@ -171,8 +171,8 @@ class ParcelSuccessScreen extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             SectionCard(
-              tint: AppColors.deepTeal,
-              dark: true,
+              tint: AppColors.greenSoft,
+              dark: false,
               child: Row(
                 children: [
                   Expanded(
@@ -296,7 +296,7 @@ class _SummaryCell extends StatelessWidget {
           Text(
             label,
             style: const TextStyle(
-              color: Color(0xFFBED3DD),
+              color: AppColors.textGrey,
               fontSize: 9.5,
               fontWeight: FontWeight.w800,
               letterSpacing: 0.5,
@@ -307,7 +307,7 @@ class _SummaryCell extends StatelessWidget {
           Text(
             value,
             style: const TextStyle(
-              color: Colors.white,
+              color: AppColors.navy,
               fontSize: 14.5,
               fontWeight: FontWeight.w900,
             ),
@@ -318,7 +318,7 @@ class _SummaryCell extends StatelessWidget {
           if (sub != null)
             Text(
               sub!,
-              style: const TextStyle(color: Color(0xFFBED3DD), fontSize: 10.5),
+              style: const TextStyle(color: AppColors.textGrey, fontSize: 10.5),
               textAlign: TextAlign.center,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,

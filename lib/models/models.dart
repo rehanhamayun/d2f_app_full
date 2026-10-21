@@ -8,7 +8,7 @@ UserRole userRoleFrom(String? s) {
   for (final e in UserRole.values) {
     if (e.name == s) return e;
   }
-  return UserRole.STAFF;
+  return UserRole.CUSTOMER;
 }
 
 enum ShippingMethod { AIR, SEA, ROAD }
@@ -310,6 +310,27 @@ const List<String> kDestinationOptions = [
   'Dakar, Senegal',
   'Lagos, Nigeria',
 ];
+
+/// Both directions share the same location suggestions. A route may also use
+/// a staff-entered city/country; these are suggestions, not geocoded offices.
+const List<String> kShippingLocationOptions = [
+  ...kOriginOptions,
+  ...kDestinationOptions,
+];
+
+class ShipmentRoute {
+  final String origin;
+  final String destination;
+  final ShippingMethod method;
+  const ShipmentRoute({
+    required this.origin,
+    required this.destination,
+    this.method = ShippingMethod.AIR,
+  });
+
+  ShipmentRoute get reversed =>
+      ShipmentRoute(origin: destination, destination: origin, method: method);
+}
 
 const List<String> kEventLocations = [
   'Omaha, NE, USA',

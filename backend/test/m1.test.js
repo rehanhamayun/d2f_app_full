@@ -22,7 +22,7 @@ test('M1: authentication, permissions, concurrent retries, tracking and history'
   };
   try {
     const staff = await prisma.user.findUniqueOrThrow({where:{email:'staff@d2fshipping.com'}});
-    const token = jwt.sign({id:staff.id,role:'STAFF'},JWT_SECRET);
+    const token = jwt.sign({id:staff.id,role:'STAFF',purpose:'session',ver:0},JWT_SECRET);
     const suffix = randomUUID();
     customer = await prisma.customer.create({data:{displayName:`M1 automated QA ${suffix}`}});
     const input = {customerId:customer.id,recipientName:'M1 isolated test recipient',packageType:'BOX',weightKg:2.5,
@@ -38,17 +38,17 @@ test('M1: authentication, permissions, concurrent retries, tracking and history'
       for (const role of ['CUSTOMER','DRIVER']) {
         const user=await prisma.user.create({data:{email:`${role}-${suffix}@example.com`,fullName:'QA role fixture',passwordHash:'unused',role}});
         createdUsers.push(user.id);
-        const restricted=jwt.sign({id:user.id,role:'STAFF'},JWT_SECRET); // DB role must override a stale role claim.
+        const restricted=jwt.sign({id:user.id,role:'STAFF',purpose:'session',ver:0},JWT_SECRET); // DB role must override a stale role claim.
         for(const path of ['/parcels','/parcels/stats','/customers']) assert.equal((await request(path,{token:restricted})).status,403);
       }
       const user=await prisma.user.create({data:{email:`disabled-${suffix}@example.com`,fullName:'QA disabled fixture',passwordHash:'unused',role:'STAFF',isActive:false}});
       createdUsers.push(user.id);
-      assert.equal((await request('/parcels',{token:jwt.sign({id:user.id,role:'STAFF'},JWT_SECRET)})).status,401);
+      assert.equal((await request('/parcels',{token:jwt.sign({id:user.id,role:'STAFF',purpose:'session',ver:0},JWT_SECRET)})).status,401);
     });
     await t.test('profile edits persist without allowing role or email changes',async()=>{
       const user=await prisma.user.create({data:{email:`profile-${suffix}@example.com`,fullName:'QA profile fixture',passwordHash:'unused',role:'STAFF'}});
       createdUsers.push(user.id);
-      const ownToken=jwt.sign({id:user.id,role:'STAFF'},JWT_SECRET);
+      const ownToken=jwt.sign({id:user.id,role:'STAFF',purpose:'session',ver:0},JWT_SECRET);
       assert.equal((await request('/auth/me',{method:'PATCH',data:{fullName:'Unauthorized'}})).status,401);
       assert.equal((await request('/auth/me',{token:ownToken,method:'PATCH',data:{fullName:' '}})).status,400);
       const result=await request('/auth/me',{token:ownToken,method:'PATCH',data:{fullName:'Updated profile',phone:'+1 402 555 0100',role:'ADMIN',email:'other@example.com'}});
@@ -73,6 +73,15 @@ test('M1: authentication, permissions, concurrent retries, tracking and history'
       const results=await Promise.all(Array.from({length:3},(_,i)=>request('/parcels',{token,method:'POST',data:{...input,clientRequestId:`qa-${suffix}-${i}`}})));
       for(const result of results) { assert.equal(result.status,201,JSON.stringify(result.body));createdParcels.push(result.body.id); }
       assert.equal(new Set(results.map(r=>r.body.trackingId)).size,3);
+    });
+    await t.test('customer tracking exposes progress without operational or personal records',async()=>{
+      const customerToken=jwt.sign({id:createdUsers[0],purpose:'session',ver:0},JWT_SECRET);
+      const result=await request(`/tracking/${parcel.trackingId}`,{token:customerToken});
+      assert.equal(result.status,200);
+      assert.deepEqual(Object.keys(result.body).sort(),['events','method','status','trackingId']);
+      assert.equal(result.body.events[0].status,'RECEIVED');
+      assert.deepEqual(Object.keys(result.body.events[0]).sort(),['createdAt','status']);
+      assert.equal((await request(`/parcels/${parcel.id}`,{token:customerToken})).status,403);
     });
     await t.test('concurrent status updates record one event; backward transitions are rejected',async()=>{
       const results=await Promise.all(Array.from({length:2},()=>request(`/parcels/${parcel.id}/events`,{token,method:'POST',data:{status:'PROCESSING',location:'Omaha Warehouse',note:'Prepared for shipment'}})));

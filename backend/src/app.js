@@ -5,9 +5,14 @@ import { prisma } from './db.js';
 import authRouter from './routes/auth.js';
 import parcelsRouter from './routes/parcels.js';
 import customersRouter from './routes/customers.js';
+import recoveryRouter from './routes/auth_recovery.js';
+import socialRouter from './routes/auth_social.js';
+import { authenticate } from './middleware/auth.js';
+import { authRateLimit } from './middleware/auth_rate_limit.js';
 
 
 const app = express();
+app.set('trust proxy', 1);
 app.use(cors());
 app.disable('x-powered-by');
 app.use(express.json({ limit: '64kb' }));
@@ -23,6 +28,22 @@ app.get('/health', async (req, res) => {
 });
 
 app.use('/auth', authRouter);
+app.use('/auth/password', recoveryRouter);
+app.use('/auth/social', socialRouter);
+// Tracking-number possession reveals progress only, never people, contact
+// details, internal notes, actor identity, or the staff parcel record.
+app.get('/tracking/:trackingId', authenticate, authRateLimit(60), async (req, res, next) => {
+  try {
+    if (!/^D2F-\d{4}-\d{6}$/.test(req.params.trackingId)) {
+      return res.status(400).json({ error: 'Enter a valid D2F tracking number.' });
+    }
+    const parcel = await prisma.parcel.findUnique({ where: { trackingId: req.params.trackingId },
+      select: { trackingId: true, status: true, method: true,
+        events: { select: { status: true, createdAt: true }, orderBy: { createdAt: 'asc' } } } });
+    if (!parcel) return res.status(404).json({ error: 'No shipment found. Check your tracking number.' });
+    res.json(parcel);
+  } catch (error) { next(error); }
+});
 app.use('/parcels', parcelsRouter);
 app.use('/customers', customersRouter);
 

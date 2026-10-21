@@ -84,10 +84,7 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
           Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF164D60), Color(0xFF10324B)],
-              ),
-              border: Border.all(color: const Color(0xFF315C70)),
+              color: AppColors.blueSoft,
               borderRadius: BorderRadius.circular(20),
             ),
             child: Column(
@@ -96,7 +93,7 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
                 const Text(
                   'SHIPMENT UPDATE  /  CURRENT STATUS',
                   style: TextStyle(
-                    color: Color(0xFFB8D0DF),
+                    color: AppColors.textGrey,
                     fontSize: 10.5,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0.8,
@@ -107,14 +104,14 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
                   statusLabel(p.status),
                   style: AppTheme.heading.copyWith(
                     fontSize: 30,
-                    color: Colors.white,
+                    color: AppColors.navy,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   statusHeadline(p.status),
                   style: AppTheme.body.copyWith(
-                    color: Colors.white.withValues(alpha: 0.75),
+                    color: AppColors.textGrey,
                     height: 1.4,
                   ),
                 ),
@@ -124,13 +121,15 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
                     Icon(
                       Icons.calendar_today_rounded,
                       size: 13,
-                      color: Color(0xFFB8D0DF),
+                      color: AppColors.textGrey,
                     ),
                     const SizedBox(width: 5),
-                    Text(
-                      'Updated on $updatedOn',
-                      style: AppTheme.caption.copyWith(
-                        color: const Color(0xFFB8D0DF),
+                    Expanded(
+                      child: Text(
+                        'Updated on $updatedOn',
+                        style: AppTheme.caption.copyWith(
+                          color: AppColors.textGrey,
+                        ),
                       ),
                     ),
                   ],

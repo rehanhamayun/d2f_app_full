@@ -9,8 +9,15 @@ import 'parcel_success_screen.dart';
 /// "Register New Parcel" (design screen 5). Shown as the Ship tab.
 class ShipScreen extends StatefulWidget {
   final ShippingMethod? initialMethod;
+  final ShipmentRoute? initialRoute;
+  final Future<List<Customer>> Function()? loadCustomers;
 
-  const ShipScreen({super.key, this.initialMethod});
+  const ShipScreen({
+    super.key,
+    this.initialMethod,
+    this.initialRoute,
+    this.loadCustomers,
+  });
 
   @override
   State<ShipScreen> createState() => ShipScreenState();
@@ -42,8 +49,12 @@ class ShipScreenState extends State<ShipScreen> {
   @override
   void initState() {
     super.initState();
-    _method = widget.initialMethod ?? ShippingMethod.AIR;
-    _origin = kOriginOptions.first;
+    _method =
+        widget.initialRoute?.method ??
+        widget.initialMethod ??
+        ShippingMethod.AIR;
+    _origin = widget.initialRoute?.origin ?? kOriginOptions.first;
+    _destination = widget.initialRoute?.destination;
     _loadCustomers();
   }
 
@@ -61,13 +72,22 @@ class ShipScreenState extends State<ShipScreen> {
   /// a preselected shipping method.
   void presetMethod(ShippingMethod method) => setState(() => _method = method);
 
+  void presetRoute(ShipmentRoute route) {
+    if (_saving) return;
+    setState(() {
+      _origin = route.origin;
+      _destination = route.destination;
+      _method = route.method;
+    });
+  }
+
   Future<void> _loadCustomers() async {
     setState(() {
       _customersLoading = true;
       _customersError = null;
     });
     try {
-      final list = await Api.I.customers();
+      final list = await (widget.loadCustomers ?? Api.I.customers)();
       if (!mounted) return;
       setState(() {
         _customers = list;
@@ -210,8 +230,8 @@ class ShipScreenState extends State<ShipScreen> {
 
                   // ── Customer Information ──────────────────────────────
                   SectionCard(
-                    dark: true,
-                    tint: AppColors.deepPurple,
+                    dark: false,
+                    tint: AppColors.coralSoft,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -315,8 +335,8 @@ class ShipScreenState extends State<ShipScreen> {
 
                   // ── Recipient Information ─────────────────────────────
                   SectionCard(
-                    dark: true,
-                    tint: AppColors.deepBlue,
+                    dark: false,
+                    tint: AppColors.blueSoft,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -335,7 +355,7 @@ class ShipScreenState extends State<ShipScreen> {
                               const Text(
                                 'Recipient Name',
                                 style: TextStyle(
-                                  color: Colors.white,
+                                  color: AppColors.navy,
                                   fontWeight: FontWeight.w700,
                                   fontSize: 13,
                                 ),
@@ -362,7 +382,7 @@ class ShipScreenState extends State<ShipScreen> {
                               const Text(
                                 'Phone Number',
                                 style: TextStyle(
-                                  color: Colors.white,
+                                  color: AppColors.navy,
                                   fontWeight: FontWeight.w700,
                                   fontSize: 13,
                                 ),
@@ -387,7 +407,7 @@ class ShipScreenState extends State<ShipScreen> {
                         const Text(
                           'Address',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: AppColors.navy,
                             fontWeight: FontWeight.w700,
                             fontSize: 13,
                           ),
@@ -410,8 +430,8 @@ class ShipScreenState extends State<ShipScreen> {
 
                   // ── Shipment Details ─────────────────────────────────
                   SectionCard(
-                    dark: true,
-                    tint: AppColors.deepTeal,
+                    dark: false,
+                    tint: AppColors.goldSoft,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -430,17 +450,21 @@ class ShipScreenState extends State<ShipScreen> {
                               const Text(
                                 'Origin',
                                 style: TextStyle(
-                                  color: Colors.white,
+                                  color: AppColors.navy,
                                   fontWeight: FontWeight.w700,
                                   fontSize: 13,
                                 ),
                               ),
                               const SizedBox(height: 6),
                               DropdownButtonFormField<String>(
+                                key: ValueKey('parcel-origin-$_origin'),
                                 isExpanded: true,
                                 initialValue: _origin,
                                 items: [
-                                  for (final o in kOriginOptions)
+                                  for (final o in {
+                                    ...kShippingLocationOptions,
+                                    ?_origin,
+                                  })
                                     DropdownMenuItem(
                                       value: o,
                                       child: Text(
@@ -463,17 +487,23 @@ class ShipScreenState extends State<ShipScreen> {
                               const Text(
                                 'Destination',
                                 style: TextStyle(
-                                  color: Colors.white,
+                                  color: AppColors.navy,
                                   fontWeight: FontWeight.w700,
                                   fontSize: 13,
                                 ),
                               ),
                               const SizedBox(height: 6),
                               DropdownButtonFormField<String>(
+                                key: ValueKey(
+                                  'parcel-destination-$_destination',
+                                ),
                                 isExpanded: true,
                                 initialValue: _destination,
                                 items: [
-                                  for (final d in kDestinationOptions)
+                                  for (final d in {
+                                    ...kShippingLocationOptions,
+                                    ?_destination,
+                                  })
                                     DropdownMenuItem(
                                       value: d,
                                       child: Text(
@@ -489,7 +519,11 @@ class ShipScreenState extends State<ShipScreen> {
                                   hintText: 'Select destination',
                                   prefixIcon: Icon(Icons.location_on_outlined),
                                 ),
-                                validator: (v) => v == null ? 'Required' : null,
+                                validator: (v) => v == null
+                                    ? 'Required'
+                                    : v == _origin
+                                    ? 'Choose a different destination'
+                                    : null,
                               ),
                             ],
                           ),
@@ -498,7 +532,7 @@ class ShipScreenState extends State<ShipScreen> {
                         const Text(
                           'Shipping Method',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: AppColors.navy,
                             fontWeight: FontWeight.w700,
                             fontSize: 13,
                           ),
@@ -530,7 +564,7 @@ class ShipScreenState extends State<ShipScreen> {
                                   const Text(
                                     'Package Type',
                                     style: TextStyle(
-                                      color: Colors.white,
+                                      color: AppColors.navy,
                                       fontWeight: FontWeight.w700,
                                       fontSize: 13,
                                     ),
@@ -624,7 +658,7 @@ class ShipScreenState extends State<ShipScreen> {
                                   const Text(
                                     'Weight (kg)',
                                     style: TextStyle(
-                                      color: Colors.white,
+                                      color: AppColors.navy,
                                       fontWeight: FontWeight.w700,
                                       fontSize: 13,
                                     ),
@@ -661,7 +695,7 @@ class ShipScreenState extends State<ShipScreen> {
                           TextSpan(
                             text: 'Description / Notes ',
                             style: const TextStyle(
-                              color: Colors.white,
+                              color: AppColors.navy,
                               fontWeight: FontWeight.w700,
                               fontSize: 13,
                             ),
@@ -743,7 +777,7 @@ class _SectionHeader extends StatelessWidget {
                 title,
                 style: AppTheme.sectionTitle.copyWith(
                   fontSize: 15,
-                  color: Colors.white,
+                  color: AppColors.navy,
                 ),
               ),
               Text(
@@ -751,7 +785,7 @@ class _SectionHeader extends StatelessWidget {
                 style: AppTheme.caption.copyWith(
                   fontSize: 11,
                   height: 1.4,
-                  color: const Color(0xFFBFD0E4),
+                  color: AppColors.textGrey,
                 ),
               ),
             ],

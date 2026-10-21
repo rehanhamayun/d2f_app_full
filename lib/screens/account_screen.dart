@@ -7,9 +7,11 @@ import '../core/theme.dart';
 import '../models/models.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/common.dart';
+import '../widgets/customer_profile_view.dart';
 
 class AccountScreen extends ConsumerStatefulWidget {
-  const AccountScreen({super.key});
+  final VoidCallback? onTrack, onShip;
+  const AccountScreen({super.key, this.onTrack, this.onShip});
   @override
   ConsumerState<AccountScreen> createState() => _AccountScreenState();
 }
@@ -94,21 +96,38 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   }
 
   Future<void> _support() async {
-    final opened = await launchUrl(
-      Uri(scheme: 'mailto', path: 'info@d2fshipping.com'),
-    );
-    if (!opened && mounted) {
+    try {
+      if (await launchUrl(Uri(scheme: 'mailto', path: 'info@d2fshipping.com')))
+        return;
+    } catch (_) {
+      /* Keep support reachable when no email application is installed. */
+    }
+    if (mounted)
       copyToClipboard(
         context,
         'info@d2fshipping.com',
         message: 'Support email copied.',
       );
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authControllerProvider).valueOrNull;
+    if (user?.role == UserRole.CUSTOMER) {
+      return CustomerProfileView(
+        user: user!,
+        connected: _connected,
+        onEdit: () => showDialog<void>(
+          context: context,
+          builder: (_) => _EditProfile(user: user),
+        ),
+        onSupport: _support,
+        onSignOut: _signOut,
+        onCheckConnection: _checkConnection,
+        onTrack: widget.onTrack,
+        onShip: widget.onShip,
+      );
+    }
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
@@ -117,14 +136,16 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
           const SizedBox(height: 20),
           const Text('Your profile', style: AppTheme.display),
           const SizedBox(height: 6),
-          const Text(
-            'Your people. Your workspace. Your D2F.',
+          Text(
+            user?.isStaff == true
+                ? 'Your people. Your workspace. Your D2F.'
+                : 'Your details. Your next journey.',
             style: AppTheme.caption,
           ),
           const SizedBox(height: 20),
           SectionCard(
-            dark: true,
-            tint: AppColors.deepBlue,
+            dark: false,
+            tint: AppColors.blueSoft,
             raised: true,
             child: Column(
               children: [
@@ -156,10 +177,10 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            user?.fullName ?? 'D2F Staff',
+                            user?.fullName ?? 'Your account',
                             maxLines: 2,
                             style: const TextStyle(
-                              color: Colors.white,
+                              color: AppColors.navy,
                               fontSize: 19,
                               fontWeight: FontWeight.w800,
                             ),
@@ -168,18 +189,21 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                           Text(
                             user?.email ?? '',
                             style: const TextStyle(
-                              color: Color(0xFFBCD0E7),
+                              color: AppColors.textGrey,
                               fontSize: 12,
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            user?.role == UserRole.ADMIN
-                                ? 'ADMINISTRATOR'
-                                : 'OPERATIONS TEAM',
+                            switch (user?.role) {
+                              UserRole.ADMIN => 'ADMINISTRATOR',
+                              UserRole.STAFF => 'OPERATIONS TEAM',
+                              UserRole.DRIVER => 'DRIVER',
+                              _ => 'CUSTOMER',
+                            },
                             style: const TextStyle(
-                              color: Color(0xFFFFD185),
+                              color: AppColors.blue,
                               fontSize: 9,
                               letterSpacing: 1,
                               fontWeight: FontWeight.w700,
@@ -201,8 +225,8 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                             builder: (_) => _EditProfile(user: user),
                           ),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: const BorderSide(color: Colors.white30),
+                      foregroundColor: AppColors.navy,
+                      side: const BorderSide(color: AppColors.border),
                     ),
                     icon: const Icon(Icons.edit_outlined, size: 17),
                     label: const Text('Edit profile'),
@@ -212,29 +236,51 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
             ),
           ),
           const SizedBox(height: 22),
-          SectionCard(
-            dark: true,
-            tint: AppColors.deepTeal,
-            child: Column(
-              children: [
-                _line(
-                  Icons.business_outlined,
-                  'Organization',
-                  user?.organizationName ?? 'D2F Shipping LLC',
-                ),
-                const Divider(color: Colors.white12, height: 24),
-                _line(
-                  Icons.warehouse_outlined,
-                  'Assigned location',
-                  user?.locationName ?? 'D2F Warehouse',
-                ),
-                if (user?.phone?.isNotEmpty ?? false) ...[
-                  const Divider(color: Colors.white12, height: 24),
-                  _line(Icons.phone_outlined, 'Contact phone', user!.phone!),
+          if (user?.isStaff == true || user?.role == UserRole.DRIVER)
+            SectionCard(
+              dark: false,
+              tint: AppColors.greenSoft,
+              child: Column(
+                children: [
+                  _line(
+                    Icons.business_outlined,
+                    'Organization',
+                    user?.organizationName ?? 'Not assigned',
+                  ),
+                  const Divider(color: AppColors.border, height: 24),
+                  _line(
+                    Icons.warehouse_outlined,
+                    'Assigned location',
+                    user?.locationName ?? 'Not assigned',
+                  ),
+                  if (user?.phone?.isNotEmpty ?? false) ...[
+                    const Divider(color: AppColors.border, height: 24),
+                    _line(Icons.phone_outlined, 'Contact phone', user!.phone!),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
+          if (user?.role == UserRole.CUSTOMER)
+            SectionCard(
+              tint: AppColors.greenSoft,
+              child: Column(
+                children: [
+                  _line(
+                    Icons.mail_outline_rounded,
+                    'Account email',
+                    user?.email ?? 'Not provided',
+                  ),
+                  const Divider(height: 24),
+                  _line(
+                    Icons.phone_outlined,
+                    'Contact phone',
+                    user?.phone?.isNotEmpty == true
+                        ? user!.phone!
+                        : 'Not provided',
+                  ),
+                ],
+              ),
+            ),
           const SizedBox(height: 18),
           ClipRRect(
             borderRadius: BorderRadius.circular(22),
@@ -273,10 +319,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                         ? AppColors.green
                         : AppColors.textGrey,
                   ),
-                  title: const Text(
-                    'Workspace connection',
-                    style: AppTheme.body,
-                  ),
+                  title: const Text('Service connection', style: AppTheme.body),
                   subtitle: Text(
                     _connected == null
                         ? 'Checking connection…'
@@ -295,45 +338,46 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          ExpansionTile(
-            tilePadding: const EdgeInsets.symmetric(horizontal: 4),
-            shape: const Border(),
-            collapsedShape: const Border(),
-            title: const Text('Advanced connection', style: AppTheme.caption),
-            children: [
-              TextField(
-                controller: _server,
-                keyboardType: TextInputType.url,
-                decoration: const InputDecoration(
-                  hintText: 'https://your-server',
-                  prefixIcon: Icon(Icons.dns_outlined),
+          if (user?.isStaff == true)
+            ExpansionTile(
+              tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+              shape: const Border(),
+              collapsedShape: const Border(),
+              title: const Text('Advanced connection', style: AppTheme.caption),
+              children: [
+                TextField(
+                  controller: _server,
+                  keyboardType: TextInputType.url,
+                  decoration: const InputDecoration(
+                    hintText: 'https://your-server',
+                    prefixIcon: Icon(Icons.dns_outlined),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      onPressed: _savingServer ? null : _saveServer,
-                      child: const Text('Save connection'),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        onPressed: _savingServer ? null : _saveServer,
+                        child: const Text('Save connection'),
+                      ),
                     ),
-                  ),
-                  Expanded(
-                    child: TextButton(
-                      onPressed: () async {
-                        await Api.I.setBaseUrl('');
-                        if (mounted) {
-                          setState(() => _server.text = Api.I.currentBaseUrl);
-                        }
-                        await _checkConnection();
-                      },
-                      child: const Text('Use default'),
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () async {
+                          await Api.I.setBaseUrl('');
+                          if (mounted) {
+                            setState(() => _server.text = Api.I.currentBaseUrl);
+                          }
+                          await _checkConnection();
+                        },
+                        child: const Text('Use default'),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+                  ],
+                ),
+              ],
+            ),
           const SizedBox(height: 18),
           OutlineButton2(label: 'Sign out', onPressed: _signOut),
           const SizedBox(height: 20),
@@ -349,7 +393,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
 
   Widget _line(IconData icon, String title, String value) => Row(
     children: [
-      Icon(icon, color: const Color(0xFFFFD185), size: 23),
+      Icon(icon, color: AppColors.blue, size: 23),
       const SizedBox(width: 13),
       Expanded(
         child: Column(
@@ -357,13 +401,13 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
           children: [
             Text(
               title,
-              style: const TextStyle(color: Color(0xFFAFCBD9), fontSize: 11),
+              style: const TextStyle(color: AppColors.textGrey, fontSize: 11),
             ),
             const SizedBox(height: 4),
             Text(
               value,
               style: const TextStyle(
-                color: Colors.white,
+                color: AppColors.navy,
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
               ),

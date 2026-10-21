@@ -5,6 +5,7 @@ import '../core/api.dart';
 import '../core/theme.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
+import '../widgets/reference_widgets.dart';
 import 'label_preview_screen.dart';
 import '../widgets/timeline.dart';
 import 'update_status_screen.dart';
@@ -15,8 +16,13 @@ import '../services/parcel_report.dart';
 /// Tracking tab carries a "Download parcel details" PDF action.
 class ParcelDetailScreen extends StatefulWidget {
   final String parcelId; // UUID or public tracking ID
+  final Future<Parcel> Function(String)? loadParcel;
 
-  const ParcelDetailScreen({super.key, required this.parcelId});
+  const ParcelDetailScreen({
+    super.key,
+    required this.parcelId,
+    this.loadParcel,
+  });
 
   @override
   State<ParcelDetailScreen> createState() => _ParcelDetailScreenState();
@@ -41,7 +47,9 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
       _error = null;
     });
     try {
-      final p = await Api.I.parcelDetail(widget.parcelId);
+      final p =
+          await (widget.loadParcel?.call(widget.parcelId) ??
+              Api.I.parcelDetail(widget.parcelId));
       if (!mounted) return;
       setState(() {
         _parcel = p;
@@ -112,8 +120,6 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
   }
 
   Widget _body(Parcel parcel) {
-    final refreshedAt = DateFormat('MMMM d, yyyy').format(parcel.updatedAt);
-
     return DefaultTabController(
       length: 3,
       child: RefreshIndicator(
@@ -123,109 +129,28 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
           children: [
-            // Header card
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF173F6D), Color(0xFF0D294A)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                border: Border.all(color: const Color(0xFF31567D)),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'TRACKING NUMBER',
-                    style: TextStyle(
-                      color: Color(0xFFBFD0E5),
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          parcel.trackingId,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 23,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.4,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => copyToClipboard(
-                          context,
-                          parcel.trackingId,
-                          message: 'Tracking number copied',
-                        ),
-                        icon: const Icon(
-                          Icons.copy_rounded,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 10,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      StatusChip(status: parcel.status),
-                      Text(
-                        statusHeadline(parcel.status),
-                        style: AppTheme.body.copyWith(
-                          color: Colors.white.withValues(alpha: 0.75),
-                          fontSize: 13.5,
-                          height: 1.4,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.calendar_today_rounded,
-                        size: 13,
-                        color: Color(0xFFBFD0E5),
-                      ),
-                      const SizedBox(width: 5),
-                      Text('Updated on $refreshedAt', style: AppTheme.caption),
-                    ],
-                  ),
-                ],
+            ParcelSummaryCard(
+              trackingId: parcel.trackingId,
+              status: parcel.status,
+              method: parcel.method.label,
+              onCopy: () => copyToClipboard(
+                context,
+                parcel.trackingId,
+                message: 'Tracking number copied',
               ),
             ),
-            const SizedBox(height: 14),
-
-            // Segmented tabs — navy capsule on a soft track, brand-colored icons.
+            const SizedBox(height: 16),
             Container(
-              padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
-                color: const Color(0xFFEDF2F9),
-                borderRadius: BorderRadius.circular(18),
+                color: Colors.white,
                 border: Border.all(color: AppColors.border),
+                borderRadius: BorderRadius.circular(13),
               ),
               child: TabBar(
                 onTap: (index) => setState(() => _tab = index),
                 indicator: BoxDecoration(
-                  color: AppColors.navy,
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.navy.withValues(alpha: .35),
-                      offset: const Offset(0, 2),
-                      blurRadius: 0,
-                    ),
-                  ],
+                  color: AppColors.blue,
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 indicatorSize: TabBarIndicatorSize.tab,
                 dividerColor: Colors.transparent,
@@ -233,41 +158,16 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                 unselectedLabelColor: AppColors.navy,
                 labelStyle: const TextStyle(
                   fontWeight: FontWeight.w800,
-                  fontSize: 13.5,
+                  fontSize: 12,
                 ),
-                indicatorPadding: const EdgeInsets.symmetric(vertical: 2),
                 tabs: const [
-                  Tab(
-                    height: 48,
-                    text: 'Overview',
-                    icon: Icon(
-                      Icons.inventory_2_rounded,
-                      size: 17,
-                      color: AppColors.coral,
-                    ),
-                  ),
-                  Tab(
-                    height: 48,
-                    text: 'Tracking',
-                    icon: Icon(
-                      Icons.place_rounded,
-                      size: 17,
-                      color: AppColors.blue,
-                    ),
-                  ),
-                  Tab(
-                    height: 48,
-                    text: 'Details',
-                    icon: Icon(
-                      Icons.list_alt_rounded,
-                      size: 17,
-                      color: AppColors.teal,
-                    ),
-                  ),
+                  Tab(height: 44, text: 'Overview'),
+                  Tab(height: 44, text: 'Tracking'),
+                  Tab(height: 44, text: 'Details'),
                 ],
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 20),
 
             // Render the selected section in the same scroll view.
             if (_tab == 0) _overview(parcel),
@@ -313,26 +213,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
           ),
         ),
         const SizedBox(height: 20),
-        const Text('Shipment Information', style: AppTheme.sectionTitle),
-        const SizedBox(height: 4),
-        const Text(
-          'Swipe to see every record for this shipment.',
-          style: AppTheme.caption,
-        ),
-        const SizedBox(height: 10),
-        // Six full-detail cards in one horizontal rail.
-        SizedBox(
-          height: 168,
-          child: ListView.separated(
-            physics: const BouncingScrollPhysics(
-              decelerationRate: ScrollDecelerationRate.fast,
-            ),
-            scrollDirection: Axis.horizontal,
-            itemCount: _shipmentCards(parcel).length,
-            separatorBuilder: (_, _) => const SizedBox(width: 12),
-            itemBuilder: (context, i) => _shipmentCards(parcel)[i],
-          ),
-        ),
+        _shipmentGrid(parcel),
         const SizedBox(height: 20),
         if (canUpdate)
           PrimaryButton(
@@ -375,6 +256,34 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
       ],
     );
   }
+
+  Widget _shipmentGrid(Parcel parcel) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Text('Shipment Information', style: AppTheme.sectionTitle),
+      const SizedBox(height: 12),
+      LayoutBuilder(
+        builder: (context, c) {
+          final columns =
+              c.maxWidth < 270 ||
+                  MediaQuery.textScalerOf(context).scale(1) > 1.4
+              ? 1
+              : 2;
+          return Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (final card in _shipmentCards(parcel))
+                SizedBox(
+                  width: (c.maxWidth - (columns - 1) * 10) / columns,
+                  child: card,
+                ),
+            ],
+          );
+        },
+      ),
+    ],
+  );
 
   /// The six shipment-information records, each on its own tinted card with
   /// full, un-truncated text.
@@ -437,7 +346,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
         tint: AppColors.coralSoft,
         fg: AppColors.coral,
         value: df.format(parcel.createdAt),
-        sub: 'Internal ref ${parcel.id.substring(0, 8)}…',
+        sub: 'Internal ref ${parcel.id}',
       ),
     ];
   }
@@ -446,20 +355,26 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Tracking Timeline', style: AppTheme.sectionTitle),
-        const SizedBox(height: 4),
-        Text(
-          'Recorded updates from your parcel’s journey.',
-          style: AppTheme.caption,
-        ),
-        const SizedBox(height: 16),
         SectionCard(
-          tint: AppColors.tealSoft,
-          child: TrackingTimeline(
-            events: parcel.events,
-            currentStatus: parcel.status,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Tracking Timeline', style: AppTheme.sectionTitle),
+              const SizedBox(height: 5),
+              const Text(
+                'Recorded updates from your parcel’s journey.',
+                style: AppTheme.caption,
+              ),
+              const SizedBox(height: 20),
+              TrackingTimeline(
+                events: parcel.events,
+                currentStatus: parcel.status,
+              ),
+            ],
           ),
         ),
+        const SizedBox(height: 20),
+        _shipmentGrid(parcel),
         const SizedBox(height: 20),
         // Download action pinned across the page width (bottom-bar spot).
         _DownloadReportButton(
@@ -555,7 +470,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 130,
+            width: MediaQuery.sizeOf(context).width < 360 ? 96 : 130,
             child: Text(
               label,
               style: const TextStyle(color: AppColors.textGrey, fontSize: 13),
@@ -577,7 +492,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
   }
 }
 
-/// Wide horizontal info card with its own brand tint — full text, no cuts.
+/// Reference-style pastel information grid, with complete wrapping values.
 class _ShipmentCard extends StatelessWidget {
   final String label, value, sub;
   final IconData icon;
@@ -590,190 +505,63 @@ class _ShipmentCard extends StatelessWidget {
     required this.tint,
     required this.fg,
   });
-
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 258,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Colors.white, tint],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(13),
+    decoration: BoxDecoration(
+      color: tint,
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, color: AppColors.navy, size: 23),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  color: AppColors.textGrey,
+                  fontSize: 10,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ],
         ),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Color.lerp(tint, AppColors.blue, .16)!),
-        boxShadow: [
-          BoxShadow(
-            color: Color.lerp(tint, AppColors.navy, .16)!,
-            offset: const Offset(0, 4),
-            blurRadius: 0,
+        const SizedBox(height: 10),
+        Text(
+          value,
+          style: const TextStyle(
+            fontWeight: FontWeight.w800,
+            fontSize: 13,
+            height: 1.4,
           ),
-          BoxShadow(
-            color: AppColors.navy.withValues(alpha: .05),
-            offset: const Offset(0, 10),
-            blurRadius: 18,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          sub,
+          style: const TextStyle(
+            color: AppColors.textGrey,
+            fontSize: 10,
+            height: 1.5,
           ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(11),
-                  border: Border.all(
-                    color: fg.withValues(alpha: .35),
-                    width: 1.2,
-                  ),
-                ),
-                child: Icon(icon, color: fg, size: 19),
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  label.toUpperCase(),
-                  style: TextStyle(
-                    color: fg,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: .7,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // Full value: wraps instead of ellipsising.
-          Text(
-            value,
-            style: TextStyle(
-              color: AppColors.navy,
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-              height: 1.25,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            sub,
-            style: TextStyle(
-              color: AppColors.textGrey,
-              fontSize: 11.5,
-              height: 1.35,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
 }
 
-/// Navy gradient download action styled like the primary CTA bar area.
 class _DownloadReportButton extends StatelessWidget {
   final VoidCallback onPressed;
   final bool busy;
   const _DownloadReportButton({required this.onPressed, required this.busy});
-
   @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.navy.withValues(alpha: .45),
-            offset: const Offset(0, 5),
-            blurRadius: 0,
-          ),
-          BoxShadow(
-            color: AppColors.navy.withValues(alpha: .20),
-            offset: const Offset(0, 14),
-            blurRadius: 26,
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(18),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: busy ? null : onPressed,
-          child: Ink(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [AppColors.navy, Color(0xFF16305E)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: .12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: busy
-                        ? const Padding(
-                            padding: EdgeInsets.all(9),
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.4,
-                              color: AppColors.gold,
-                            ),
-                          )
-                        : const Icon(
-                            Icons.file_download_rounded,
-                            color: AppColors.gold,
-                            size: 23,
-                          ),
-                  ),
-                  const SizedBox(width: 13),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          busy ? 'Building PDF...' : 'Download parcel details',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Barcode, codes and full tracking history',
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: .72),
-                            fontSize: 10.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (!busy)
-                    const Icon(
-                      Icons.download_done_rounded,
-                      color: AppColors.gold,
-                      size: 22,
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => PrimaryButton(
+    label: busy ? 'Building PDF…' : 'Download parcel details',
+    onPressed: onPressed,
+    loading: busy,
+  );
 }

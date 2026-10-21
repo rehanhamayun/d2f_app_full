@@ -5,24 +5,24 @@ import 'package:flutter/material.dart';
 class AppColors {
   AppColors._();
 
-  static const cream = Color(0xFFEDF2F9); // app canvas
+  static const cream = Color(0xFFFFFCF6); // warm ivory reference canvas
   static const deepBlue = Color(0xFF12365C);
   static const deepTeal = Color(0xFF104D55);
   static const deepPurple = Color(0xFF45315D);
-  static const navy = Color(0xFF0B1B46); // headings / primary text
-  static const textGrey = Color(0xFF6B7280); // secondary text
-  static const border = Color(0xFFDFE7F3); // card hairline
+  static const navy = Color(0xFF071541); // reference navy headings
+  static const textGrey = Color(0xFF697080); // secondary text
+  static const border = Color(0xFFE8E6E1); // warm card hairline
 
   static const coral = Color(0xFFFF5139); // primary actions
-  static const coralSoft = Color(0xFFFFEAE4);
+  static const coralSoft = Color(0xFFFFEEE9);
 
-  static const gold = Color(0xFFF0B323); // accents / arrows
-  static const goldSoft = Color(0xFFFFF1C9);
+  static const gold = Color(0xFFF2B824); // accents / arrows
+  static const goldSoft = Color(0xFFFFF4C9);
 
-  static const blue = Color(0xFF1668DC); // info / tracking
-  static const blueSoft = Color(0xFFE3F1FF);
+  static const blue = Color(0xFF0065EE); // info / tracking
+  static const blueSoft = Color(0xFFE7F4FF);
 
-  static const green = Color(0xFF1FA05C); // success
+  static const green = Color(0xFF159553); // success
   static const greenSoft = Color(0xFFE1F4E9);
 
   static const teal = Color(0xFF0E8F8A);
@@ -31,6 +31,12 @@ class AppColors {
   static const indigo = Color(0xFF5B4FC9);
   static const indigoSoft = Color(0xFFEBE9F9);
 
+  static const surface = Colors.white;
+  static const primary = coral;
+  static const primarySoft = coralSoft;
+  static const yellow = Color(0xFFFFDA45);
+  static const muted = textGrey;
+  static const subtle = Color(0xFFF6F4EE);
   static const chipGrey = Color(0xFFF1EDE4);
 }
 
@@ -108,7 +114,7 @@ class AppTheme {
         seedColor: AppColors.coral,
         primary: AppColors.coral,
         secondary: AppColors.gold,
-        surface: Colors.white,
+        surface: AppColors.cream,
       ),
       scaffoldBackgroundColor: AppColors.cream,
     );
@@ -137,23 +143,23 @@ class AppTheme {
         ),
       ),
       appBarTheme: const AppBarTheme(
-        backgroundColor: AppColors.navy,
-        foregroundColor: Colors.white,
+        backgroundColor: AppColors.cream,
+        foregroundColor: AppColors.navy,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
-        iconTheme: IconThemeData(color: Colors.white),
+        iconTheme: IconThemeData(color: AppColors.navy),
         titleTextStyle: TextStyle(
           fontFamily: 'PlusJakartaSans',
-          color: Colors.white,
+          color: AppColors.navy,
           fontSize: 18,
           fontWeight: FontWeight.w800,
         ),
-        toolbarHeight: 64,
+        toolbarHeight: 58,
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: const Color(0xFFFCFDFF),
+        fillColor: Colors.white,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 14,
           vertical: 16,
@@ -172,7 +178,7 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppColors.coral, width: 1.4),
+          borderSide: const BorderSide(color: AppColors.blue, width: 1.4),
         ),
       ),
       dropdownMenuTheme: const DropdownMenuThemeData(
@@ -192,10 +198,10 @@ class AppTheme {
   static const TextStyle display = TextStyle(
     fontFamily: 'PlusJakartaSans',
     color: AppColors.navy,
-    fontSize: 34,
+    fontSize: 30,
     height: 1.12,
     fontWeight: FontWeight.w800,
-    letterSpacing: -1.3,
+    letterSpacing: -1.1,
   );
 
   static const TextStyle heading = TextStyle(
@@ -206,7 +212,7 @@ class AppTheme {
 
   static const TextStyle sectionTitle = TextStyle(
     color: AppColors.navy,
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: FontWeight.w800,
   );
 
@@ -221,4 +227,16 @@ class AppTheme {
     fontSize: 13,
     fontWeight: FontWeight.w500,
   );
+}
+
+/// Shared spacing and surface geometry derived from all five references.
+class AppSpacing {
+  AppSpacing._();
+  static const double page = 18;
+  static const double section = 20;
+  static const double gap = 12;
+  static const double radius = 18;
+  static const double fieldRadius = 14;
+  static const double maxWidth = 600;
+  static const pageInsets = EdgeInsets.fromLTRB(page, 12, page, 24);
 }

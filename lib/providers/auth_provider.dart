@@ -40,11 +40,22 @@ class AuthController extends AsyncNotifier<User?> {
     String email,
     String password, {
     String? phone,
+    UserRole role = UserRole.CUSTOMER,
+    String? invitation,
   }) async {
-    final user = await Api.I.signUp(fullName, email, password, phone: phone);
+    final user = await Api.I.signUp(
+      fullName,
+      email,
+      password,
+      phone: phone,
+      role: role,
+      invitation: invitation,
+    );
     state = AsyncData(user);
     return user;
   }
+
+  void acceptSession(User user) => state = AsyncData(user);
 
   Future<void> updateProfile(String name, String? phone) async {
     state = AsyncData(await Api.I.updateProfile(fullName: name, phone: phone));

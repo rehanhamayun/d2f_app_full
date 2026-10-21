@@ -1,265 +1,378 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../providers/auth_provider.dart';
+import '../widgets/reference_widgets.dart';
 
 import '../core/api.dart';
 import '../core/theme.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
+import '../widgets/route_planner.dart';
+import 'ship_screen.dart';
 import 'parcel_detail_screen.dart';
 import 'scan_screen.dart';
 
-/// Staff dashboard (adapted from the approved customer dashboard design,
-/// screen 3) with M1 staff actions.
-class HomeScreen extends StatelessWidget {
-  final VoidCallback onGoRegister;
-  final VoidCallback onGoActivity;
+/// Staff and admin dashboard. Counts and recents come from the existing API.
+class HomeScreen extends ConsumerStatefulWidget {
+  final VoidCallback onGoRegister, onGoActivity;
   final ValueChanged<ShippingMethod>? onGoMethod;
-
+  final ValueChanged<ShipmentRoute>? onGoRoute;
+  final Future<Map<String, int>> Function()? loadStats;
+  final Future<List<Parcel>> Function()? loadRecent;
   const HomeScreen({
     super.key,
     required this.onGoRegister,
     required this.onGoActivity,
     this.onGoMethod,
+    this.onGoRoute,
+    this.loadStats,
+    this.loadRecent,
   });
+  @override
+  ConsumerState<HomeScreen> createState() => HomeScreenState();
+}
 
+class HomeScreenState extends ConsumerState<HomeScreen> {
+  Map<String, int>? _stats;
+  List<Parcel>? _recent;
+  bool _failed = false;
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    if (mounted) setState(() => _failed = false);
+    await Future.wait([
+      () async {
+        try {
+          final data = await (widget.loadStats?.call() ?? Api.I.parcelStats());
+          if (mounted) setState(() => _stats = data);
+        } catch (_) {
+          if (mounted) setState(() => _failed = true);
+        }
+      }(),
+      () async {
+        try {
+          final data = await (widget.loadRecent?.call() ?? Api.I.parcels());
+          if (mounted) setState(() => _recent = data);
+        } catch (_) {
+          if (mounted) setState(() => _failed = true);
+        }
+      }(),
+    ]);
+  }
+
+  Future<void> refresh() => _refresh();
+
+  String _count(String status) =>
+      _stats == null ? '—' : '${_stats![status] ?? 0}';
   @override
   Widget build(BuildContext context) {
+    final user = ref.watch(authControllerProvider).valueOrNull;
+    final name = user?.fullName.trim().split(' ').first ?? 'there';
+    final hour = DateTime.now().hour;
+    final greeting = hour < 12
+        ? 'Good morning'
+        : hour < 18
+        ? 'Good afternoon'
+        : 'Good evening';
+    final compact = MediaQuery.sizeOf(context).width < 360;
     return SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-        children: [
-          const D2FHomeHeader(),
-          const SizedBox(height: 10),
-
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: AppColors.blueSoft,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Text(
-                'STAFF WORKSPACE',
-                style: TextStyle(
-                  color: AppColors.navy,
-                  fontSize: 9,
-                  letterSpacing: 1.3,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          // Headline
-          Text(
-            'Parcels in motion.',
-            style: AppTheme.display.copyWith(height: 1.1),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Register, scan and update every shipment from one desk.',
-            style: AppTheme.body.copyWith(color: AppColors.textGrey),
-          ),
-          const SizedBox(height: 18),
-
-          // Quick actions row
-          SizedBox(
-            height: 232,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: RefreshIndicator(
+        onRefresh: _refresh,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
+          children: [
+            D2FHomeHeader(onBell: widget.onGoActivity),
+            const SizedBox(height: 19),
+            Row(
               children: [
-                // Send Package (big coral card) → Register parcel
-                Expanded(
-                  flex: 5,
-                  child: _QuickCard(
-                    color: AppColors.deepPurple,
-                    title: 'Register\nparcel',
-                    artworkAsset: 'assets/images/home_register_card.png',
-                    onTap: onGoRegister,
+                CircleAvatar(
+                  radius: 24,
+                  backgroundColor: AppColors.goldSoft,
+                  child: Text(
+                    name.isEmpty ? 'D' : name[0].toUpperCase(),
+                    style: const TextStyle(
+                      color: AppColors.navy,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  flex: 4,
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Track Parcel (blue card) → Scan / lookup
-                      Expanded(
-                        child: _QuickCard(
-                          color: AppColors.deepBlue,
-                          title: 'Track parcel',
-                          artworkAsset: 'assets/images/home_track_card.png',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const ScanScreen(),
-                            ),
-                          ),
+                      Text(
+                        '$greeting, $name.',
+                        style: AppTheme.sectionTitle.copyWith(
+                          fontSize: 24,
+                          letterSpacing: -.8,
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      // Parcel records are the third primary M1 action.
-                      Expanded(
-                        child: _QuickCard(
-                          color: AppColors.deepTeal,
-                          title: 'All parcels',
-                          artworkAsset:
-                              'assets/images/home_all_parcels_card.png',
-                          onTap: onGoActivity,
-                        ),
+                      const SizedBox(height: 4),
+                      Text(
+                        user?.role == UserRole.ADMIN
+                            ? 'Your operations, at a glance.'
+                            : 'Let’s get things moving today.',
+                        style: AppTheme.caption,
                       ),
                     ],
                   ),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 16),
-
-          // Tracking number lookup
-          D2FSearchField(
-            hint: 'Enter tracking number',
-            onSubmit: (value) => _lookup(context, value),
-          ),
-          const SizedBox(height: 18),
-
-          // Hero banner
-          ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: const ReferenceArt('warehouse', fit: BoxFit.cover),
-          ),
-          const SizedBox(height: 22),
-
-          // How would you like to send?
-          const Text('Shipping methods', style: AppTheme.sectionTitle),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              for (final m in ShippingMethod.values) ...[
-                Expanded(
-                  child: _MethodCard(
-                    method: m,
-                    onTap: () {
-                      if (onGoMethod != null) {
-                        onGoMethod!(m);
-                      } else {
-                        onGoRegister();
-                      }
-                    },
+            const SizedBox(height: 18),
+            SectionCard(
+              tint: AppColors.blueSoft,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+              child: Row(
+                children: [
+                  const Icon(Icons.location_on_outlined, size: 19),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Assigned location: ${user?.locationName ?? 'Not assigned'}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
-                ),
-                if (m != ShippingMethod.ROAD) const SizedBox(width: 10),
-              ],
-            ],
-          ),
-          const SizedBox(height: 22),
-
-          const Text('More from D2F', style: AppTheme.sectionTitle),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _FutureService(
-                  title: 'Marketplace',
-                  icon: Icons.storefront_outlined,
-                  color: AppColors.deepPurple,
-                  artworkAsset: 'assets/images/parcel.jpg',
-                  onTap: () => showComingSoon(context, 'D2F Marketplace'),
-                ),
+                  const Icon(Icons.verified_user_outlined, size: 18),
+                ],
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _FutureService(
-                  title: 'Buy For Me',
-                  icon: Icons.shopping_bag_outlined,
-                  color: AppColors.deepTeal,
-                  artworkAsset: 'assets/images/success.jpg',
-                  onTap: () => showComingSoon(context, 'Buy For Me'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          const Text('Every parcel, connected.', style: AppTheme.sectionTitle),
-          const SizedBox(height: 12),
-          const SectionCard(
-            tint: AppColors.tealSoft,
-            child: Column(
-              children: [
-                _WorkflowLine(
-                  number: '01',
-                  title: 'Register & identify',
-                  description:
-                      'Save parcel details and generate its QR and barcode.',
-                ),
-                Divider(height: 24),
-                _WorkflowLine(
-                  number: '02',
-                  title: 'Scan & find',
-                  description: 'Scan a label or enter the tracking number.',
-                ),
-                Divider(height: 24),
-                _WorkflowLine(
-                  number: '03',
-                  title: 'Update & follow',
-                  description:
-                      'Record a status update and keep a traceable history.',
-                ),
-              ],
             ),
-          ),
-          const SizedBox(height: 22),
-
-          // Route banner
-          SectionCard(
-            tint: AppColors.goldSoft,
-            raised: true,
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            const SizedBox(height: 16),
+            LayoutBuilder(
+              builder: (context, c) => Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (final metric in [
+                    (
+                      'Total Parcels',
+                      _stats == null
+                          ? '—'
+                          : '${_stats!.values.fold<int>(0, (a, b) => a + b)}',
+                      'All registered shipments',
+                      Icons.inventory_2_outlined,
+                      AppColors.blueSoft,
+                    ),
+                    (
+                      'In Transit',
+                      _count('IN_TRANSIT'),
+                      'Currently on the move',
+                      Icons.local_shipping_outlined,
+                      AppColors.goldSoft,
+                    ),
+                    (
+                      'Processing',
+                      _count('PROCESSING'),
+                      'Being prepared for shipment',
+                      Icons.pending_actions_rounded,
+                      AppColors.greenSoft,
+                    ),
+                    (
+                      'Delivered',
+                      _count('DELIVERED'),
+                      'Successfully completed',
+                      Icons.task_alt_rounded,
+                      AppColors.coralSoft,
+                    ),
+                  ])
+                    SizedBox(
+                      width: (c.maxWidth - 10) / 2,
+                      child: DashboardMetric(
+                        title: metric.$1,
+                        value: metric.$2,
+                        caption: metric.$3,
+                        icon: metric.$4,
+                        tint: metric.$5,
+                        onTap: widget.onGoActivity,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (_failed)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
                   children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'FROM',
-                          style: AppTheme.caption.copyWith(
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1,
-                          ),
-                        ),
-                        const Text('Omaha, USA', style: AppTheme.sectionTitle),
-                      ],
+                    const Expanded(
+                      child: Text(
+                        'Some shipment information could not load.',
+                        style: AppTheme.caption,
+                      ),
                     ),
-                    Icon(Icons.flight_takeoff_rounded, color: AppColors.navy),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          'TO',
-                          style: AppTheme.caption.copyWith(
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1,
-                          ),
-                        ),
-                        const Text('Lomé, Togo', style: AppTheme.sectionTitle),
-                      ],
-                    ),
+                    TextButton(onPressed: _refresh, child: const Text('Retry')),
                   ],
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  'OUR PRIMARY SHIPPING LANE',
-                  style: AppTheme.caption.copyWith(
-                    fontSize: 9,
-                    letterSpacing: 1.3,
+              ),
+            const SizedBox(height: 22),
+            SizedBox(
+              height: compact ? 176 : 184,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    flex: 6,
+                    child: ReferenceActionCard(
+                      title: 'Register\nParcel',
+                      subtitle: 'Create a shipment',
+                      color: AppColors.coral,
+                      icon: Icons.add_box_outlined,
+                      onTap: widget.onGoRegister,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 4,
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: ReferenceActionCard(
+                            title: 'Scan Parcel',
+                            subtitle: 'Scan a QR or barcode',
+                            color: AppColors.blue,
+                            icon: Icons.qr_code_scanner_rounded,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const ScanScreen(),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Expanded(
+                          child: ReferenceActionCard(
+                            title: 'Search Parcel',
+                            subtitle: 'Find any shipment',
+                            color: AppColors.yellow,
+                            icon: Icons.search_rounded,
+                            onTap: widget.onGoActivity,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 22),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('Recent shipments', style: AppTheme.sectionTitle),
+                ),
+                TextButton(
+                  onPressed: widget.onGoActivity,
+                  child: const Text(
+                    'View all',
+                    style: TextStyle(fontSize: 11, color: AppColors.textGrey),
                   ),
                 ),
               ],
             ),
-          ),
-        ],
+            if (_recent == null && !_failed)
+              const LinearProgressIndicator(minHeight: 2),
+            if (_recent?.isEmpty ?? false)
+              const SectionCard(
+                child: Text(
+                  'No shipments yet. Register your first parcel to get started.',
+                  style: AppTheme.caption,
+                ),
+              ),
+            for (final parcel in (_recent ?? <Parcel>[]).take(3))
+              ShipmentRecordTile(
+                parcel: parcel,
+                onTap: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ParcelDetailScreen(parcelId: parcel.id),
+                    ),
+                  );
+                  if (mounted) _refresh();
+                },
+              ),
+            const SizedBox(height: 20),
+            D2FSearchField(
+              hint: 'Enter tracking number',
+              onSubmit: (value) => _lookup(context, value),
+            ),
+            const SizedBox(height: 22),
+            const Text('Shipping methods', style: AppTheme.sectionTitle),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                for (final method in ShippingMethod.values) ...[
+                  Expanded(
+                    child: _MethodCard(
+                      method: method,
+                      onTap: () => widget.onGoMethod != null
+                          ? widget.onGoMethod!(method)
+                          : widget.onGoRegister(),
+                    ),
+                  ),
+                  if (method != ShippingMethod.ROAD) const SizedBox(width: 10),
+                ],
+              ],
+            ),
+            const SizedBox(height: 22),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: const ReferenceArt('warehouse', fit: BoxFit.cover),
+            ),
+            const SizedBox(height: 22),
+            const Text('Explore more', style: AppTheme.sectionTitle),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _FutureService(
+                    title: 'Marketplace',
+                    color: AppColors.coralSoft,
+                    artworkAsset: 'assets/images/home_marketplace.svg',
+                    onTap: () => showComingSoon(context, 'D2F Marketplace'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _FutureService(
+                    title: 'Buy For Me',
+                    color: AppColors.blueSoft,
+                    artworkAsset: 'assets/images/home_buy_for_me.svg',
+                    onTap: () => showComingSoon(context, 'Buy For Me'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 22),
+            RoutePlannerCard(
+              onRouteSelected: (route) {
+                if (widget.onGoRoute != null) {
+                  widget.onGoRoute!(route);
+                } else {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          Scaffold(body: ShipScreen(initialRoute: route)),
+                    ),
+                  );
+                }
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -282,44 +395,6 @@ class HomeScreen extends StatelessWidget {
           .showSnackBar(SnackBar(content: Text(e.message)));
     }
   }
-}
-
-class _QuickCard extends StatelessWidget {
-  final Color color;
-  final String title;
-  final String artworkAsset;
-  final VoidCallback onTap;
-
-  const _QuickCard({
-    required this.color,
-    required this.title,
-    required this.artworkAsset,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) => LiftedSurface(
-    color: color,
-    child: Semantics(
-      button: true,
-      label: title,
-      child: InkWell(
-        onTap: onTap,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            ExcludeSemantics(
-              child: Image.asset(
-                artworkAsset,
-                fit: BoxFit.cover,
-                filterQuality: FilterQuality.high,
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
 }
 
 class _MethodCard extends StatelessWidget {
@@ -371,68 +446,14 @@ class _MethodCard extends StatelessWidget {
   }
 }
 
-class _WorkflowLine extends StatelessWidget {
-  final String number, title, description;
-  const _WorkflowLine({
-    required this.number,
-    required this.title,
-    required this.description,
-  });
-  @override
-  Widget build(BuildContext context) => Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Container(
-        width: 34,
-        height: 34,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: AppColors.blueSoft,
-          borderRadius: BorderRadius.circular(11),
-        ),
-        child: Text(
-          number,
-          style: const TextStyle(
-            color: AppColors.blue,
-            fontSize: 11,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      ),
-      const SizedBox(width: 12),
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: AppTheme.body.copyWith(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              description,
-              style: AppTheme.caption.copyWith(fontSize: 11, height: 1.5),
-            ),
-          ],
-        ),
-      ),
-    ],
-  );
-}
-
 class _FutureService extends StatelessWidget {
   final String title;
   final String artworkAsset;
-  final IconData icon;
   final Color color;
   final VoidCallback onTap;
   const _FutureService({
     required this.title,
     required this.artworkAsset,
-    required this.icon,
     required this.color,
     required this.onTap,
   });
@@ -444,41 +465,27 @@ class _FutureService extends StatelessWidget {
     child: InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.all(15),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Row(
-              children: [
-                Icon(icon, color: const Color(0xFFFFD18A), size: 25),
-                const Spacer(),
-                SizedBox(
-                  width: 92,
-                  height: 80,
-                  child: ShaderMask(
-                    shaderCallback: (bounds) => RadialGradient(
-                      center: const Alignment(.12, -.08),
-                      radius: .88,
-                      colors: [Colors.white, Colors.white.withValues(alpha: 0)],
-                      stops: const [.56, 1],
-                    ).createShader(bounds),
-                    blendMode: BlendMode.dstIn,
-                    child: ExcludeSemantics(
-                      child: Image.asset(
-                        artworkAsset,
-                        fit: BoxFit.cover,
-                        filterQuality: FilterQuality.high,
-                      ),
-                    ),
-                  ),
+            SizedBox(
+              width: double.infinity,
+              height: 100,
+              child: ExcludeSemantics(
+                child: SvgPicture.asset(
+                  artworkAsset,
+                  fit: BoxFit.contain,
+                  alignment: Alignment.center,
                 ),
-              ],
+              ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 6),
             Text(
               title,
+              textAlign: TextAlign.center,
               style: const TextStyle(
-                color: Colors.white,
+                color: AppColors.navy,
                 fontSize: 15,
                 fontWeight: FontWeight.w800,
               ),
@@ -487,13 +494,13 @@ class _FutureService extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.white12,
+                color: Colors.white,
                 borderRadius: BorderRadius.circular(7),
               ),
               child: const Text(
                 'COMING SOON',
                 style: TextStyle(
-                  color: Color(0xFFFFD18A),
+                  color: AppColors.textGrey,
                   fontSize: 8,
                   fontWeight: FontWeight.w700,
                   letterSpacing: .9,
