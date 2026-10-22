@@ -53,6 +53,7 @@ test('admin dashboard analytics and user management require Admin access', async
           fullName: 'Dashboard Staff',
           passwordHash: 'unused',
           role: 'STAFF',
+          organizationId: organization.id,
         },
       }),
       prisma.user.create({
@@ -61,6 +62,7 @@ test('admin dashboard analytics and user management require Admin access', async
           fullName: 'Dashboard Customer',
           passwordHash: 'unused',
           role: 'CUSTOMER',
+          organizationId: organization.id,
         },
       }),
     ]);
@@ -70,18 +72,21 @@ test('admin dashboard analytics and user management require Admin access', async
       data: {
         displayName: `Dashboard Test Customer ${suffix}`,
         email: customer.email,
+        organizationId: organization.id,
       },
     });
     const secondCustomerProfile = await prisma.customer.create({
       data: {
         displayName: `Dashboard Test Customer Second ${suffix}`,
         email: `profile-${suffix}@example.com`,
+        organizationId: organization.id,
       },
     });
     createdCustomerIds.push(customerProfile.id, secondCustomerProfile.id);
     const parcel = await prisma.parcel.create({
       data: {
         trackingId: `D2F-2099-${Math.floor(Math.random() * 900000 + 100000)}`,
+        organizationId: organization.id,
         customerId: customerProfile.id,
         recipientName: `Dashboard Recipient ${suffix}`,
         packageType: 'BOX',
@@ -96,6 +101,7 @@ test('admin dashboard analytics and user management require Admin access', async
     const secondParcel = await prisma.parcel.create({
       data: {
         trackingId: `D2F-2099-${Math.floor(Math.random() * 900000 + 100000)}`,
+        organizationId: organization.id,
         customerId: secondCustomerProfile.id,
         recipientName: `Dashboard Recipient Second ${suffix}`,
         packageType: 'BOX',

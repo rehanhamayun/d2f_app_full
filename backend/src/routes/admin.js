@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { resolveOrganizationId } from '../tracking.js';
 
 const router = Router();
 const userSelect = {
@@ -38,7 +39,14 @@ function pagination(query) {
   return { limit, offset };
 }
 
-router.use(authenticate, requireRole('ADMIN'));
+router.use(authenticate, requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    req.organizationId = await resolveOrganizationId(prisma, req.user);
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.get('/overview', async (req, res, next) => {
   try {
@@ -53,6 +61,11 @@ router.get('/overview', async (req, res, next) => {
     periodStart.setUTCHours(0, 0, 0, 0);
     const chartStart = new Date(periodStart);
 
+    const organizationId = req.organizationId;
+    const organizationUsers = await prisma.user.findMany({
+      where: { organizationId },
+      select: { id: true },
+    });
     const [
       totalParcels,
       periodParcels,
@@ -64,20 +77,22 @@ router.get('/overview', async (req, res, next) => {
       recentEvents,
       recentAudit,
     ] = await prisma.$transaction([
-      prisma.parcel.count(),
-      prisma.parcel.count({ where: { createdAt: { gte: periodStart } } }),
-      prisma.parcel.groupBy({ by: ['status'], _count: { _all: true } }),
-      prisma.parcel.groupBy({ by: ['method'], _count: { _all: true } }),
+      prisma.parcel.count({ where: { organizationId } }),
+      prisma.parcel.count({ where: { organizationId, createdAt: { gte: periodStart } } }),
+      prisma.parcel.groupBy({ by: ['status'], where: { organizationId }, _count: { _all: true } }),
+      prisma.parcel.groupBy({ by: ['method'], where: { organizationId }, _count: { _all: true } }),
       prisma.parcel.findMany({
-        where: { createdAt: { gte: chartStart } },
+        where: { organizationId, createdAt: { gte: chartStart } },
         select: { createdAt: true },
       }),
-      prisma.customer.count(),
+      prisma.customer.count({ where: { organizationId } }),
       prisma.user.groupBy({
         by: ['role', 'isActive'],
+        where: { organizationId },
         _count: { _all: true },
       }),
       prisma.trackingEvent.findMany({
+        where: { parcel: { organizationId } },
         orderBy: { createdAt: 'desc' },
         take: 8,
         select: {
@@ -96,6 +111,7 @@ router.get('/overview', async (req, res, next) => {
         },
       }),
       prisma.auditLog.findMany({
+        where: { actorId: { in: organizationUsers.map((user) => user.id) } },
         orderBy: { createdAt: 'desc' },
         take: 8,
         select: {
@@ -181,6 +197,7 @@ router.get('/parcels', async (req, res, next) => {
     }
 
     const where = {
+      organizationId: req.organizationId,
       ...(status && status !== 'ALL' ? { status } : {}),
       ...(q
         ? {
@@ -217,13 +234,14 @@ router.get('/customers', async (req, res, next) => {
     const q = req.query.q?.toString().trim();
     const where = q
       ? {
+          organizationId: req.organizationId,
           OR: [
             { displayName: { contains: q, mode: 'insensitive' } },
             { email: { contains: q, mode: 'insensitive' } },
             { phone: { contains: q } },
           ],
         }
-      : {};
+      : { organizationId: req.organizationId };
     const [customers, total] = await prisma.$transaction([
       prisma.customer.findMany({
         where,
@@ -253,6 +271,7 @@ router.get('/users', async (req, res, next) => {
     }
 
     const where = {
+      organizationId: req.organizationId,
       ...(role && role !== 'ALL' ? { role } : {}),
       ...(q
         ? {
@@ -291,14 +310,18 @@ router.patch('/users/:id/active', async (req, res, next) => {
 
     const updated = await prisma.$transaction(
       async (tx) => {
-        const target = await tx.user.findUnique({
-          where: { id: req.params.id },
+        const target = await tx.user.findFirst({
+          where: { id: req.params.id, organizationId: req.organizationId },
           select: { id: true, role: true, isActive: true },
         });
         if (!target) return null;
         if (target.role === 'ADMIN' && target.isActive && !isActive) {
           const activeAdmins = await tx.user.count({
-            where: { role: 'ADMIN', isActive: true },
+            where: {
+              role: 'ADMIN',
+              isActive: true,
+              organizationId: req.organizationId,
+            },
           });
           if (activeAdmins <= 1) {
             const conflict = new Error('The last active administrator cannot be deactivated.');

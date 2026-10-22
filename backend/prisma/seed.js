@@ -8,7 +8,11 @@ async function main() {
   const org = await prisma.organization.upsert({
     where: { id: 'org-d2f' },
     update: {},
-    create: { id: 'org-d2f', name: 'D2F Shipping LLC' },
+    create: {
+      id: 'org-d2f',
+      name: 'D2F Shipping LLC',
+      trackingPrefix: 'D2F',
+    },
   });
 
   const omaha = await prisma.location.upsert({
@@ -81,6 +85,7 @@ async function main() {
     update: {},
     create: {
       id: 'cust-koffi-demo',
+      organizationId: org.id,
       displayName: 'Koffi Mensah',
       email: 'koffi.mensah@example.com',
       phone: '+228 90 12 34 56',
@@ -95,6 +100,7 @@ async function main() {
     update: {},
     create: {
       id: 'cust-fatima-demo',
+      organizationId: org.id,
       displayName: 'Fatima Okoye',
       email: 'fatima.okoye@example.com',
       phone: '+1 402 555 0142',
@@ -179,6 +185,7 @@ async function main() {
     const created = await prisma.parcel.create({
       data: {
         trackingId: sp.trackingId,
+        organizationId: org.id,
         customerId: sp.customer.id,
         recipientName: sp.recipientName,
         recipientPhone: sp.recipientPhone,

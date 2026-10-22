@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { resolveOrganizationId } from '../tracking.js';
 
 const router = Router();
 
@@ -10,15 +11,17 @@ router.use(authenticate, requireRole('STAFF', 'ADMIN'));
 router.get('/', async (req, res, next) => {
   try {
     const q = req.query.q?.toString().trim();
+    const organizationId = await resolveOrganizationId(prisma, req.user);
     const where = q
       ? {
+          organizationId,
           OR: [
             { displayName: { contains: q, mode: 'insensitive' } },
             { email: { contains: q, mode: 'insensitive' } },
             { phone: { contains: q } },
           ],
         }
-      : {};
+      : { organizationId };
 
     const customers = await prisma.customer.findMany({
       where,
@@ -42,8 +45,10 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid email format' });
     }
 
+    const organizationId = await resolveOrganizationId(prisma, req.user);
     const customer = await prisma.customer.create({
       data: {
+        organizationId,
         displayName: displayName.trim(),
         email: email?.trim().toLowerCase() || null,
         phone: phone?.trim() || null,

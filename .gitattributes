@@ -1,0 +1,2 @@
+# Preserve generated PDF documents as binary assets.
+*.pdf binary

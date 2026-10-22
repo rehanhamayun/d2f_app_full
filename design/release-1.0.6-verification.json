@@ -1,0 +1,46 @@
+{
+  "version": "1.0.6",
+  "backendDeployment": "2f119b9d-3c09-4611-8704-802be352dd4e",
+  "deploymentStatus": "SUCCESS",
+  "backendTestsPassed": 27,
+  "flutterTestsPassed": 59,
+  "analyzerErrors": 0,
+  "analyzerWarnings": 0,
+  "existingAnalyzerInfo": 9,
+  "liveApiChecksPassed": true,
+  "liveAllocationRollbackCheckPassed": true,
+  "backendArchive": "build/deliverables/d2f-backend-1.0.6.tar.gz",
+  "backendArchiveSha256": "4c0a42dd49a11210477fad52fe9bcfa1aeb497e1702896c0ac3981e9a3f9fadd",
+  "signupPreview": "design/verification-auth/03-join-d2f.png",
+  "signupArtwork": "assets/images/signup_shipping.png",
+  "artworkPrompt": "design/signup-artwork.md",
+  "apks": [
+    {
+      "apk": "build/deliverables/d2f-1.0.6-arm64-v8a.apk",
+      "bytes": 40048076,
+      "sha256": "9fd1aa48ff9c4347b2defe4dbd17843be63e231c15bfebdf6d7df3baf65a9a98",
+      "signerMatchesPreviousRelease": true,
+      "newSignupArtworkBundled": true,
+      "versionName": "1.0.6",
+      "versionCode": 4010
+    },
+    {
+      "apk": "build/deliverables/d2f-1.0.6-armeabi-v7a.apk",
+      "bytes": 36343868,
+      "sha256": "0ea86b18465ddc2e7955e195c00b12c196e2aa54292d8945b35adafa67f4b158",
+      "signerMatchesPreviousRelease": true,
+      "newSignupArtworkBundled": true,
+      "versionName": "1.0.6",
+      "versionCode": 3010
+    },
+    {
+      "apk": "build/deliverables/d2f-1.0.6-x86_64.apk",
+      "bytes": 42587594,
+      "sha256": "e87acd573d2fe886b0ae954b13c605a99f69a0ba69ecdc689da5f13bb6243071",
+      "signerMatchesPreviousRelease": true,
+      "newSignupArtworkBundled": true,
+      "versionName": "1.0.6",
+      "versionCode": 6010
+    }
+  ]
+}

@@ -12,24 +12,46 @@ datasource db {
 
 // Organizations: D2F and permitted partner orgs (future SaaS-ready)
 model Organization {
-  id        String   @id @default(uuid())
-  name      String
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  users     User[]
-  locations Location[]
+  id              String     @id @default(uuid())
+  name            String
+  trackingPrefix  String     @unique
+  trackingCounter BigInt     @default(1)
+  isActive        Boolean    @default(true)
+  createdAt       DateTime   @default(now())
+  users           User[]
+  locations       Location[]
+  customers       Customer[]
+  parcels         Parcel[]
+}
+
+// These identity reservations intentionally outlive deleted organizations/parcels.
+// Database triggers make them append-only; they contain no customer details.
+model TrackingPrefixReservation {
+  prefix         String   @id
+  organizationId String   @unique
+  createdAt      DateTime @default(now())
+}
+
+model TrackingNumberReservation {
+  trackingId       String   @id
+  parcelId         String   @unique
+  organizationId   String
+  trackingSequence BigInt?
+  createdAt        DateTime @default(now())
+
+  @@unique([organizationId, trackingSequence])
 }
 
 // Locations: Omaha warehouse, Lomé facility, etc.
 model Location {
-  id             String       @id @default(uuid())
+  id             String   @id @default(uuid())
   organizationId String
   name           String
   code           String // e.g. OMA-1, LOME-1
   city           String?
   country        String?
-  timezone       String       @default("America/Chicago")
-  createdAt      DateTime     @default(now())
+  timezone       String   @default("America/Chicago")
+  createdAt      DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id])
   users        User[]
@@ -48,26 +70,26 @@ enum Role {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String
-  fullName     String
-  phone        String?
-  role         Role     @default(CUSTOMER)
-  authVersion  Int      @default(0)
+  id             String   @id @default(uuid())
+  email          String   @unique
+  passwordHash   String
+  fullName       String
+  phone          String?
+  role           Role     @default(CUSTOMER)
+  authVersion    Int      @default(0)
   organizationId String?
-  locationId   String?
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
+  locationId     String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
 
   organization Organization? @relation(fields: [organizationId], references: [id])
   location     Location?     @relation(fields: [locationId], references: [id])
 
-  parcelsCreated Parcel[] @relation("parcelsCreatedBy")
-  customerProfile Customer?
-  events         TrackingEvent[]
+  parcelsCreated   Parcel[]         @relation("parcelsCreatedBy")
+  customerProfile  Customer?
+  events           TrackingEvent[]
   socialIdentities SocialIdentity[]
-  passwordResets PasswordReset[]
+  passwordResets   PasswordReset[]
 }
 
 model SocialIdentity {
@@ -75,84 +97,96 @@ model SocialIdentity {
   provider String
   subject  String
   userId   String
-  user     User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@unique([provider, subject])
 }
 
 model PasswordReset {
-  id          String @id @default(uuid())
+  id          String   @id @default(uuid())
   userId      String?
-  user        User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   codeHash    String
   authVersion Int
-  attempts    Int @default(0)
+  attempts    Int      @default(0)
   expiresAt   DateTime
+
   @@index([expiresAt])
 }
 
 // The browser callback and the app's polling request may hit different replicas.
 model SocialLoginFlow {
-  id         String @id @default(uuid())
+  id         String   @id @default(uuid())
   provider   String
   secretHash String
-  stateHash  String @unique
+  stateHash  String   @unique
   nonce      String
   verifier   String
-  status     String @default("pending")
+  status     String   @default("pending")
   userId     String?
   error      String?
   expiresAt  DateTime
+
   @@index([expiresAt])
 }
 
 // Customers: shipping/billing identity associated with parcels
 model Customer {
-  id          String   @id @default(uuid())
-  userId      String?  @unique
-  displayName String
-  email       String?
-  phone       String?
-  address     String?
-  city        String?
-  country     String?
-  createdAt   DateTime @default(now())
+  id             String   @id @default(uuid())
+  userId         String?  @unique
+  organizationId String?
+  displayName    String
+  email          String?
+  phone          String?
+  address        String?
+  city           String?
+  country        String?
+  createdAt      DateTime @default(now())
 
-  user    User? @relation(fields: [userId], references: [id], onDelete: SetNull)
-  parcels Parcel[]
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  parcels      Parcel[]
 }
 
 // Parcels: permanent UUID + public tracking ID
 model Parcel {
-  id           String   @id @default(uuid()) // permanent internal UUID
-  trackingId   String   @unique // public D2F tracking ID (D2F-YYYY-NNNNNN)
-  customerId   String // shipper
-  recipientName String
-  recipientPhone String?
+  id               String   @id @default(uuid()) // permanent internal UUID
+  trackingId       String   @unique // immutable, globally unique public tracking ID
+  organizationId   String
+  trackingSequence BigInt?
+  customerId       String // shipper
+  recipientName    String
+  recipientPhone   String?
   recipientAddress String?
-  packageType  String // BOX, BARREL, TV, APPLIANCE, FURNITURE, PALLET, VEHICLE...
-  weightKg     Float
-  origin       String
-  destination  String
-  method       String   @default("SEA") // AIR | SEA | ROAD
-  notes        String?
-  status       String   @default("RECEIVED")
-  createdById  String
-  locationId   String?
-  clientRequestId String? @unique // idempotency key: guards duplicate submissions on retry
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  packageType      String // BOX, BARREL, TV, APPLIANCE, FURNITURE, PALLET, VEHICLE...
+  weightKg         Float
+  origin           String
+  destination      String
+  method           String   @default("SEA") // AIR | SEA | ROAD
+  notes            String?
+  status           String   @default("RECEIVED")
+  createdById      String
+  locationId       String?
+  clientRequestId  String? // retry keys belong to the organization that issued them
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  customer   Customer        @relation(fields: [customerId], references: [id])
-  createdBy  User            @relation("parcelsCreatedBy", fields: [createdById], references: [id])
-  location   Location?       @relation(fields: [locationId], references: [id])
-  events     TrackingEvent[] @relation("parcelEvents")
+  organization  Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer      Customer        @relation(fields: [customerId], references: [id])
+  createdBy     User            @relation("parcelsCreatedBy", fields: [createdById], references: [id])
+  location      Location?       @relation(fields: [locationId], references: [id])
+  events        TrackingEvent[] @relation("parcelEvents")
   trackingIndex TrackingIndex?
+
+  @@unique([organizationId, trackingSequence])
+  @@unique([organizationId, clientRequestId])
+  @@index([organizationId, createdAt])
 }
 
 // trackingIndex equivalent: unique public tracking ID lookup + QR payload
 model TrackingIndex {
-  trackingId String @id
-  parcelId   String @unique
+  trackingId String   @id
+  parcelId   String   @unique
   createdAt  DateTime @default(now())
 
   parcel Parcel @relation(fields: [parcelId], references: [id])

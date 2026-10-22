@@ -15,6 +15,9 @@ import { authRateLimit } from './middleware/auth_rate_limit.js';
 
 const app = express();
 app.set('trust proxy', 1);
+app.set('json replacer', (_key, value) =>
+  typeof value === 'bigint' ? value.toString() : value,
+);
 const allowedOrigins = (process.env.CORS_ORIGINS || '')
   .split(',')
   .map((origin) => origin.trim())
@@ -55,8 +58,8 @@ app.use('/admin', adminRouter);
 // details, internal notes, actor identity, or the staff parcel record.
 app.get('/tracking/:trackingId', authenticate, authRateLimit(60), async (req, res, next) => {
   try {
-    if (!/^D2F-\d{4}-\d{6}$/.test(req.params.trackingId)) {
-      return res.status(400).json({ error: 'Enter a valid D2F tracking number.' });
+    if (!/^(?:[A-Z0-9]{3,5}(?:\d{12}|\d{15})|D2F-\d{4}-\d{6})$/.test(req.params.trackingId)) {
+      return res.status(400).json({ error: 'Enter a valid tracking number.' });
     }
     const parcel = await prisma.parcel.findUnique({ where: { trackingId: req.params.trackingId },
       select: { trackingId: true, status: true, method: true,

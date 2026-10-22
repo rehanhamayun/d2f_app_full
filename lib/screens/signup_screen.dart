@@ -198,18 +198,6 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                               : Stack(
                                   fit: StackFit.expand,
                                   children: [
-                                    ColoredBox(
-                                      color: authCanvas,
-                                      child: Align(
-                                        alignment: Alignment.centerRight,
-                                        child: Image.asset(
-                                          'assets/images/login.jpg',
-                                          width: 160,
-                                          fit: BoxFit.contain,
-                                          excludeFromSemantics: true,
-                                        ),
-                                      ),
-                                    ),
                                     Positioned(
                                       top:
                                           MediaQuery.paddingOf(context).top + 6,
@@ -238,32 +226,64 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                                     ),
                                     Positioned(
                                       left: 24,
-                                      right: 115,
-                                      bottom: 42,
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
+                                      right: 16,
+                                      top:
+                                          MediaQuery.paddingOf(context).top +
+                                          58,
+                                      bottom: 30,
+                                      child: Row(
                                         children: [
-                                          const Text(
-                                            'Join D2F',
-                                            style: TextStyle(
-                                              color: authNavy,
-                                              fontSize: 28,
-                                              fontWeight: FontWeight.w800,
-                                              letterSpacing: -.8,
+                                          Expanded(
+                                            flex: 6,
+                                            child: Column(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                const Flexible(
+                                                  child: FittedBox(
+                                                    fit: BoxFit.scaleDown,
+                                                    alignment:
+                                                        Alignment.centerLeft,
+                                                    child: Text(
+                                                      'Join D2F',
+                                                      style: TextStyle(
+                                                        color: authNavy,
+                                                        fontSize: 28,
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                        letterSpacing: -.8,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                                if (heroHeight > 150) ...[
+                                                  const SizedBox(height: 8),
+                                                  const Text(
+                                                    'Your next shipment\nstarts here.',
+                                                    style: TextStyle(
+                                                      color: authMuted,
+                                                      fontSize: 13,
+                                                      height: 1.45,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ],
                                             ),
                                           ),
-                                          if (heroHeight > 150) ...[
-                                            const SizedBox(height: 4),
-                                            const Text(
-                                              'Create your account and\nstart shipping with ease.',
-                                              style: TextStyle(
-                                                color: authMuted,
-                                                fontSize: 14,
-                                                height: 1.45,
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            flex: 5,
+                                            child: Image.asset(
+                                              'assets/images/signup_shipping.png',
+                                              key: const ValueKey(
+                                                'signup-artwork',
                                               ),
+                                              fit: BoxFit.contain,
+                                              excludeFromSemantics: true,
                                             ),
-                                          ],
+                                          ),
                                         ],
                                       ),
                                     ),

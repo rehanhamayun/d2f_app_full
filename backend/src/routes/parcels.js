@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
-import { generateTrackingId } from '../tracking.js';
+import { generateTrackingId, resolveOrganizationId } from '../tracking.js';
 
 const router = Router();
 
@@ -58,28 +58,50 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
       return res.status(400).json({ error: `packageType must be one of ${PACKAGE_TYPES.join(', ')}` });
     }
 
+    const organizationId = await resolveOrganizationId(prisma, req.user);
+
     // Idempotency: same clientRequestId returns the original record
     if (clientRequestId) {
-      const existing = await prisma.parcel.findUnique({ where: { clientRequestId } });
+      const existing = await prisma.parcel.findUnique({
+        where: { organizationId_clientRequestId: { organizationId, clientRequestId } },
+      });
       if (existing) {
+        if (existing.organizationId !== organizationId) {
+          return res.status(409).json({ error: 'This request identifier has already been used.' });
+        }
         return res.status(200).json(existing);
       }
     }
 
     const customer = await prisma.customer.findUnique({ where: { id: customerId } });
-    if (!customer) return res.status(404).json({ error: 'Customer not found' });
+    if (!customer || customer.organizationId !== organizationId) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
 
     let createdNew = true;
     const parcel = await prisma.$transaction(async (tx) => {
-      const trackingId = await generateTrackingId(tx);
-      // Recheck after acquiring the lock: concurrent retries may have committed.
+      // Retry keys and their locks are isolated to the owning organization.
       if (clientRequestId) {
-        const existing = await tx.parcel.findUnique({ where: { clientRequestId } });
-        if (existing) { createdNew = false; return existing; }
+        await tx.$executeRaw`
+          SELECT pg_advisory_xact_lock(hashtextextended(${`${organizationId}:${clientRequestId}`}, 0))
+        `;
+        const existing = await tx.parcel.findUnique({
+          where: { organizationId_clientRequestId: { organizationId, clientRequestId } },
+        });
+        if (existing) {
+          if (existing.organizationId !== organizationId) {
+            const conflict = new Error('This request identifier has already been used.');
+            conflict.status = 409;
+            throw conflict;
+          }
+          createdNew = false;
+          return existing;
+        }
       }
+      const tracking = await generateTrackingId(tx, organizationId);
       const created = await tx.parcel.create({
         data: {
-          trackingId,
+          ...tracking,
           customerId,
           recipientName: recipientName.trim(),
           recipientPhone: recipientPhone?.trim() || null,
@@ -99,7 +121,7 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
 
       // trackingIndex: public tracking ID → parcel lookup (QR payload source)
       await tx.trackingIndex.create({
-        data: { trackingId, parcelId: created.id },
+        data: { trackingId: tracking.trackingId, parcelId: created.id },
       });
 
       await tx.trackingEvent.create({
@@ -118,7 +140,7 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
           action: 'PARCEL_REGISTER',
           entity: 'Parcel',
           entityId: created.id,
-          detail: `trackingId=${trackingId}`,
+          detail: `trackingId=${tracking.trackingId}`,
         },
       });
 
@@ -135,7 +157,8 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
 router.get('/', async (req, res, next) => {
   try {
     const { status, q } = req.query;
-    const where = {};
+    const organizationId = await resolveOrganizationId(prisma, req.user);
+    const where = { organizationId };
 
     if (status && status !== 'ALL') {
       where.status = Array.isArray(status) ? { in: status } : status;
@@ -164,7 +187,12 @@ router.get('/', async (req, res, next) => {
 // GET /parcels/stats — chip counts for the list screen
 router.get('/stats', async (req, res, next) => {
   try {
-    const grouped = await prisma.parcel.groupBy({ by: ['status'], _count: { _all: true } });
+    const organizationId = await resolveOrganizationId(prisma, req.user);
+    const grouped = await prisma.parcel.groupBy({
+      by: ['status'],
+      where: { organizationId },
+      _count: { _all: true },
+    });
     const counts = {};
     for (const g of grouped) counts[g.status] = g._count._all;
     res.json(counts);
@@ -177,9 +205,14 @@ router.get('/stats', async (req, res, next) => {
 // Accepts either the internal UUID or the public tracking ID.
 router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
   try {
-    let parcel = await prisma.parcel.findUnique({ where: { id: req.params.id } });
+    const organizationId = await resolveOrganizationId(prisma, req.user);
+    let parcel = await prisma.parcel.findFirst({
+      where: { id: req.params.id, organizationId },
+    });
     if (!parcel) {
-      parcel = await prisma.parcel.findUnique({ where: { trackingId: req.params.id.toUpperCase() } });
+      parcel = await prisma.parcel.findFirst({
+        where: { trackingId: req.params.id.toUpperCase(), organizationId },
+      });
     }
     if (!parcel) return res.status(404).json({ error: 'Parcel not found' });
 
@@ -196,7 +229,7 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
 
     const event = await prisma.$transaction(async (tx) => {
       const updated = await tx.parcel.updateMany({
-        where: { id: parcel.id, status: parcel.status }, data: { status },
+        where: { id: parcel.id, organizationId, status: parcel.status }, data: { status },
       });
       if (updated.count !== 1) {
         const conflict = new Error('The parcel was updated by another request. Refresh and try again.');
@@ -224,9 +257,10 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
 router.get('/:idOrTracking', async (req, res, next) => {
   try {
     const { idOrTracking } = req.params;
+    const organizationId = await resolveOrganizationId(prisma, req.user);
 
-    let parcel = await prisma.parcel.findUnique({
-      where: { id: idOrTracking },
+    let parcel = await prisma.parcel.findFirst({
+      where: { id: idOrTracking, organizationId },
       include: {
         customer: { select: { id: true, displayName: true, email: true, phone: true } },
         events: { orderBy: { createdAt: 'asc' }, include: { actor: { select: { fullName: true } } } },
@@ -234,8 +268,8 @@ router.get('/:idOrTracking', async (req, res, next) => {
     });
 
     if (!parcel) {
-      parcel = await prisma.parcel.findUnique({
-        where: { trackingId: idOrTracking.toUpperCase() },
+      parcel = await prisma.parcel.findFirst({
+        where: { trackingId: idOrTracking.toUpperCase(), organizationId },
         include: {
           customer: { select: { id: true, displayName: true, email: true, phone: true } },
           events: { orderBy: { createdAt: 'asc' }, include: { actor: { select: { fullName: true } } } },

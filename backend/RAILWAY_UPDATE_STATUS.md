@@ -2,9 +2,45 @@
 
 The production API is deployed and healthy.
 
+The permanent organization tracking architecture is live in deployment
+`2f119b9d-3c09-4611-8704-802be352dd4e` (`SUCCESS`). Startup confirmed that
+`20261022203000_organization_tracking_numbers` and
+`20261022210000_permanent_tracking_reservations` applied successfully. The active
+deployment has `sleepApplication: false`. A native database backup named
+`Before permanent tracking architecture 2026-10-22` was confirmed beforehand.
+
+New numbers use reserved organization prefixes and 12-digit isolated counters.
+Append-only reservations prevent reuse of tracking numbers, parcel UUIDs, and
+prefixes after deletion. Database triggers protect identities and counters;
+retry keys are scoped per organization. Legacy identifiers remain supported.
+See [tracking architecture](TRACKING_ARCHITECTURE.md).
+
+Live checks passed for health/database connectivity, registration configuration,
+staff login/session, dashboard counts, parcel/customer listing, role enforcement,
+12-digit and previous 15-digit lookup validation, and an existing legacy
+shipment's redacted tracking history. A production verification transaction also
+confirmed independent partner sequences, reservation creation, and counter
+advancement. Its temporary organizations/users/parcels/reservations were rolled
+back, and their absence was verified. No synthetic shipments were left behind.
+
+Release 1.0.6 (base Android build 2010) includes the new signup artwork and layout.
+All 27 backend tests and all 59 Flutter tests passed. The analyzer succeeds with
+nine existing informational style notices. The backend tests used an isolated
+PostgreSQL 16 database because the existing local Docker container reports a
+storage I/O error. The temporary database server was stopped after testing;
+the Docker database was not reset.
+
+Signed APKs are at `build/deliverables/d2f-1.0.6-{arm64-v8a,armeabi-v7a,x86_64}.apk`.
+Version codes, the embedded new artwork, and signature compatibility with 1.0.5
+were verified; hashes are in `build/deliverables/d2f-1.0.6-build.json`.
+Signup layout checks cover compact screens, enlarged text, and keyboard states.
+The reviewed screenshot is `design/verification-auth/03-join-d2f.png`.
+
+The notes below retain the earlier deployment history.
+
 The failed attempts are `8f8b04cb-a116-4bd9-a76b-944e25fc4aa2` (12:42 PKT) and
 `9d39cb24-a21b-4853-afb5-ff6385e9557b` (12:47 PKT). The original deployment
-`46441dab-3bec-484f-921d-f0ceb376f4a8` remains active. At 12:48 PKT, live staff
+`46441dab-3bec-484f-921d-f0ceb376f4a8` remained active during those attempts. At 12:48 PKT, live staff
 login, session lookup, dashboard counts, parcel listing and customer listing all
 returned HTTP 200. Warm health checks took 0.73–0.80 seconds; the first cold
 health request took 11.67 seconds. `/auth/config` still returns HTTP 404, so

@@ -2,6 +2,8 @@
 
 Android staff shipping app for D2F Shipping LLC, with a shared Express/Prisma/PostgreSQL backend. This build covers the Milestone 1 staff parcel foundation and the requested UI/label enhancements.
 
+Current Android release: **1.0.7+2011**, including the supplied D2F wordmark launcher icon and updated signup artwork. See [source and build guide](SOURCE_CODE.md) for the repository contents, local setup, and private configuration needed to reproduce a build.
+
 The app defaults to the live HTTPS backend at https://d2f-api-production.up.railway.app, hosted in **production_house**, Managing Consultant’s Railway Pro workspace. It works independently of this development computer. Private account details are in `.local/ACCESS_DETAILS.md` and must not be committed or included in an APK.
 
 ## Included
@@ -11,7 +13,7 @@ The app defaults to the live HTTPS backend at https://d2f-api-production.up.rail
 - Staff/admin sign-in, optional remembered sessions and profile name/contact updates. Roles and account email cannot be edited through the profile API.
 - Immediate Customer signup without email/SMS verification. Driver/Staff signup requires an administrator invitation. Separate role landing pages keep operational records restricted to Staff/Admin. Optional Google/Apple sign-in and password recovery are implemented; provider credentials and recovery email delivery require server configuration. See [authentication setup](backend/AUTH_SETUP.md).
 - Existing/new customer intake, recipient/route/package details, AIR/SEA/ROAD and notes.
-- Permanent parcel UUID and unique public tracking ID. Transactional registration prevents duplicate parcels on retries.
+- Permanent parcel UUID and globally unique public tracking ID. New IDs use each organization's reserved 3–5 character uppercase alphanumeric prefix and an isolated 12-digit sequence (for example, `D2F000000000001`). Database reservations retain issued numbers, UUIDs, and prefixes after record deletion. Allocation is transactional and retries are scoped to the organization. Existing tracking IDs remain valid. See [tracking architecture](backend/TRACKING_ARCHITECTURE.md).
 - QR/Code128 scanning, manual lookup, real event history with actor/location/time, and server-validated forward status updates.
 - 4×6 PDF label preview, Android document save, share and system print/reprint. Both codes use the existing saved tracking identity.
 - Marketplace (A) and Buy For Me (D) appear as **Coming soon**, as requested. Commerce workflows are not enabled.

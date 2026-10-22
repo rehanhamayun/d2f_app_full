@@ -1,0 +1,35 @@
+[
+  {
+    "apk": "build/deliverables/d2f-1.0.7-arm64-v8a.apk",
+    "versionName": "1.0.7",
+    "versionCode": 4011,
+    "bytes": 39874196,
+    "sha256": "93d801b1868d6f46bb1643f08fedb1d0bd6735d949f51119bf7728ae9af02cce",
+    "signerMatchesPreviousRelease": true,
+    "wordmarkLauncherIconBundled": true,
+    "signupArtworkBundled": true,
+    "productionApiBundled": true
+  },
+  {
+    "apk": "build/deliverables/d2f-1.0.7-armeabi-v7a.apk",
+    "versionName": "1.0.7",
+    "versionCode": 3011,
+    "bytes": 36169992,
+    "sha256": "42a57698aed51dc9d93eadd7a268411b9d3e5b4425da2301aa54c051ccf24b95",
+    "signerMatchesPreviousRelease": true,
+    "wordmarkLauncherIconBundled": true,
+    "signupArtworkBundled": true,
+    "productionApiBundled": true
+  },
+  {
+    "apk": "build/deliverables/d2f-1.0.7-x86_64.apk",
+    "versionName": "1.0.7",
+    "versionCode": 6011,
+    "bytes": 42413714,
+    "sha256": "f15bbb9e1b7e8da15f0e6ecb0d2fd37f353f3ac3d5eefa6826429bc2943dc2ea",
+    "signerMatchesPreviousRelease": true,
+    "wordmarkLauncherIconBundled": true,
+    "signupArtworkBundled": true,
+    "productionApiBundled": true
+  }
+]

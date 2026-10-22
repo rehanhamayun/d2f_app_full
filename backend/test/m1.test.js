@@ -24,7 +24,7 @@ test('M1: authentication, permissions, concurrent retries, tracking and history'
     const staff = await prisma.user.findUniqueOrThrow({where:{email:'staff@d2fshipping.com'}});
     const token = jwt.sign({id:staff.id,role:'STAFF',purpose:'session',ver:0},JWT_SECRET);
     const suffix = randomUUID();
-    customer = await prisma.customer.create({data:{displayName:`M1 automated QA ${suffix}`}});
+    customer = await prisma.customer.create({data:{organizationId:staff.organizationId,displayName:`M1 automated QA ${suffix}`}});
     const input = {customerId:customer.id,recipientName:'M1 isolated test recipient',packageType:'BOX',weightKg:2.5,
       origin:'Omaha, NE, USA',destination:'Lomé, Togo',method:'SEA',clientRequestId:`qa-${suffix}`};
 
@@ -63,7 +63,10 @@ test('M1: authentication, permissions, concurrent retries, tracking and history'
       const ids=new Set(results.map(r=>r.body.id));
       assert.equal(ids.size,1);
       parcel=results[0].body;createdParcels.push(parcel.id);
-      assert.match(parcel.id,/^[\da-f-]{36}$/i);assert.match(parcel.trackingId,/^D2F-\d{4}-\d{6}$/);
+      assert.match(parcel.id,/^[\da-f-]{36}$/i);assert.match(parcel.trackingId,/^D2F\d{12}$/);
+      assert.equal(parcel.organizationId,staff.organizationId);
+      assert.match(parcel.trackingSequence,/^\d+$/);
+      assert.ok(parcel.trackingId.endsWith(parcel.trackingSequence.padStart(12, '0')));
       assert.equal(await prisma.parcel.count({where:{clientRequestId:input.clientRequestId}}),1);
       const found=await request(`/parcels/${parcel.trackingId}`,{token});
       assert.equal(found.body.id,parcel.id);assert.equal(found.body.events.length,1);
@@ -73,6 +76,7 @@ test('M1: authentication, permissions, concurrent retries, tracking and history'
       const results=await Promise.all(Array.from({length:3},(_,i)=>request('/parcels',{token,method:'POST',data:{...input,clientRequestId:`qa-${suffix}-${i}`}})));
       for(const result of results) { assert.equal(result.status,201,JSON.stringify(result.body));createdParcels.push(result.body.id); }
       assert.equal(new Set(results.map(r=>r.body.trackingId)).size,3);
+      assert.ok(results.every((result) => /^D2F\d{12}$/.test(result.body.trackingId)));
     });
     await t.test('customer tracking exposes progress without operational or personal records',async()=>{
       const customerToken=jwt.sign({id:createdUsers[0],purpose:'session',ver:0},JWT_SECRET);

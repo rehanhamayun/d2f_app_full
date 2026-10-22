@@ -103,6 +103,21 @@ void main() {
               );
           // Text fields own horizontal scrolling; neither page scrolls vertically.
           expect(pageScrolls, isEmpty);
+          if (screen is SignupScreen && keyboard == 0) {
+            final art = tester.getRect(
+              find.byKey(const ValueKey('signup-artwork')),
+            );
+            final title = tester.getRect(find.text('Join D2F'));
+            expect(art.left, greaterThanOrEqualTo(title.right));
+            expect(art.right, lessThanOrEqualTo(dimensions.width));
+            expect(art.top, greaterThanOrEqualTo(0));
+            expect(
+              art.bottom,
+              lessThan(
+                tester.getTopLeft(find.byKey(const ValueKey('signup-name'))).dy,
+              ),
+            );
+          }
           expect(
             find.text(screen is SignupScreen ? 'Create Account' : 'Sign In'),
             findsOneWidget,
@@ -307,6 +322,7 @@ void main() {
             'auth_air.jpg',
             'auth_join.jpg',
             'auth_reference_map.png',
+            'signup_shipping.png',
           ])
             precacheImage(
               AssetImage('assets/images/$asset'),

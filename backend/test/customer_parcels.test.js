@@ -26,6 +26,7 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
   };
 
   try {
+    const organization = await prisma.organization.findFirstOrThrow();
     const customer = await prisma.user.create({
       data: {
         email: `customer-${suffix}@example.com`,
@@ -33,6 +34,7 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
         phone: '+22890123456',
         passwordHash: 'unused',
         role: 'CUSTOMER',
+        organizationId: organization.id,
       },
     });
     createdUsers.push(customer.id);
@@ -42,6 +44,7 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
         fullName: 'Other Customer',
         passwordHash: 'unused',
         role: 'CUSTOMER',
+        organizationId: organization.id,
       },
     });
     createdUsers.push(otherCustomer.id);
@@ -51,6 +54,7 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
         fullName: 'Customer Parcel Test Staff',
         passwordHash: 'unused',
         role: 'STAFF',
+        organizationId: organization.id,
       },
     });
     createdUsers.push(staff.id);
@@ -114,7 +118,7 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
     });
     assert.equal(created.status, 201, JSON.stringify(created.body));
     createdParcels.push(created.body.id);
-    assert.match(created.body.trackingId, /^D2F-\d{4}-\d{6}$/);
+    assert.match(created.body.trackingId, /^D2F\d{12}$/);
     assert.equal(created.body.status, 'REQUESTED');
     assert.equal(created.body.events.length, 1);
     assert.equal(created.body.events[0].status, 'REQUESTED');
@@ -126,6 +130,16 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
     assert.equal(linkedCustomer.displayName, customer.fullName);
     assert.equal(linkedCustomer.email, customer.email);
     assert.equal(linkedCustomer.phone, customer.phone);
+    assert.equal(linkedCustomer.organizationId, customer.organizationId);
+    const savedParcel = await prisma.parcel.findUniqueOrThrow({
+      where: { id: created.body.id },
+      select: { trackingSequence: true },
+    });
+    assert.ok(
+      created.body.trackingId.endsWith(
+        savedParcel.trackingSequence.toString().padStart(12, '0'),
+      ),
+    );
 
     const ownParcels = await request('/customer/parcels', {
       token: customerToken,

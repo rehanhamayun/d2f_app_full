@@ -652,7 +652,7 @@ void main() {
       await capture('03-customer-track');
       expect(find.text('Track a shipment'), findsOneWidget);
       expect(find.text('Update Status'), findsNothing);
-      expect(find.text('D2F-2026-000123'), findsOneWidget);
+      expect(find.text('D2F000000000001'), findsOneWidget);
 
       await tester.pumpWidget(
         wrap(

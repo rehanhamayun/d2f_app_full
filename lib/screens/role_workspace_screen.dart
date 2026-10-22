@@ -45,8 +45,12 @@ class _RoleWorkspaceScreenState extends ConsumerState<RoleWorkspaceScreen> {
 
   Future<void> _track() async {
     final code = _tracking.text.trim().toUpperCase();
-    if (!RegExp(r'^D2F-\d{4}-\d{6}$').hasMatch(code)) {
-      authMessage(context, 'Enter a tracking number like D2F-2026-000123.');
+    if (!RegExp(r'^(?:[A-Z0-9]{3,5}(?:\d{12}|\d{15})|D2F-\d{4}-\d{6})$')
+        .hasMatch(code)) {
+      authMessage(
+        context,
+        'Enter the tracking number shown on the shipment label.',
+      );
       return;
     }
     FocusScope.of(context).unfocus();
@@ -228,7 +232,7 @@ class _RoleWorkspaceScreenState extends ConsumerState<RoleWorkspaceScreen> {
       const SizedBox(height: 24),
       D2FSearchField(
         controller: _tracking,
-        hint: 'D2F-2026-000123',
+        hint: 'D2F000000000001',
         onSubmit: (_) => _track(),
       ),
       const SizedBox(height: 14),

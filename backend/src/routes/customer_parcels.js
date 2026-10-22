@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
-import { generateTrackingId } from '../tracking.js';
+import { generateTrackingId, resolveOrganizationId } from '../tracking.js';
 
 const router = Router();
 const packageTypes = [
@@ -131,29 +131,44 @@ router.post('/', async (req, res, next) => {
 
     let createdNew = true;
     const parcel = await prisma.$transaction(async (tx) => {
+      const linkedCustomer = await tx.customer.findUnique({
+        where: { userId: req.user.id },
+        select: { organizationId: true },
+      });
+      const organizationId = await resolveOrganizationId(tx, {
+        ...req.user,
+        organizationId: req.user.organizationId || linkedCustomer?.organizationId,
+      });
       const customer = await tx.customer.upsert({
         where: { userId: req.user.id },
         update: {
+          organizationId,
           displayName: req.user.fullName,
           email: req.user.email,
           phone: req.user.phone,
         },
         create: {
           userId: req.user.id,
+          organizationId,
           displayName: req.user.fullName,
           email: req.user.email,
           phone: req.user.phone,
         },
       });
 
-      const trackingId = await generateTrackingId(tx);
       if (clientRequestId) {
+        await tx.$executeRaw`
+          SELECT pg_advisory_xact_lock(hashtextextended(${`${organizationId}:${clientRequestId}`}, 0))
+        `;
         const existing = await tx.parcel.findUnique({
-          where: { clientRequestId },
+          where: { organizationId_clientRequestId: { organizationId, clientRequestId } },
           include: { customer: { select: { userId: true } } },
         });
         if (existing) {
-          if (existing.customer.userId !== req.user.id) {
+          if (
+            existing.customer.userId !== req.user.id ||
+            existing.organizationId !== organizationId
+          ) {
             const conflict = new Error('This request identifier has already been used.');
             conflict.status = 409;
             throw conflict;
@@ -166,9 +181,10 @@ router.post('/', async (req, res, next) => {
         }
       }
 
+      const tracking = await generateTrackingId(tx, organizationId);
       const created = await tx.parcel.create({
         data: {
-          trackingId,
+          ...tracking,
           customerId: customer.id,
           recipientName: recipientName.trim(),
           recipientPhone: recipientPhone?.trim() || null,
@@ -186,7 +202,7 @@ router.post('/', async (req, res, next) => {
       });
 
       await tx.trackingIndex.create({
-        data: { trackingId, parcelId: created.id },
+        data: { trackingId: tracking.trackingId, parcelId: created.id },
       });
       await tx.trackingEvent.create({
         data: {
@@ -203,7 +219,7 @@ router.post('/', async (req, res, next) => {
           action: 'CUSTOMER_PARCEL_REQUEST',
           entity: 'Parcel',
           entityId: created.id,
-          detail: `trackingId=${trackingId}`,
+          detail: `trackingId=${tracking.trackingId}`,
         },
       });
 

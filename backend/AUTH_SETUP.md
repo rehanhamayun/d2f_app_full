@@ -40,6 +40,16 @@ the repository change does not deploy the service by itself.
 - STAFF: invitation required; existing staff workspace and parcel operations.
 - ADMIN: existing provisioned administrators only; cannot be selected at signup.
 
+New parcel tracking numbers use the owning organization's reserved, unique
+uppercase 3–5 character alphanumeric prefix and an isolated 12-digit sequence (for example,
+`D2F000000000001`). The sequence is allocated atomically in the parcel creation
+transaction. Parcel UUIDs remain the permanent internal identifiers, existing
+tracking numbers remain unchanged, and public tracking continues to accept
+legacy D2F numbers.
+
+Permanent prefix/number reservations, immutable identities, and organization-scoped
+retry keys are enforced by database migrations. See [tracking architecture](TRACKING_ARCHITECTURE.md).
+
 An authenticated ADMIN can POST `/auth/invitations` with
 `{"email":"person@example.com","role":"STAFF"}` (or DRIVER). The response contains
 an invitation valid for seven days, bound to that exact email and role. Give it to
