@@ -15,7 +15,7 @@ class ApiException implements Exception {
 
 /// Singleton API client for the D2F backend.
 ///
-/// Base URL defaults to the Android-emulator host alias (10.0.2.2) and can be
+/// Base URL defaults to the hosted Railway API and can be
 /// overridden from the Account tab (useful when demoing on a physical phone
 /// against a LAN backend) or at build time via --dart-define=API_BASE_URL=...
 class Api {
@@ -93,11 +93,17 @@ class Api {
 
   Future<User?> restoreSession() async {
     if (_token == null || _token!.isEmpty) return null;
+    final restoringToken = _token;
     try {
       return await me();
+    } on ApiException catch (error) {
+      // A temporary outage must not erase a remembered login. Only the server
+      // rejecting this session can invalidate it, and never a newer sign-in.
+      if (error.statusCode == 401 && _token == restoringToken) {
+        await signOut();
+      }
+      return null;
     } catch (_) {
-      await _storage.delete(key: _tokenKey);
-      _token = null;
       return null;
     }
   }
@@ -324,6 +330,53 @@ class Api {
   }
 
   // ── Parcels ────────────────────────────────────────────────────────────────
+
+  Future<List<Parcel>> customerParcels() async {
+    try {
+      final res = await _dio!.get('/customer/parcels');
+      return (res.data as List)
+          .map((j) => Parcel.fromJson(j as Map<String, dynamic>))
+          .toList();
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Parcel> createCustomerParcel({
+    required String recipientName,
+    String? recipientPhone,
+    String? recipientAddress,
+    required String packageType,
+    required double weightKg,
+    required String origin,
+    required String destination,
+    required String method,
+    String? notes,
+    required String clientRequestId,
+  }) async {
+    try {
+      final res = await _dio!.post(
+        '/customer/parcels',
+        data: {
+          'recipientName': recipientName,
+          if (recipientPhone != null && recipientPhone.isNotEmpty)
+            'recipientPhone': recipientPhone,
+          if (recipientAddress != null && recipientAddress.isNotEmpty)
+            'recipientAddress': recipientAddress,
+          'packageType': packageType,
+          'weightKg': weightKg,
+          'origin': origin,
+          'destination': destination,
+          'method': method,
+          if (notes != null && notes.isNotEmpty) 'notes': notes,
+          'clientRequestId': clientRequestId,
+        },
+      );
+      return Parcel.fromJson(res.data as Map<String, dynamic>);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
 
   Future<List<Parcel>> parcels({String? q, String? status}) async {
     try {

@@ -20,7 +20,9 @@ curl https://d2f-api-production.up.railway.app/health
 
 The API health check confirms a database connection. To verify persistence, use a saved tracking ID after restarting the API. Do not run destructive reset/db-push commands against the hosted database.
 
-Resource ceilings: one API replica; API and database each 0.5 vCPU / 0.5 GB RAM. API sleeping is enabled. These are resource limits, not spending caps. Railway usage is metered under the existing Pro subscription.
+Resource ceilings: one API replica; API and database each 0.5 vCPU / 0.5 GB RAM. Keep API sleeping disabled (`sleepApplication: false`) to avoid cold-start delays during app login. These are resource limits, not spending caps. Railway usage is metered under the existing Pro subscription; keeping the API awake can increase usage.
+
+The no-sleep setting was saved on 22 October 2026. The running deployment still uses the old settings until a new deployment succeeds. See [the pending update status](RAILWAY_UPDATE_STATUS.md).
 
 
 Production seeds create authorized accounts/locations only. `SEED_DEMO_DATA` defaults off. Keep bootstrap passwords strong; seed upserts deliberately do not overwrite an existing account password.

@@ -64,6 +64,7 @@ model User {
   location     Location?     @relation(fields: [locationId], references: [id])
 
   parcelsCreated Parcel[] @relation("parcelsCreatedBy")
+  customerProfile Customer?
   events         TrackingEvent[]
   socialIdentities SocialIdentity[]
   passwordResets PasswordReset[]
@@ -107,6 +108,7 @@ model SocialLoginFlow {
 // Customers: shipping/billing identity associated with parcels
 model Customer {
   id          String   @id @default(uuid())
+  userId      String?  @unique
   displayName String
   email       String?
   phone       String?
@@ -115,6 +117,7 @@ model Customer {
   country     String?
   createdAt   DateTime @default(now())
 
+  user    User? @relation(fields: [userId], references: [id], onDelete: SetNull)
   parcels Parcel[]
 }
 

@@ -13,7 +13,7 @@ export async function authenticate(req, res, next) {
     const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
     if (payload.purpose !== 'session') return res.status(401).json({ error: 'Please sign in again.' });
     const user = await prisma.user.findUnique({ where: { id: payload.id }, select: {
-      id: true, email: true, role: true, fullName: true, organizationId: true, locationId: true, isActive: true, authVersion: true,
+      id: true, email: true, role: true, fullName: true, phone: true, organizationId: true, locationId: true, isActive: true, authVersion: true,
     } });
     if (!user?.isActive) return res.status(401).json({ error: 'Account disabled or not found' });
     if (payload.ver !== user.authVersion) return res.status(401).json({ error: 'Your session has expired. Please sign in again.' });

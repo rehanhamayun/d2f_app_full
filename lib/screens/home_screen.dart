@@ -81,6 +81,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
         ? 'Good afternoon'
         : 'Good evening';
     final compact = MediaQuery.sizeOf(context).width < 360;
+    final enlargedText = MediaQuery.textScalerOf(context).scale(1) > 1.15;
     return SafeArea(
       child: RefreshIndicator(
         onRefresh: _refresh,
@@ -217,7 +218,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
               ),
             const SizedBox(height: 22),
             SizedBox(
-              height: compact ? 176 : 184,
+              height: enlargedText ? 270 : (compact ? 176 : 184),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [

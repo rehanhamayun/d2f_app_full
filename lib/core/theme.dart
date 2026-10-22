@@ -50,6 +50,13 @@ class StatusVisual {
 
   static StatusVisual of(String status) {
     switch (status) {
+      case 'REQUESTED':
+        return const StatusVisual(
+          AppColors.goldSoft,
+          Color(0xFF9A7100),
+          AppColors.goldSoft,
+          AppColors.gold,
+        );
       case 'RECEIVED':
         return const StatusVisual(
           AppColors.coralSoft,

@@ -112,6 +112,33 @@ void main() {
     }
   }
 
+  testWidgets('signup text fields retain focus when tapped', (tester) async {
+    size(tester, const Size(390, 844));
+    await tester.pumpWidget(wrap(const SignupScreen()));
+    await tester.pumpAndSettle();
+
+    final nameField = find.descendant(
+      of: find.byKey(const ValueKey('signup-name')),
+      matching: find.byType(EditableText),
+    );
+    await tester.tap(nameField);
+    await tester.pump();
+
+    expect(tester.widget<EditableText>(nameField).focusNode.hasFocus, isTrue);
+    expect(
+      tester.testTextInput.log.map((call) => call.method),
+      contains('TextInput.show'),
+    );
+    tester.view.viewInsets = const FakeViewPadding(bottom: 320);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<EditableText>(nameField).focusNode.hasFocus,
+      isTrue,
+      reason: tester.testTextInput.log.map((call) => call.method).join(', '),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'swiping splash moves only artwork and retains both button bounds',
     (tester) async {

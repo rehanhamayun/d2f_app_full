@@ -18,6 +18,10 @@ The app defaults to the live HTTPS backend at https://d2f-api-production.up.rail
 
 See [MILESTONE_1_REVIEW.md](MILESTONE_1_REVIEW.md) for requirement mapping, validation and acceptance items. The existing Flutter/custom backend architecture differs from the original FlutterFlow/Firebase specification; the client’s written architecture decision still needs to be recorded.
 
+## Web Admin dashboard
+
+A separate responsive web Admin dashboard is in [admin-dashboard](admin-dashboard/README.md). It uses the same D2F API, supports live operations and team access management, and includes deployment configuration for Netlify and Cloudflare Pages. Deploy the updated backend before publishing the dashboard; see its README for setup and limitations.
+
 ## Run and build
 
 ```sh

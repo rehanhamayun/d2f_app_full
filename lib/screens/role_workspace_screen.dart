@@ -15,10 +15,18 @@ import '../models/models.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/auth_widgets.dart';
 import 'account_screen.dart';
+import 'customer_shipment_screen.dart';
 
 /// Customers and drivers never mount the staff shell or fetch staff records.
 class RoleWorkspaceScreen extends ConsumerStatefulWidget {
-  const RoleWorkspaceScreen({super.key});
+  final Future<List<Parcel>> Function()? loadCustomerParcels;
+  final CustomerShipmentCreator? createCustomerParcel;
+
+  const RoleWorkspaceScreen({
+    super.key,
+    this.loadCustomerParcels,
+    this.createCustomerParcel,
+  });
   @override
   ConsumerState<RoleWorkspaceScreen> createState() =>
       _RoleWorkspaceScreenState();
@@ -248,6 +256,18 @@ class _RoleWorkspaceScreenState extends ConsumerState<RoleWorkspaceScreen> {
       ),
       body: _section == 3
           ? AccountScreen(onTrack: () => _select(2), onShip: () => _select(1))
+          : !driver && _section == 1
+          ? CustomerShipmentScreen(
+              initialRoute:
+                  _plannedRoute ??
+                  const ShipmentRoute(
+                    origin: 'Omaha, NE, USA',
+                    destination: 'Lomé, Togo',
+                  ),
+              onRouteSelected: (route) => setState(() => _plannedRoute = route),
+              loadParcels: widget.loadCustomerParcels,
+              createParcel: widget.createCustomerParcel,
+            )
           : SafeArea(
               child: Center(
                 child: ConstrainedBox(

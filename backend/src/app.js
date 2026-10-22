@@ -4,16 +4,36 @@ import './config.js';
 import { prisma } from './db.js';
 import authRouter from './routes/auth.js';
 import parcelsRouter from './routes/parcels.js';
+import customerParcelsRouter from './routes/customer_parcels.js';
 import customersRouter from './routes/customers.js';
 import recoveryRouter from './routes/auth_recovery.js';
 import socialRouter from './routes/auth_social.js';
+import adminRouter from './routes/admin.js';
 import { authenticate } from './middleware/auth.js';
 import { authRateLimit } from './middleware/auth_rate_limit.js';
 
 
 const app = express();
 app.set('trust proxy', 1);
-app.use(cors());
+const allowedOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+app.use(
+  cors(
+    allowedOrigins.length
+      ? {
+          origin(origin, callback) {
+            if (!origin || allowedOrigins.includes(origin)) {
+              callback(null, true);
+            } else {
+              callback(null, false);
+            }
+          },
+        }
+      : undefined,
+  ),
+);
 app.disable('x-powered-by');
 app.use(express.json({ limit: '64kb' }));
 
@@ -30,6 +50,7 @@ app.get('/health', async (req, res) => {
 app.use('/auth', authRouter);
 app.use('/auth/password', recoveryRouter);
 app.use('/auth/social', socialRouter);
+app.use('/admin', adminRouter);
 // Tracking-number possession reveals progress only, never people, contact
 // details, internal notes, actor identity, or the staff parcel record.
 app.get('/tracking/:trackingId', authenticate, authRateLimit(60), async (req, res, next) => {
@@ -45,6 +66,7 @@ app.get('/tracking/:trackingId', authenticate, authRateLimit(60), async (req, re
   } catch (error) { next(error); }
 });
 app.use('/parcels', parcelsRouter);
+app.use('/customer/parcels', customerParcelsRouter);
 app.use('/customers', customersRouter);
 
 // 404

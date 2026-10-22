@@ -42,6 +42,7 @@ extension ShippingMethodX on ShippingMethod {
 
 /// Canonical M1 statuses (forward-only lifecycle, enforced server-side).
 const List<String> kParcelStatuses = [
+  'REQUESTED',
   'RECEIVED',
   'PROCESSING',
   'IN_TRANSIT',
@@ -51,6 +52,7 @@ const List<String> kParcelStatuses = [
 ];
 
 const Map<String, List<String>> kAllowedTransitions = {
+  'REQUESTED': ['RECEIVED'],
   'RECEIVED': ['PROCESSING', 'IN_TRANSIT'],
   'PROCESSING': ['IN_TRANSIT', 'ARRIVED_LOME'],
   'IN_TRANSIT': ['ARRIVED_LOME'],
@@ -60,6 +62,7 @@ const Map<String, List<String>> kAllowedTransitions = {
 };
 
 String statusLabel(String status) => switch (status) {
+  'REQUESTED' => 'Request Submitted',
   'RECEIVED' => 'Received',
   'PROCESSING' => 'Processing',
   'IN_TRANSIT' => 'In Transit',
@@ -71,6 +74,7 @@ String statusLabel(String status) => switch (status) {
 
 /// Compact chip labels for tight list rows.
 String statusShortLabel(String status) => switch (status) {
+  'REQUESTED' => 'Requested',
   'RECEIVED' => 'Received',
   'PROCESSING' => 'Processing',
   'IN_TRANSIT' => 'In Transit',
@@ -82,6 +86,7 @@ String statusShortLabel(String status) => switch (status) {
 
 /// Short operational sub-label shown under chips / list cards.
 String statusSubLabel(String status) => switch (status) {
+  'REQUESTED' => 'Awaiting D2F intake confirmation',
   'RECEIVED' => 'At warehouse (USA)',
   'PROCESSING' => 'Being prepared for shipment',
   'IN_TRANSIT' => 'On the way to West Africa',
@@ -93,6 +98,7 @@ String statusSubLabel(String status) => switch (status) {
 
 /// Friendly customer-safe headline for the detail header.
 String statusHeadline(String status) => switch (status) {
+  'REQUESTED' => 'Your shipment request is awaiting D2F intake confirmation.',
   'RECEIVED' => 'Your parcel is registered at our warehouse.',
   'PROCESSING' => 'Your parcel is being prepared for shipment.',
   'IN_TRANSIT' => 'Your package is on the way to West Africa. Arriving soon!',

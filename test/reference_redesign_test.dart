@@ -17,8 +17,10 @@ import 'package:d2f_application/screens/parcel_success_screen.dart';
 import 'package:d2f_application/screens/update_status_screen.dart';
 import 'package:d2f_application/screens/account_screen.dart';
 import 'package:d2f_application/screens/ship_screen.dart';
+import 'package:d2f_application/screens/customer_shipment_screen.dart';
 import 'package:d2f_application/widgets/d2f_navigation_bar.dart';
 import 'package:d2f_application/widgets/reference_widgets.dart';
+import 'package:d2f_application/widgets/customer_profile_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -249,7 +251,7 @@ void main() {
   });
 
   testWidgets(
-    'customer home follows the reference hierarchy and shipping methods open an enquiry',
+    'customer home follows the reference hierarchy and shipping methods prefill a shipment request',
     (tester) async {
       viewport(tester, const Size(390, 844));
       await tester.pumpWidget(
@@ -280,12 +282,16 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('home-method-sea')));
       await tester.pumpAndSettle();
       expect(find.text('Sea · Cost-effective'), findsOneWidget);
-      expect(find.text('Contact shipping team'), findsOneWidget);
+      expect(find.byType(CustomerShipmentScreen), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('customer-create-shipment')),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
     },
   );
 
-  testWidgets('customer destination chips prefill the shipment enquiry', (
+  testWidgets('customer destination chips prefill the shipment request', (
     tester,
   ) async {
     viewport(tester, const Size(390, 844));
@@ -305,7 +311,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Lomé, Togo'), findsOneWidget);
-    expect(find.text('Contact shipping team'), findsOneWidget);
+    expect(find.byType(CustomerShipmentScreen), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('customer-create-shipment')),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -428,9 +438,28 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text(parcel.trackingId), findsOneWidget);
+      final chipScroll = find.descendant(
+        of: find.byWidgetPredicate(
+          (widget) =>
+              widget is ListView && widget.scrollDirection == Axis.horizontal,
+        ),
+        matching: find.byType(Scrollable),
+      );
+      await tester.scrollUntilVisible(
+        find.text('Received (7)'),
+        100,
+        scrollable: chipScroll,
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Received (7)'));
       await tester.pumpAndSettle();
       expect(find.text(parcel.trackingId), findsNothing);
+      await tester.scrollUntilVisible(
+        find.text('All (27)'),
+        -100,
+        scrollable: chipScroll,
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.text('All (27)'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), parcel.trackingId);
@@ -574,6 +603,99 @@ void main() {
           image.dispose();
         });
       }
+    },
+  );
+
+  testWidgets(
+    'capture the customer ship, route, track, tracking detail and account screens',
+    (tester) async {
+      viewport(tester, const Size(390, 844));
+      final key = GlobalKey();
+      final directory = Directory('design/verification-customer')
+        ..createSync(recursive: true);
+
+      Future<void> capture(String name) async {
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull, reason: name);
+        final boundary =
+            key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+        await tester.runAsync(() async {
+          final image = await boundary.toImage(pixelRatio: 2);
+          final png = await image.toByteData(format: ui.ImageByteFormat.png);
+          File('${directory.path}/$name.png')
+              .writeAsBytesSync(png!.buffer.asUint8List());
+          image.dispose();
+        });
+      }
+
+      await tester.pumpWidget(
+        wrap(
+          const RoleWorkspaceScreen(),
+          role: UserRole.CUSTOMER,
+          boundary: key,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('nav-ship')));
+      await capture('01-customer-ship');
+      expect(find.text('Your next shipment'), findsOneWidget);
+      expect(find.byKey(const ValueKey('customer-route')), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('customer-route')));
+      await capture('02-customer-route-planner');
+      expect(find.text('Choose your route'), findsOneWidget);
+      expect(find.byKey(const ValueKey('route-use')), findsOneWidget);
+      await tester.tap(find.byTooltip('Close route planner'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('nav-activity')));
+      await capture('03-customer-track');
+      expect(find.text('Track a shipment'), findsOneWidget);
+      expect(find.text('Update Status'), findsNothing);
+      expect(find.text('D2F-2026-000123'), findsOneWidget);
+
+      await tester.pumpWidget(
+        wrap(
+          const PublicTrackingScreen(
+            shipment: {
+              'trackingId': 'D2F-2026-000125',
+              'status': 'IN_TRANSIT',
+              'method': 'AIR',
+              'events': [
+                {'status': 'RECEIVED', 'createdAt': '2026-10-18T09:00:00Z'},
+                {'status': 'IN_TRANSIT', 'createdAt': '2026-10-21T10:00:00Z'},
+              ],
+            },
+          ),
+          role: UserRole.CUSTOMER,
+          boundary: key,
+        ),
+      );
+      await capture('04-customer-tracking-details');
+      expect(find.text('D2F-2026-000125'), findsOneWidget);
+      expect(find.text('Update Status'), findsNothing);
+
+      await tester.pumpWidget(
+        wrap(
+          Scaffold(
+            body: CustomerProfileView(
+              user: testUser(UserRole.CUSTOMER),
+              connected: true,
+              onEdit: () {},
+              onSupport: () {},
+              onSignOut: () {},
+              onCheckConnection: () {},
+              onTrack: () {},
+              onShip: () {},
+            ),
+          ),
+          role: UserRole.CUSTOMER,
+          boundary: key,
+        ),
+      );
+      await capture('05-customer-account');
+      expect(find.text('CUSTOMER'), findsOneWidget);
+      expect(find.text('Your shipping tools'), findsOneWidget);
     },
   );
 }

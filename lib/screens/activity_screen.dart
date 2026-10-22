@@ -22,6 +22,7 @@ class ActivityScreenState extends State<ActivityScreen> {
 
   static const chips = <(String, String)>[
     ('ALL', 'All'),
+    ('REQUESTED', 'Requested'),
     ('RECEIVED', 'Received'),
     ('PROCESSING', 'Processing'),
     ('IN_TRANSIT', 'In Transit'),
@@ -313,6 +314,7 @@ class ActivityScreenState extends State<ActivityScreen> {
   }
 
   IconData _iconFor(Parcel p) => switch (p.status) {
+    'REQUESTED' => Icons.assignment_outlined,
     'RECEIVED' => Icons.inventory_2_outlined,
     'PROCESSING' => Icons.settings_outlined,
     'IN_TRANSIT' => Icons.local_shipping_outlined,

@@ -12,6 +12,7 @@ const METHODS = ['AIR', 'SEA', 'ROAD'];
 // Forward-only transitions per the ocean lifecycle
 // (registered → processing → in transit → arrived → ready → delivered)
 const TRANSITIONS = {
+  REQUESTED: ['RECEIVED'],
   RECEIVED: ['PROCESSING', 'IN_TRANSIT'],
   PROCESSING: ['IN_TRANSIT', 'ARRIVED_LOME'],
   IN_TRANSIT: ['ARRIVED_LOME'],

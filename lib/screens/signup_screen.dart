@@ -191,83 +191,85 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                     final gap = keyboard ? 7.0 : 9.0;
                     return Column(
                       children: [
-                        if (!keyboard)
-                          SizedBox(
-                            height: heroHeight + 26,
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                ColoredBox(
-                                  color: authCanvas,
-                                  child: Align(
-                                    alignment: Alignment.centerRight,
-                                    child: Image.asset(
-                                      'assets/images/login.jpg',
-                                      width: 160,
-                                      fit: BoxFit.contain,
-                                      excludeFromSemantics: true,
+                        SizedBox(
+                          height: keyboard ? 0 : heroHeight + 26,
+                          child: keyboard
+                              ? null
+                              : Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    ColoredBox(
+                                      color: authCanvas,
+                                      child: Align(
+                                        alignment: Alignment.centerRight,
+                                        child: Image.asset(
+                                          'assets/images/login.jpg',
+                                          width: 160,
+                                          fit: BoxFit.contain,
+                                          excludeFromSemantics: true,
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                ),
-                                Positioned(
-                                  top: MediaQuery.paddingOf(context).top + 6,
-                                  left: 24,
-                                  right: 24,
-                                  child: Row(
-                                    children: [
-                                      const ShippingLogo(width: 155),
-                                      const Spacer(),
-                                      IconButton(
-                                        tooltip: 'Back to sign in',
-                                        onPressed: _loading
-                                            ? null
-                                            : widget.onBack ??
-                                                  () => Navigator.maybePop(
-                                                    context,
-                                                  ),
-                                        icon: const Icon(
-                                          Icons.arrow_back_rounded,
-                                          color: authNavy,
-                                          size: 20,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Positioned(
-                                  left: 24,
-                                  right: 115,
-                                  bottom: 42,
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const Text(
-                                        'Join D2F',
-                                        style: TextStyle(
-                                          color: authNavy,
-                                          fontSize: 28,
-                                          fontWeight: FontWeight.w800,
-                                          letterSpacing: -.8,
-                                        ),
-                                      ),
-                                      if (heroHeight > 150) ...[
-                                        const SizedBox(height: 4),
-                                        const Text(
-                                          'Create your account and\nstart shipping with ease.',
-                                          style: TextStyle(
-                                            color: authMuted,
-                                            fontSize: 14,
-                                            height: 1.45,
+                                    Positioned(
+                                      top:
+                                          MediaQuery.paddingOf(context).top + 6,
+                                      left: 24,
+                                      right: 24,
+                                      child: Row(
+                                        children: [
+                                          const ShippingLogo(width: 155),
+                                          const Spacer(),
+                                          IconButton(
+                                            tooltip: 'Back to sign in',
+                                            onPressed: _loading
+                                                ? null
+                                                : widget.onBack ??
+                                                      () => Navigator.maybePop(
+                                                        context,
+                                                      ),
+                                            icon: const Icon(
+                                              Icons.arrow_back_rounded,
+                                              color: authNavy,
+                                              size: 20,
+                                            ),
                                           ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
+                                        ],
+                                      ),
+                                    ),
+                                    Positioned(
+                                      left: 24,
+                                      right: 115,
+                                      bottom: 42,
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          const Text(
+                                            'Join D2F',
+                                            style: TextStyle(
+                                              color: authNavy,
+                                              fontSize: 28,
+                                              fontWeight: FontWeight.w800,
+                                              letterSpacing: -.8,
+                                            ),
+                                          ),
+                                          if (heroHeight > 150) ...[
+                                            const SizedBox(height: 4),
+                                            const Text(
+                                              'Create your account and\nstart shipping with ease.',
+                                              style: TextStyle(
+                                                color: authMuted,
+                                                fontSize: 14,
+                                                height: 1.45,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
-                          ),
+                        ),
                         Expanded(
                           child: Transform.translate(
                             offset: Offset(0, keyboard ? 0 : -26),
@@ -275,7 +277,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                               alignment: Alignment.topCenter,
                               maxHeight: keyboard ? null : height - heroHeight,
                               child: Container(
-                                height: keyboard ? null : height - heroHeight,
+                                height: keyboard ? height : height - heroHeight,
                                 decoration: const BoxDecoration(
                                   gradient: LinearGradient(
                                     begin: Alignment.topLeft,
@@ -305,42 +307,46 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                                     crossAxisAlignment:
                                         CrossAxisAlignment.stretch,
                                     children: [
-                                      if (keyboard)
-                                        SizedBox(
-                                          height: 30,
-                                          child: Row(
-                                            children: [
-                                              IconButton(
-                                                tooltip: 'Hide keyboard',
-                                                padding: EdgeInsets.zero,
-                                                alignment: Alignment.centerLeft,
-                                                onPressed: () =>
-                                                    FocusScope.of(context)
-                                                        .unfocus(),
-                                                icon: const Icon(
-                                                  Icons
-                                                      .keyboard_arrow_down_rounded,
-                                                  color: authNavy,
-                                                ),
+                                      SizedBox(
+                                        height: keyboard ? 30 : 99,
+                                        child: keyboard
+                                            ? Row(
+                                                children: [
+                                                  IconButton(
+                                                    tooltip: 'Hide keyboard',
+                                                    padding: EdgeInsets.zero,
+                                                    alignment:
+                                                        Alignment.centerLeft,
+                                                    onPressed: () =>
+                                                        FocusScope.of(context)
+                                                            .unfocus(),
+                                                    icon: const Icon(
+                                                      Icons
+                                                          .keyboard_arrow_down_rounded,
+                                                      color: authNavy,
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    'Join D2F · ${_role == UserRole.CUSTOMER
+                                                        ? 'Customer'
+                                                        : _role == UserRole.DRIVER
+                                                        ? 'Driver'
+                                                        : 'Staff'}',
+                                                    style: const TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      color: authNavy,
+                                                    ),
+                                                  ),
+                                                ],
+                                              )
+                                            : Column(
+                                                children: [
+                                                  _roles(),
+                                                  const SizedBox(height: 17),
+                                                ],
                                               ),
-                                              Text(
-                                                'Join D2F · ${_role == UserRole.CUSTOMER
-                                                    ? 'Customer'
-                                                    : _role == UserRole.DRIVER
-                                                    ? 'Driver'
-                                                    : 'Staff'}',
-                                                style: const TextStyle(
-                                                  fontWeight: FontWeight.w800,
-                                                  color: authNavy,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        )
-                                      else ...[
-                                        _roles(),
-                                        const SizedBox(height: 17),
-                                      ],
+                                      ),
                                       AuthInput(
                                         key: const ValueKey('signup-name'),
                                         controller: _name,

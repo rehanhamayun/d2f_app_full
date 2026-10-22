@@ -10,10 +10,11 @@ Only email/phone format, password length and password confirmation are checked.
 ## Apply the backend update
 
 Run `npx prisma generate` and `npx prisma migrate deploy` from `backend/` before
-starting the updated API. The additive migration creates the recovery and social
-identity tables, adds a session version, and changes the default role to CUSTOMER.
-Existing accounts and parcel records retain their roles and data. Existing sessions
-must sign in once again because session tokens now have an explicit purpose.
+starting the updated API. The additive migrations create the recovery and social
+identity tables, add a session version, change the default role to CUSTOMER, and
+link a customer profile to its app account. Existing accounts and parcel records
+retain their roles and data. Existing sessions must sign in once again because
+session tokens now have an explicit purpose.
 
 For a development database originally created with `prisma db push`, first verify
 that its schema matches the original migration, then baseline it with
@@ -26,9 +27,13 @@ the repository change does not deploy the service by itself.
 
 ## Role policy
 
-- CUSTOMER: public signup; redacted tracking progress and account/profile access.
-  Booking enquiries open the D2F support email. No operational lists, names,
-  addresses, internal notes, or parcel editing are exposed.
+- CUSTOMER: public signup; can submit shipment requests through
+  `POST /customer/parcels` and list only their own requests through
+  `GET /customer/parcels`. The server links the shipper profile to the signed-in
+  account and ignores client-supplied customer IDs. A request receives a tracking
+  ID immediately and starts at `REQUESTED`; only staff can confirm physical intake
+  by moving it to `RECEIVED`. Customer views exclude internal notes and staff-only
+  actions. Customers also retain public, redacted tracking and account access.
 - DRIVER: invitation required; driver landing page, tracking and profile access.
   The existing project has no assignment model, so the landing page directs the
   driver to their dispatcher. This update does not invent delivery assignments.
