@@ -60,36 +60,51 @@ void main() {
           wrap(SplashScreen(onSkip: () {}, onCreateAccount: () {})),
         );
         await tester.pumpAndSettle();
-        final title = find.text('Bridging distances.\nBringing people closer.');
-        final titleBounds = tester.getRect(title);
-        final createBounds = tester.getRect(
-          find.byKey(const ValueKey('splash-create-account')),
-        );
-        final signInBounds = tester.getRect(
-          find.byKey(const ValueKey('splash-sign-in')),
-        );
+        // Every welcome page keeps the CTA block fixed while the story text
+        // swaps to match the artwork being shown.
+        const createAccount = ValueKey('splash-create-account');
+        const signIn = ValueKey('splash-sign-in');
+        final createBounds = tester.getRect(find.byKey(createAccount));
+        final signInBounds = tester.getRect(find.byKey(signIn));
         for (final step in [
-          (-280.0, 'Background 2 of 3'),
-          (-280.0, 'Background 3 of 3'),
-          (280.0, 'Background 2 of 3'),
-          (280.0, 'Background 1 of 3'),
+          (
+            'Bridging distances.\nBringing people closer.',
+            -280.0,
+            'Background 2 of 3',
+            'Register and label\nevery shipment.',
+          ),
+          (
+            'Register and label\nevery shipment.',
+            -280.0,
+            'Background 3 of 3',
+            'Track each parcel\nuntil it arrives.',
+          ),
+          (
+            'Track each parcel\nuntil it arrives.',
+            280.0,
+            'Background 2 of 3',
+            'Register and label\nevery shipment.',
+          ),
+          (
+            'Register and label\nevery shipment.',
+            280.0,
+            'Background 1 of 3',
+            'Bridging distances.\nBringing people closer.',
+          ),
         ]) {
-          final start = Offset(step.$1 < 0 ? 330 : 55, titleBounds.center.dy);
+          final start = Offset(
+            step.$2 < 0 ? 330 : 55,
+            tester.getRect(find.text(step.$1)).center.dy,
+          );
           final gesture = await tester.startGesture(start, kind: kind);
-          await gesture.moveBy(Offset(step.$1, 0));
+          await gesture.moveBy(Offset(step.$2, 0));
           await gesture.up();
           await tester.pumpAndSettle();
-          final semantics = tester.getSemantics(find.bySemanticsLabel(step.$2));
+          final semantics = tester.getSemantics(find.bySemanticsLabel(step.$3));
           expect(semantics.flagsCollection.isSelected, ui.Tristate.isTrue);
-          expect(tester.getRect(title), titleBounds);
-          expect(
-            tester.getRect(find.byKey(const ValueKey('splash-create-account'))),
-            createBounds,
-          );
-          expect(
-            tester.getRect(find.byKey(const ValueKey('splash-sign-in'))),
-            signInBounds,
-          );
+          expect(find.text(step.$4), findsOneWidget);
+          expect(tester.getRect(find.byKey(createAccount)), createBounds);
+          expect(tester.getRect(find.byKey(signIn)), signInBounds);
         }
         expect(tester.takeException(), isNull);
       },

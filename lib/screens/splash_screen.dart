@@ -109,20 +109,50 @@ class _SplashScreenState extends State<SplashScreen> {
                                 ),
                               ),
                             const Spacer(),
-                            const IgnorePointer(
-                              child: Text(
-                                'Bridging distances.\nBringing people closer.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: AppColors.navy,
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: -1.2,
-                                  height: 1.25,
+                            // Each page tells its own story: identity,
+                            // registration, tracking — synced to the artwork.
+                            IgnorePointer(
+                              child: AnimatedSwitcher(
+                                key: const ValueKey('splash-stories'),
+                                duration: const Duration(milliseconds: 280),
+                                switchInCurve: Curves.easeOutCubic,
+                                switchOutCurve: Curves.easeIn,
+                                child: Column(
+                                  key: ValueKey('splash-story-$_page'),
+                                  children: [
+                                    Text(
+                                      const [
+                                        'Bridging distances.\nBringing people closer.',
+                                        'Register and label\nevery shipment.',
+                                        'Track each parcel\nuntil it arrives.',
+                                      ][_page],
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        color: AppColors.navy,
+                                        fontSize: 26,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: -1.1,
+                                        height: 1.25,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      const [
+                                        'USA & Europe ↔ West Africa',
+                                        'Instant tracking IDs, QR codes and labels.',
+                                        'Printed-code scanning keeps history at hand.',
+                                      ][_page],
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        color: AppColors.textGrey,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 10),
                             const IgnorePointer(
                               child: Center(
                                 child: SizedBox(
@@ -136,18 +166,6 @@ class _SplashScreenState extends State<SplashScreen> {
                                       ),
                                     ),
                                   ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 13),
-                            const IgnorePointer(
-                              child: Text(
-                                'USA & Europe ↔ West Africa',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: AppColors.textGrey,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
                             ),
