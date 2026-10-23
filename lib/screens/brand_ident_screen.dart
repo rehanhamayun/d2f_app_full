@@ -34,7 +34,7 @@ class _BrandIdentScreenState extends State<BrandIdentScreen>
     super.initState();
     _entrance = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 2400),
+      duration: const Duration(milliseconds: 2000),
     )..forward();
     _flight = AnimationController(
       vsync: this,
@@ -44,31 +44,31 @@ class _BrandIdentScreenState extends State<BrandIdentScreen>
     _wordmark = Tween(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _entrance,
-        curve: const Interval(0.0, 0.38, curve: Curves.easeOutBack),
+        curve: const Interval(0.0, 0.42, curve: Curves.easeOutBack),
       ),
     );
     _art = Tween(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _entrance,
-        curve: const Interval(0.22, 0.72, curve: Curves.easeOut),
+        curve: const Interval(0.18, 0.66, curve: Curves.easeOut),
       ),
     );
     _tagline = Tween(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _entrance,
-        curve: const Interval(0.52, 0.86, curve: Curves.easeOut),
+        curve: const Interval(0.45, 0.82, curve: Curves.easeOut),
       ),
     );
     _underline = Tween(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _entrance,
-        curve: const Interval(0.68, 0.95, curve: Curves.easeOutCubic),
+        curve: const Interval(0.60, 0.93, curve: Curves.easeOutCubic),
       ),
     );
     _controls = Tween(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _entrance,
-        curve: const Interval(0.82, 1.0, curve: Curves.easeOut),
+        curve: const Interval(0.76, 1.0, curve: Curves.easeOut),
       ),
     );
   }
