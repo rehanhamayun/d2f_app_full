@@ -63,3 +63,23 @@ android/local.properties
 android/key.properties
 *.jks
 *.keystore
+
+# Repository publishing exclusions
+*.[mM][dD]
+*.[mM][aA][rR][kK][dD][oO][wW][nN]
+*.[mM][dD][xX]
+/design/*
+!/design/02_D2F_Wordmark.png
+/output/
+/assets/references/
+.agents/
+.codex/
+.claude/
+.cursor/
+.aider/
+.cursorrules
+.windsurfrules
+.aider*
+.github/copilot-instructions.*
+.github/prompts/
+.github/instructions/

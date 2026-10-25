@@ -72,6 +72,15 @@ class _FlagPainter extends CustomPainter {
         rect(0, 0, 30, 7, green);
         rect(0, 7, 30, 6, yellow);
         rect(0, 13, 30, 7, const Color(0xFF3568B8));
+      case 'Senegal':
+        rect(0, 0, 10, 20, green);
+        rect(10, 0, 10, 20, yellow);
+        rect(20, 0, 10, 20, red);
+        star(15, 10, 3.2, green);
+      case 'Belgium':
+        rect(0, 0, 10, 20, Colors.black);
+        rect(10, 0, 10, 20, yellow);
+        rect(20, 0, 10, 20, red);
       case 'Nigeria':
         rect(0, 0, 10, 20, green);
         rect(20, 0, 10, 20, green);

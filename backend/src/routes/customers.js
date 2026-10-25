@@ -1,3 +1,4 @@
+import { SERVICE_COUNTRIES } from '../service_area.js';
 import { Router } from 'express';
 import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
@@ -72,6 +73,34 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
   } catch (e) {
     next(e);
   }
+});
+
+// Admin edits the shipping profile; login credentials and roles are separate.
+router.patch('/:id', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const organizationId = await resolveOrganizationId(prisma, req.user);
+    const allowed = ['displayName', 'email', 'phone', 'address', 'city', 'country'];
+    const data = {};
+    for (const key of allowed) {
+      if (req.body?.[key] === undefined) continue;
+      const value = req.body[key];
+      if (typeof value !== 'string' || value.length > (key === 'address' ? 1000 : 200)) return res.status(400).json({ error: `Enter a valid ${key}.` });
+      data[key] = value.trim() || null;
+    }
+    if ('displayName' in data && !data.displayName) return res.status(400).json({ error: 'Customer name is required.' });
+    if (data.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(data.email)) return res.status(400).json({ error: 'Enter a valid email.' });
+    if (data.country && !SERVICE_COUNTRIES.includes(data.country)) return res.status(400).json({ error: 'Choose a supported country.' });
+    if (data.email) data.email = data.email.toLowerCase();
+    const customer = await prisma.$transaction(async tx => {
+      const existing = await tx.customer.findFirst({ where: { id: req.params.id, organizationId } });
+      if (!existing) return null;
+      const updated = await tx.customer.update({ where: { id: existing.id }, data });
+      await tx.auditLog.create({ data: { actorId: req.user.id, action: 'CUSTOMER_UPDATE', entity: 'Customer', entityId: existing.id, detail: `Updated shipping profile: ${updated.displayName}` } });
+      return updated;
+    });
+    if (!customer) return res.status(404).json({ error: 'Customer not found.' });
+    res.json(customer);
+  } catch (e) { next(e); }
 });
 
 export default router;

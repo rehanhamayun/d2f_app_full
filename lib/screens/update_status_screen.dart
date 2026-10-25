@@ -341,6 +341,8 @@ class _StatusOption extends StatelessWidget {
     'PROCESSING' => Icons.settings_rounded,
     'IN_TRANSIT' => Icons.local_shipping_rounded,
     'ARRIVED_LOME' => Icons.anchor_rounded,
+    'ARRIVED_DESTINATION' => Icons.location_on_rounded,
+    'RELEASED' => Icons.outbox_rounded,
     'READY_FOR_PICKUP' => Icons.storefront_rounded,
     'DELIVERED' => Icons.check_circle_rounded,
     _ => Icons.inventory_2_rounded,
@@ -348,9 +350,11 @@ class _StatusOption extends StatelessWidget {
 
   String _descFor(String status) => switch (status) {
     'PROCESSING' => 'Parcel received and being prepared for shipment.',
-    'IN_TRANSIT' => 'Parcel is on the way to West Africa.',
+    'IN_TRANSIT' => 'Parcel is on the way to its destination.',
     'ARRIVED_LOME' => 'Parcel has arrived at our Lomé facility.',
-    'READY_FOR_PICKUP' => 'Parcel is ready to be collected in West Africa.',
+    'ARRIVED_DESTINATION' => 'Parcel has arrived at its destination facility.',
+    'RELEASED' => 'Parcel has been released for collection or delivery.',
+    'READY_FOR_PICKUP' => 'Parcel is ready at the pickup location.',
     'DELIVERED' => 'Parcel has been delivered to the recipient.',
     _ => '',
   };

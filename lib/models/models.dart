@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/service_area.dart';
+
 // ── Enums ────────────────────────────────────────────────────────────────────
 
 enum UserRole { ADMIN, STAFF, CUSTOMER, DRIVER }
@@ -47,17 +49,21 @@ const List<String> kParcelStatuses = [
   'PROCESSING',
   'IN_TRANSIT',
   'ARRIVED_LOME',
+  'ARRIVED_DESTINATION',
   'READY_FOR_PICKUP',
+  'RELEASED',
   'DELIVERED',
 ];
 
 const Map<String, List<String>> kAllowedTransitions = {
   'REQUESTED': ['RECEIVED'],
   'RECEIVED': ['PROCESSING', 'IN_TRANSIT'],
-  'PROCESSING': ['IN_TRANSIT', 'ARRIVED_LOME'],
-  'IN_TRANSIT': ['ARRIVED_LOME'],
+  'PROCESSING': ['IN_TRANSIT', 'ARRIVED_LOME', 'ARRIVED_DESTINATION'],
+  'IN_TRANSIT': ['ARRIVED_LOME', 'ARRIVED_DESTINATION'],
   'ARRIVED_LOME': ['READY_FOR_PICKUP'],
-  'READY_FOR_PICKUP': ['DELIVERED'],
+  'ARRIVED_DESTINATION': ['READY_FOR_PICKUP'],
+  'READY_FOR_PICKUP': ['RELEASED', 'DELIVERED'],
+  'RELEASED': ['DELIVERED'],
   'DELIVERED': [],
 };
 
@@ -67,6 +73,8 @@ String statusLabel(String status) => switch (status) {
   'PROCESSING' => 'Processing',
   'IN_TRANSIT' => 'In Transit',
   'ARRIVED_LOME' => 'Arrived in Lomé',
+  'ARRIVED_DESTINATION' => 'Arrived at Destination',
+  'RELEASED' => 'Released',
   'READY_FOR_PICKUP' => 'Ready for Pickup',
   'DELIVERED' => 'Delivered',
   _ => status,
@@ -79,6 +87,8 @@ String statusShortLabel(String status) => switch (status) {
   'PROCESSING' => 'Processing',
   'IN_TRANSIT' => 'In Transit',
   'ARRIVED_LOME' => 'Arrived',
+  'ARRIVED_DESTINATION' => 'Arrived',
+  'RELEASED' => 'Released',
   'READY_FOR_PICKUP' => 'Ready',
   'DELIVERED' => 'Delivered',
   _ => status,
@@ -87,10 +97,12 @@ String statusShortLabel(String status) => switch (status) {
 /// Short operational sub-label shown under chips / list cards.
 String statusSubLabel(String status) => switch (status) {
   'REQUESTED' => 'Awaiting D2F intake confirmation',
-  'RECEIVED' => 'At warehouse (USA)',
+  'RECEIVED' => 'At warehouse',
   'PROCESSING' => 'Being prepared for shipment',
-  'IN_TRANSIT' => 'On the way to West Africa',
+  'IN_TRANSIT' => 'On the way to destination',
   'ARRIVED_LOME' => 'Arrived at Lomé facility',
+  'ARRIVED_DESTINATION' => 'Arrived at destination facility',
+  'RELEASED' => 'Released for collection or delivery',
   'READY_FOR_PICKUP' => 'Ready for pickup',
   'DELIVERED' => 'Picked up / delivered',
   _ => '',
@@ -101,8 +113,11 @@ String statusHeadline(String status) => switch (status) {
   'REQUESTED' => 'Your shipment request is awaiting D2F intake confirmation.',
   'RECEIVED' => 'Your parcel is registered at our warehouse.',
   'PROCESSING' => 'Your parcel is being prepared for shipment.',
-  'IN_TRANSIT' => 'Your package is on the way to West Africa. Arriving soon!',
+  'IN_TRANSIT' => 'Your parcel is on the way to its destination.',
   'ARRIVED_LOME' => 'Your parcel has arrived at our Lomé facility.',
+  'ARRIVED_DESTINATION' =>
+    'Your parcel has arrived at its destination facility.',
+  'RELEASED' => 'Your parcel has been released for collection or delivery.',
   'READY_FOR_PICKUP' => 'Your parcel is ready at the pickup location.',
   'DELIVERED' => 'Package successfully delivered to the recipient.',
   _ => '',
@@ -222,6 +237,9 @@ class Parcel {
   final DateTime updatedAt;
   final Customer? customer;
   final List<TrackingEvent> events;
+  final String? containerId, containerCode, containerStatus;
+  bool get containerManaged =>
+      containerId != null && containerStatus != 'ARRIVED';
 
   const Parcel({
     required this.id,
@@ -241,9 +259,15 @@ class Parcel {
     required this.updatedAt,
     this.customer,
     this.events = const [],
+    this.containerId,
+    this.containerCode,
+    this.containerStatus,
   });
 
   factory Parcel.fromJson(Map<String, dynamic> j) => Parcel(
+    containerId: j['containerId'] as String?,
+    containerCode: j['container']?['code'] as String?,
+    containerStatus: j['container']?['status'] as String?,
     id: j['id'] as String,
     trackingId: j['trackingId'] as String,
     customerId: j['customerId'] as String,
@@ -270,18 +294,7 @@ class Parcel {
   );
 
   /// Country flag emoji derived from the destination string.
-  String get destinationFlag {
-    final d = destination.toLowerCase();
-    if (d.contains('togo')) return '🇹🇬';
-    if (d.contains('benin')) return '🇧🇯';
-    if (d.contains('burkina')) return '🇧🇫';
-    if (d.contains('gabon')) return '🇬🇦';
-    if (d.contains('ghana')) return '🇬🇭';
-    if (d.contains('senegal')) return '🇸🇳';
-    if (d.contains('nigeria')) return '🇳🇬';
-    if (d.contains('usa') || d.contains('united states')) return '🇺🇸';
-    return '🌍';
-  }
+  String get destinationFlag => serviceCountryFlag(destination);
 
   String get packageTypeLabel => switch (packageType) {
     'BOX' => 'Box',
@@ -305,6 +318,7 @@ const List<String> kOriginOptions = [
   'Houston, TX, USA',
   'Atlanta, GA, USA',
   'Brussels, Belgium',
+  'Paris, France',
 ];
 
 const List<String> kDestinationOptions = [
@@ -315,6 +329,7 @@ const List<String> kDestinationOptions = [
   'Accra, Ghana',
   'Dakar, Senegal',
   'Lagos, Nigeria',
+  'Abidjan, Côte d’Ivoire',
 ];
 
 /// Both directions share the same location suggestions. A route may also use
@@ -339,11 +354,6 @@ class ShipmentRoute {
 }
 
 const List<String> kEventLocations = [
-  'Omaha, NE, USA',
-  'Lomé, Togo',
-  'Cotonou, Benin',
-  'Ouagadougou, Burkina Faso',
-  'Libreville, Gabon',
-  'Accra, Ghana',
+  ...kShippingLocationOptions,
   'In Transit',
 ];

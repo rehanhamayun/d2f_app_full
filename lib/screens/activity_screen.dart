@@ -26,8 +26,10 @@ class ActivityScreenState extends State<ActivityScreen> {
     ('RECEIVED', 'Received'),
     ('PROCESSING', 'Processing'),
     ('IN_TRANSIT', 'In Transit'),
-    ('ARRIVED_LOME', 'Arrived'),
+    ('ARRIVED_LOME', 'Arrived Lomé'),
+    ('ARRIVED_DESTINATION', 'Arrived'),
     ('READY_FOR_PICKUP', 'Ready'),
+    ('RELEASED', 'Released'),
     ('DELIVERED', 'Delivered'),
   ];
 

@@ -1,4 +1,5 @@
 import 'package:d2f_application/main.dart';
+import 'package:d2f_application/screens/brand_ident_screen.dart';
 import 'package:d2f_application/screens/splash_screen.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:d2f_application/core/theme.dart';
@@ -137,7 +138,7 @@ void main() {
     await tester.pumpWidget(const ProviderScope(child: D2FApp()));
     await tester.pump();
     await tester.runAsync(() async {
-      final context = tester.element(find.byType(SplashScreen));
+      final context = tester.element(find.byType(BrandIdentScreen));
       await Future.wait([
         for (final asset in [
           'journey.jpg',
@@ -149,11 +150,13 @@ void main() {
       ]);
     });
     await tester.pump();
-    for (var i = 0; i < 8; i++) {
-      await tester.pump(const Duration(milliseconds: 100));
-    }
+    // Ride out the full brand ident choreography (≥2.3s hold).
+    await tester.pump(const Duration(milliseconds: 2400));
+    await tester.pumpAndSettle();
+    expect(find.byType(BrandIdentScreen), findsNothing);
+    expect(find.byType(SplashScreen), findsOneWidget);
     expect(find.text('Bridging distances.\nBringing people closer.'), findsOneWidget);
-    expect(find.text('Loading your journey...'), findsNothing);
+    expect(find.text('Loading your journey…'), findsNothing);
     await tester.tap(find.text('Skip'));
     await tester.pumpAndSettle();
     expect(find.byType(LoginScreen), findsOneWidget);

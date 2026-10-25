@@ -12,7 +12,7 @@ const userSelect = {
   role: true,
   isActive: true,
   createdAt: true,
-  location: { select: { name: true, code: true } },
+  location: { select: { id: true, name: true, code: true } },
 };
 const shipmentStatuses = [
   'REQUESTED',
@@ -20,7 +20,9 @@ const shipmentStatuses = [
   'PROCESSING',
   'IN_TRANSIT',
   'ARRIVED_LOME',
+  'ARRIVED_DESTINATION',
   'READY_FOR_PICKUP',
+  'RELEASED',
   'DELIVERED',
 ];
 
@@ -296,6 +298,25 @@ router.get('/users', async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+router.patch('/users/:id/location', async (req, res, next) => {
+  try {
+    const { locationId } = req.body || {};
+    if (locationId !== null && typeof locationId !== 'string') return res.status(400).json({ error: 'Choose a location or leave the account unassigned.' });
+    const updated = await prisma.$transaction(async tx => {
+      const user = await tx.user.findFirst({ where: { id: req.params.id, organizationId: req.organizationId } });
+      if (!user) return null;
+      if (locationId && !await tx.location.findFirst({ where: { id: locationId, organizationId: req.organizationId } })) {
+        throw Object.assign(new Error('Location not found in your organization.'), { status: 400 });
+      }
+      const updated = await tx.user.update({ where: { id: user.id }, data: { locationId }, select: userSelect });
+      await tx.auditLog.create({ data: { actorId: req.user.id, action: 'USER_LOCATION_UPDATE', entity: 'User', entityId: user.id, detail: `locationId=${locationId || 'unassigned'}` } });
+      return updated;
+    });
+    if (!updated) return res.status(404).json({ error: 'User not found.' });
+    res.json({ user: updated });
+  } catch (e) { next(e); }
 });
 
 router.patch('/users/:id/active', async (req, res, next) => {

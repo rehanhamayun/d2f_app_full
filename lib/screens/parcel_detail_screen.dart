@@ -9,6 +9,7 @@ import '../widgets/reference_widgets.dart';
 import 'label_preview_screen.dart';
 import '../widgets/timeline.dart';
 import 'update_status_screen.dart';
+import 'container_detail_screen.dart';
 import '../services/parcel_report.dart';
 
 /// Parcel Details (design screen 9): header status card + segmented tabs
@@ -215,7 +216,39 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
         const SizedBox(height: 20),
         _shipmentGrid(parcel),
         const SizedBox(height: 20),
-        if (canUpdate)
+        if (parcel.containerManaged)
+          SectionCard(
+            tint: AppColors.blueSoft,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Container: ${parcel.containerCode ?? 'Assigned'}',
+                  style: AppTheme.sectionTitle,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Departure and arrival are managed together from the container.',
+                  style: AppTheme.caption,
+                ),
+                TextButton(
+                  onPressed: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ContainerDetailScreen(
+                          containerId: parcel.containerId!,
+                        ),
+                      ),
+                    );
+                    if (mounted) _fetch();
+                  },
+                  child: const Text('Open container'),
+                ),
+              ],
+            ),
+          )
+        else if (canUpdate)
           PrimaryButton(
             label: 'Update Status',
             onPressed: () async {

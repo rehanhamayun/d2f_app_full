@@ -118,6 +118,22 @@ void main() {
       await Api.I.init();
       await Api.I.signOut();
       app.main();
+      // A fresh install always plays the brand ident, then the welcome intro
+      // (three onboarding pages). Returning staff skip straight to the
+      // workspace, so advance to sign-in the same way a new user would.
+      for (
+        var i = 0;
+        i < 120 &&
+            find.byKey(const ValueKey('splash-sign-in')).evaluate().isEmpty;
+        i++
+      ) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      if (find.byKey(const ValueKey('splash-sign-in')).evaluate().isNotEmpty) {
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('splash-sign-in')));
+        await tester.pumpAndSettle();
+      }
       await waitFor(find.text('Welcome back.'));
       await fill(
         find.byKey(const ValueKey('staff-email')),

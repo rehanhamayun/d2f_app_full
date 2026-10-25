@@ -7,6 +7,7 @@ import '../core/api.dart';
 import '../core/theme.dart';
 import '../widgets/common.dart';
 import '../widgets/country_flag.dart';
+import '../core/service_area.dart';
 import '../widgets/d2f_navigation_bar.dart';
 import '../widgets/reference_widgets.dart';
 import '../widgets/timeline.dart';
@@ -619,13 +620,10 @@ class _RoleWorkspaceScreenState extends ConsumerState<RoleWorkspaceScreen> {
           scrollDirection: Axis.horizontal,
           child: Row(
             children: [
-              _destinationChip('Togo', 'Lomé, Togo'),
-              const SizedBox(width: 4),
-              _destinationChip('Benin', 'Cotonou, Benin'),
-              const SizedBox(width: 4),
-              _destinationChip('Burkina Faso', 'Ouagadougou, Burkina Faso'),
-              const SizedBox(width: 4),
-              _destinationChip('Gabon', 'Libreville, Gabon'),
+              for (final entry in kCountryLocations.entries) ...[
+                _destinationChip(entry.key, entry.value),
+                const SizedBox(width: 4),
+              ],
             ],
           ),
         ),

@@ -1,3 +1,4 @@
+import { warehouseLock } from '../warehouse.js';
 import { Router } from 'express';
 import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
@@ -14,10 +15,12 @@ const METHODS = ['AIR', 'SEA', 'ROAD'];
 const TRANSITIONS = {
   REQUESTED: ['RECEIVED'],
   RECEIVED: ['PROCESSING', 'IN_TRANSIT'],
-  PROCESSING: ['IN_TRANSIT', 'ARRIVED_LOME'],
-  IN_TRANSIT: ['ARRIVED_LOME'],
+  PROCESSING: ['IN_TRANSIT', 'ARRIVED_LOME', 'ARRIVED_DESTINATION'],
+  IN_TRANSIT: ['ARRIVED_LOME', 'ARRIVED_DESTINATION'],
   ARRIVED_LOME: ['READY_FOR_PICKUP'],
-  READY_FOR_PICKUP: ['DELIVERED'],
+  ARRIVED_DESTINATION: ['READY_FOR_PICKUP'],
+  READY_FOR_PICKUP: ['RELEASED', 'DELIVERED'],
+  RELEASED: ['DELIVERED'],
   DELIVERED: [],
 };
 
@@ -223,11 +226,18 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
         error: `Invalid transition ${parcel.status} → ${status || '(none)'}. Allowed: ${allowed.join(', ') || 'none'}`,
       });
     }
-    if (location && typeof location !== 'string') {
-      return res.status(400).json({ error: 'location must be a string' });
+    if ((location != null && typeof location !== 'string') || (note != null && typeof note !== 'string')) {
+      return res.status(400).json({ error: 'location and note must be strings' });
     }
 
     const event = await prisma.$transaction(async (tx) => {
+      await warehouseLock(tx, organizationId);
+      const current = await tx.parcel.findUnique({ where: { id: parcel.id }, include: { container: true } });
+      if (current.container && current.container.status !== 'ARRIVED') {
+        const conflict = new Error('This parcel is in a container. Record departure and arrival from the container workspace.');
+        conflict.status = 409;
+        throw conflict;
+      }
       const updated = await tx.parcel.updateMany({
         where: { id: parcel.id, organizationId, status: parcel.status }, data: { status },
       });
@@ -262,6 +272,7 @@ router.get('/:idOrTracking', async (req, res, next) => {
     let parcel = await prisma.parcel.findFirst({
       where: { id: idOrTracking, organizationId },
       include: {
+        container: { select: { id: true, code: true, status: true } },
         customer: { select: { id: true, displayName: true, email: true, phone: true } },
         events: { orderBy: { createdAt: 'asc' }, include: { actor: { select: { fullName: true } } } },
       },
@@ -271,6 +282,7 @@ router.get('/:idOrTracking', async (req, res, next) => {
       parcel = await prisma.parcel.findFirst({
         where: { trackingId: idOrTracking.toUpperCase(), organizationId },
         include: {
+          container: { select: { id: true, code: true, status: true } },
           customer: { select: { id: true, displayName: true, email: true, phone: true } },
           events: { orderBy: { createdAt: 'asc' }, include: { actor: { select: { fullName: true } } } },
         },

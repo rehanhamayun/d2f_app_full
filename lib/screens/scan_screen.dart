@@ -9,7 +9,8 @@ import 'parcel_detail_screen.dart';
 /// Scan Parcel / Manual Tracking Lookup (screen map #6).
 /// Camera scan of a parcel QR/Code-128, plus manual fallback field.
 class ScanScreen extends StatefulWidget {
-  const ScanScreen({super.key});
+  final bool returnTracking;
+  const ScanScreen({super.key, this.returnTracking = false});
 
   @override
   State<ScanScreen> createState() => _ScanScreenState();
@@ -50,6 +51,10 @@ class _ScanScreenState extends State<ScanScreen> {
       await _controller.stop();
     } catch (_) {}
     try {
+      if (widget.returnTracking) {
+        if (mounted) Navigator.pop(context, code.trim().toUpperCase());
+        return;
+      }
       final parcel = await Api.I.parcelDetail(code);
       if (!mounted) return;
       await Navigator.push(
@@ -77,7 +82,7 @@ class _ScanScreenState extends State<ScanScreen> {
       );
     } finally {
       try {
-        await _controller.start();
+        if (mounted && !widget.returnTracking) await _controller.start();
       } catch (_) {}
     }
   }

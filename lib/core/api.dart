@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/models.dart';
+import '../models/warehouse.dart';
 
 /// Thrown for any API failure with a human-friendly message.
 class ApiException implements Exception {
@@ -477,6 +478,39 @@ class Api {
       throw _map(e);
     }
   }
+
+  // Warehouse operations use the same authenticated session as parcel intake.
+  Future<List<WarehouseLocation>> warehouseLocations() async {
+    final data = await warehouseRequest('/locations');
+    return (data as List)
+        .map((j) => WarehouseLocation.fromJson(Map<String, dynamic>.from(j)))
+        .toList();
+  }
+
+  Future<dynamic> warehouseRequest(
+    String path, {
+    String method = 'GET',
+    Map<String, dynamic>? data,
+    Map<String, dynamic>? query,
+  }) async {
+    try {
+      return (await _dio!.request(
+        '/warehouse$path',
+        data: data,
+        queryParameters: query,
+        options: Options(method: method),
+      )).data;
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<FreightContainer> containerDetail(String id) async =>
+      FreightContainer.fromJson(
+        Map<String, dynamic>.from(
+          await warehouseRequest('/containers/${Uri.encodeComponent(id)}'),
+        ),
+      );
 
   ApiException _map(DioException e) {
     if (e.type == DioExceptionType.connectionTimeout ||

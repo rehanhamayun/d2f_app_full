@@ -25,7 +25,7 @@ export function getSavedSession() {
   try {
     const token = sessionStorage.getItem(TOKEN_KEY);
     const user = JSON.parse(sessionStorage.getItem(USER_KEY) || 'null');
-    return token && user?.role === 'ADMIN' ? { token, user } : null;
+    return token && ['ADMIN', 'STAFF'].includes(user?.role) ? { token, user } : null;
   } catch {
     clearSession();
     return null;
@@ -81,7 +81,7 @@ export async function signIn(email, password) {
     method: 'POST',
     body: JSON.stringify({ email: email.trim(), password }),
   });
-  if (session?.user?.role !== 'ADMIN' || !session.token) {
+  if (!['ADMIN', 'STAFF'].includes(session?.user?.role) || !session.token) {
     throw new Error('This account does not have Admin dashboard access.');
   }
   saveSession(session.token, session.user);

@@ -97,17 +97,19 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
 
   Future<void> _support() async {
     try {
-      if (await launchUrl(Uri(scheme: 'mailto', path: 'info@d2fshipping.com')))
+      if (await launchUrl(Uri(scheme: 'mailto', path: 'info@d2fshipping.com'))) {
         return;
+      }
     } catch (_) {
       /* Keep support reachable when no email application is installed. */
     }
-    if (mounted)
+    if (mounted) {
       copyToClipboard(
         context,
         'info@d2fshipping.com',
         message: 'Support email copied.',
       );
+    }
   }
 
   @override

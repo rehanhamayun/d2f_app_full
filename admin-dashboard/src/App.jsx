@@ -1,3 +1,7 @@
+import { UserLocation } from './team-location.jsx';
+import { Containers, Locations } from './warehouse.jsx';
+import { Commerce } from './commerce.jsx';
+import { SERVICE_COUNTRIES, ROUTE_LOCATIONS } from './service-area.js';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
@@ -51,6 +55,11 @@ import {
 const NAV = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'shipments', label: 'Shipments', icon: Box },
+  { id: 'containers', label: 'Containers', icon: PackageCheck },
+  { id: 'bookings', label: 'Bookings', icon: Truck },
+  { id: 'locations', label: 'Locations', icon: Globe2 },
+  { id: 'marketplace', label: 'Marketplace', icon: Building2 },
+  { id: 'buy-for-me', label: 'Buy For Me', icon: Download },
   { id: 'customers', label: 'Customers', icon: UserRound },
   { id: 'team', label: 'Team & access', icon: UsersRound },
   { id: 'system', label: 'System health', icon: Activity },
@@ -61,6 +70,8 @@ const STATUS_COLORS = {
   PROCESSING: '#7958cc',
   IN_TRANSIT: '#19a89a',
   ARRIVED_LOME: '#39a2d9',
+  ARRIVED_DESTINATION: '#39a2d9',
+  RELEASED: '#159553',
   READY_FOR_PICKUP: '#ef8050',
   DELIVERED: '#3c9a64',
 };
@@ -70,16 +81,20 @@ const STATUS_LABELS = {
   PROCESSING: 'Processing',
   IN_TRANSIT: 'In transit',
   ARRIVED_LOME: 'Arrived in Lomé',
+  ARRIVED_DESTINATION: 'Arrived at destination',
+  RELEASED: 'Released',
   READY_FOR_PICKUP: 'Ready for pickup',
   DELIVERED: 'Delivered',
 };
 const TRANSITIONS = {
   REQUESTED: ['RECEIVED'],
   RECEIVED: ['PROCESSING', 'IN_TRANSIT'],
-  PROCESSING: ['IN_TRANSIT', 'ARRIVED_LOME'],
-  IN_TRANSIT: ['ARRIVED_LOME'],
+  PROCESSING: ['IN_TRANSIT', 'ARRIVED_LOME', 'ARRIVED_DESTINATION'],
+  IN_TRANSIT: ['ARRIVED_LOME', 'ARRIVED_DESTINATION'],
   ARRIVED_LOME: ['READY_FOR_PICKUP'],
-  READY_FOR_PICKUP: ['DELIVERED'],
+  ARRIVED_DESTINATION: ['READY_FOR_PICKUP'],
+  READY_FOR_PICKUP: ['RELEASED', 'DELIVERED'],
+  RELEASED: ['DELIVERED'],
   DELIVERED: [],
 };
 const PAGE_SIZE = 50;
@@ -174,7 +189,7 @@ function Login({ onSignedIn }) {
         <div className="login-form-wrap">
           <div className="login-icon"><Building2 size={23} /></div>
           <h2>Welcome back</h2>
-          <p className="muted">Sign in with your D2F administrator account.</p>
+          <p className="muted">Sign in with your authorized D2F operations account.</p>
           <form onSubmit={submit} className="login-form">
             <label htmlFor="admin-email">Email address</label>
             <input id="admin-email" autoComplete="username" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@d2fshipping.com" required />
@@ -197,7 +212,7 @@ function Login({ onSignedIn }) {
             </div>
           )}
         </div>
-        <div className="login-foot"><span>© {new Date().getFullYear()} D2F Global</span><span>Authorized administrators only</span></div>
+        <div className="login-foot"><span>© {new Date().getFullYear()} D2F Global</span><span>Authorized Admin and Staff accounts</span></div>
       </section>
     </main>
   );
@@ -216,7 +231,7 @@ function Sidebar({ page, setPage, user, onLogout, open, setOpen }) {
         <div className="workspace-chip"><span className="workspace-dot" /><span><small>WORKSPACE</small><b>D2F Shipping</b></span><ChevronDown size={15} /></div>
         <div className="nav-caption">WORKSPACE</div>
         <nav className="side-nav" aria-label="Admin dashboard">
-          {NAV.map(({ id, label, icon: Icon }) => (
+          {NAV.filter(item => user.role === 'ADMIN' || ['shipments', 'containers', 'bookings', 'customers'].includes(item.id)).map(({ id, label, icon: Icon }) => (
             <button key={id} className={`nav-link ${page === id ? 'nav-active' : ''}`} onClick={() => { setPage(id); setOpen(false); }}>
               <Icon size={18} strokeWidth={1.9} /><span>{label}</span>
               {id === 'shipments' && page === id && <span className="nav-active-dot" />}
@@ -227,7 +242,7 @@ function Sidebar({ page, setPage, user, onLogout, open, setOpen }) {
         <div className="side-help"><span className="help-icon"><CircleHelp size={18} /></span><div><b>Need a hand?</b><small>Contact the D2F team</small></div><ChevronRight size={15} /></div>
         <div className="profile-card">
           <div className="avatar">{initials(user.fullName)}</div>
-          <div className="profile-info"><b>{user.fullName}</b><small>Administrator</small></div>
+          <div className="profile-info"><b>{user.fullName}</b><small>{user.role === 'ADMIN' ? 'Administrator' : 'Dispatcher / Staff'}</small></div>
           <button className="icon-button logout-button" onClick={onLogout} title="Sign out" aria-label="Sign out"><LogOut size={17} /></button>
         </div>
       </aside>
@@ -246,7 +261,7 @@ function Header({ page, onMenu, user, onRefresh, refreshing }) {
       <div className="topbar-actions">
         <button className="icon-button refresh-button" onClick={onRefresh} disabled={refreshing} aria-label="Refresh dashboard" title="Refresh"><Activity size={18} className={refreshing ? 'spin' : ''} /></button>
         <div className="topbar-divider" />
-        <div className="topbar-user"><div className="avatar small-avatar">{initials(user.fullName)}</div><span><b>{user.fullName}</b><small>Admin</small></span></div>
+        <div className="topbar-user"><div className="avatar small-avatar">{initials(user.fullName)}</div><span><b>{user.fullName}</b><small>{user.role === 'ADMIN' ? 'Admin' : 'Staff'}</small></span></div>
         <button className="icon-button logout-mobile" onClick={() => window.dispatchEvent(new Event('d2f-logout'))} aria-label="Sign out"><LogOut size={17} /></button>
       </div>
     </header>
@@ -374,10 +389,10 @@ function PageControls({ total, offset, limit, onPage }) {
   );
 }
 
-function Shipments({ token, notify, refreshOverview, refreshKey }) {
+function Shipments({ token, notify, refreshOverview, refreshKey, bookings = false, staffAccess = false }) {
   const [rows, setRows] = useState([]);
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('ALL');
+  const [status, setStatus] = useState(bookings ? 'REQUESTED' : 'ALL');
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
   const [reloadCount, setReloadCount] = useState(0);
@@ -394,7 +409,7 @@ function Shipments({ token, notify, refreshOverview, refreshKey }) {
       if (status !== 'ALL') query.set('status', status);
       query.set('limit', String(PAGE_SIZE));
       query.set('offset', String(offset));
-      const result = await request(`/admin/parcels?${query}`, { token });
+      const result = await request(`${staffAccess ? '/warehouse/directory' : '/admin'}/parcels?${query}`, { token });
       setRows(result.parcels);
       setTotal(result.total);
     } catch (error) {
@@ -402,7 +417,7 @@ function Shipments({ token, notify, refreshOverview, refreshKey }) {
     } finally {
       setLoading(false);
     }
-  }, [token, search, status, offset, notify]);
+  }, [token, search, status, offset, notify, staffAccess]);
 
   useEffect(() => {
     const timer = setTimeout(load, 180);
@@ -443,7 +458,7 @@ function Shipments({ token, notify, refreshOverview, refreshKey }) {
 
   return (
     <>
-      <PageHeading eyebrow="SHIPMENT OPERATIONS" title="Shipments" subtitle="Search records, review tracking history, and move shipments through approved status transitions.">
+      <PageHeading eyebrow="SHIPMENT OPERATIONS" title={bookings ? "Bookings" : "Shipments"} subtitle={bookings ? "Review customer shipment requests and confirm warehouse intake." : "Search records, review tracking history, and move shipments through approved status transitions."}>
         <button className="button primary" onClick={() => setCreateOpen(true)}><PackageCheck size={16} /> Create shipment</button>
       </PageHeading>
       <section className="panel table-panel">
@@ -454,7 +469,7 @@ function Shipments({ token, notify, refreshOverview, refreshKey }) {
         <div className="table-foot"><span>Live operational records shared with the D2F app</span><PageControls total={total} offset={offset} limit={PAGE_SIZE} onPage={setOffset} /></div>
       </section>
       {selected && <ShipmentModal parcel={detail || selected} loading={!detail} busy={busy} onClose={() => { setSelected(null); setDetail(null); }} onUpdate={updateStatus} />}
-      {createOpen && <ShipmentCreateModal token={token} notify={notify} onClose={() => setCreateOpen(false)} onCreated={(parcel) => {
+      {createOpen && <ShipmentCreateModal token={token} staffAccess={staffAccess} notify={notify} onClose={() => setCreateOpen(false)} onCreated={(parcel) => {
         setCreateOpen(false);
         setSearch('');
         setStatus('ALL');
@@ -467,7 +482,7 @@ function Shipments({ token, notify, refreshOverview, refreshKey }) {
   );
 }
 
-function ShipmentCreateModal({ token, notify, onClose, onCreated }) {
+function ShipmentCreateModal({ token, notify, onClose, onCreated, staffAccess = false }) {
   const [customers, setCustomers] = useState([]);
   const [customerTotal, setCustomerTotal] = useState(0);
   const [customerQuery, setCustomerQuery] = useState('');
@@ -480,8 +495,8 @@ function ShipmentCreateModal({ token, notify, onClose, onCreated }) {
     recipientAddress: '',
     packageType: 'BOX',
     weightKg: '',
-    origin: 'Omaha',
-    destination: 'Lomé',
+    origin: 'Omaha, NE, USA',
+    destination: 'Lomé, Togo',
     method: 'AIR',
     notes: '',
   });
@@ -493,7 +508,7 @@ function ShipmentCreateModal({ token, notify, onClose, onCreated }) {
       try {
         const query = new URLSearchParams({ limit: String(PAGE_SIZE), offset: '0' });
         if (customerQuery.trim()) query.set('q', customerQuery.trim());
-        const result = await request(`/admin/customers?${query}`, { token });
+        const result = await request(`${staffAccess ? '/warehouse/directory' : '/admin'}/customers?${query}`, { token });
         if (active) {
           setCustomers(result.customers);
           setCustomerTotal(result.total);
@@ -508,7 +523,7 @@ function ShipmentCreateModal({ token, notify, onClose, onCreated }) {
       active = false;
       clearTimeout(timer);
     };
-  }, [token, customerQuery, notify]);
+  }, [token, customerQuery, notify, staffAccess]);
 
   async function submit(event) {
     event.preventDefault();
@@ -537,7 +552,7 @@ function ShipmentCreateModal({ token, notify, onClose, onCreated }) {
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="modal invite-modal" role="dialog" aria-modal="true" aria-labelledby="create-shipment-title">
+      <datalist id="d2f-route-locations">{ROUTE_LOCATIONS.map(l => <option key={l} value={l} />)}</datalist><section className="modal invite-modal" role="dialog" aria-modal="true" aria-labelledby="create-shipment-title">
         <div className="modal-header">
           <div><span className="eyebrow">NEW OPERATIONAL RECORD</span><h2 id="create-shipment-title">Create a shipment</h2></div>
           <button className="icon-button" onClick={onClose} aria-label="Close shipment form"><X size={19} /></button>
@@ -560,8 +575,8 @@ function ShipmentCreateModal({ token, notify, onClose, onCreated }) {
             <label>Shipping method<select value={form.method} onChange={(event) => setForm({ ...form, method: event.target.value })}><option value="AIR">Air</option><option value="SEA">Sea</option><option value="ROAD">Road</option></select></label>
           </div>
           <div className="form-row">
-            <label>Origin<input required maxLength={120} value={form.origin} onChange={(event) => setForm({ ...form, origin: event.target.value })} /></label>
-            <label>Destination<input required maxLength={120} value={form.destination} onChange={(event) => setForm({ ...form, destination: event.target.value })} /></label>
+            <label>Origin<input list="d2f-route-locations" required maxLength={120} value={form.origin} onChange={(event) => setForm({ ...form, origin: event.target.value })} /></label>
+            <label>Destination<input list="d2f-route-locations" required maxLength={120} value={form.destination} onChange={(event) => setForm({ ...form, destination: event.target.value })} /></label>
           </div>
           <label>Staff note (optional)<input maxLength={1000} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
           <div className="alert info-alert"><ShieldCheck size={16} /> The shipment is saved to the shared D2F API and appears in staff operations.</div>
@@ -579,24 +594,25 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate }) {
   useEffect(() => {
     setNext(TRANSITIONS[parcel.status]?.[0] || '');
   }, [parcel.id, parcel.status]);
-  const available = TRANSITIONS[parcel.status] || [];
+  const containerManaged = parcel.container && parcel.container.status !== 'ARRIVED';
+  const available = containerManaged ? [] : TRANSITIONS[parcel.status] || [];
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="modal shipment-modal" role="dialog" aria-modal="true" aria-labelledby="shipment-title">
+      <datalist id="d2f-route-locations">{ROUTE_LOCATIONS.map(l => <option key={l} value={l} />)}</datalist><section className="modal shipment-modal" role="dialog" aria-modal="true" aria-labelledby="shipment-title">
         <div className="modal-header"><div><span className="eyebrow">SHIPMENT RECORD</span><h2 id="shipment-title">{parcel.trackingId}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close shipment details"><X size={19} /></button></div>
         {loading ? <LoadingPanel label="Loading tracking history…" /> : <div className="modal-body">
           <div className="detail-status"><span><small>CURRENT STATUS</small><StatusPill status={parcel.status} /></span><span><small>CREATED</small><b>{formatDate(parcel.createdAt, { year: 'numeric', month: 'long', day: 'numeric' })}</b></span></div>
           <div className="detail-grid"><div><small>Customer</small><b>{parcel.customer?.displayName || '—'}</b></div><div><small>Recipient</small><b>{parcel.recipientName}</b></div><div><small>Route</small><b>{parcel.origin} → {parcel.destination}</b></div><div><small>Package</small><b>{parcel.packageType} · {parcel.weightKg} kg</b></div></div>
           <h3 className="modal-section-title">Tracking history</h3>
           <div className="timeline">{parcel.events?.map((event) => <div className="timeline-item" key={event.id}><span className="timeline-dot" style={{ '--status-color': STATUS_COLORS[event.status] || '#788295' }} /><div><b>{statusLabel(event.status)}</b><span>{event.note || event.location || 'Status updated'}</span><small>{formatDate(event.createdAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{event.actor?.fullName ? ` · ${event.actor.fullName}` : ''}</small></div></div>)}</div>
-          {available.length > 0 ? <form className="status-update-form" onSubmit={(event) => { event.preventDefault(); onUpdate(next, note, location); }}><h3 className="modal-section-title">Update shipment</h3><div className="form-row"><label>Move to<select value={next} onChange={(event) => setNext(event.target.value)}>{available.map((state) => <option key={state} value={state}>{statusLabel(state)}</option>)}</select></label><label>Location<input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="e.g. Omaha Warehouse" /></label></div><label>Update note<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Add a short tracking update (optional)" /></label><button className="button primary" disabled={busy || !next}>{busy ? <span className="spinner" /> : <Check size={16} />} Save status update</button></form> : <div className="complete-note"><Check size={16} /> This shipment is marked delivered. No further status changes are available.</div>}
+          {available.length > 0 ? <form className="status-update-form" onSubmit={(event) => { event.preventDefault(); onUpdate(next, note, location); }}><h3 className="modal-section-title">Update shipment</h3><div className="form-row"><label>Move to<select value={next} onChange={(event) => setNext(event.target.value)}>{available.map((state) => <option key={state} value={state}>{statusLabel(state)}</option>)}</select></label><label>Location<input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="e.g. Omaha Warehouse" /></label></div><label>Update note<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Add a short tracking update (optional)" /></label><button className="button primary" disabled={busy || !next}>{busy ? <span className="spinner" /> : <Check size={16} />} Save status update</button></form> : <div className="complete-note"><Check size={16} /> {containerManaged ? `Managed by container ${parcel.container.code}. Record freight departure and arrival in Containers.` : "This shipment is marked delivered. No further status changes are available."}</div>}
         </div>}
       </section>
     </div>
   );
 }
 
-function Customers({ token, notify, refreshKey }) {
+function Customers({ token, notify, refreshKey, staffAccess = false }) {
   const [customers, setCustomers] = useState([]);
   const [search, setSearch] = useState('');
   const [offset, setOffset] = useState(0);
@@ -604,6 +620,7 @@ function Customers({ token, notify, refreshKey }) {
   const [reloadCount, setReloadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ displayName: '', email: '', phone: '', address: '', city: '', country: '' });
   useEffect(() => {
@@ -615,7 +632,7 @@ function Customers({ token, notify, refreshKey }) {
         if (search.trim()) params.set('q', search.trim());
         params.set('limit', String(PAGE_SIZE));
         params.set('offset', String(offset));
-        const result = await request(`/admin/customers?${params}`, { token });
+        const result = await request(`${staffAccess ? '/warehouse/directory' : '/admin'}/customers?${params}`, { token });
         if (active) {
           setCustomers(result.customers);
           setTotal(result.total);
@@ -627,19 +644,19 @@ function Customers({ token, notify, refreshKey }) {
       }
     }, 180);
     return () => { active = false; clearTimeout(timer); };
-  }, [token, search, offset, notify, refreshKey, reloadCount]);
+  }, [token, search, offset, notify, refreshKey, reloadCount, staffAccess]);
   async function addCustomer(event) {
     event.preventDefault();
     setSaving(true);
     try {
-      const created = await request('/customers', {
+      const created = await request(editingCustomer ? `/customers/${editingCustomer.id}` : '/customers', {
         token,
-        method: 'POST',
+        method: editingCustomer ? 'PATCH' : 'POST',
         body: JSON.stringify(Object.fromEntries(Object.entries(form).map(([key, value]) => [key, value.trim()]))),
       });
       setAddOpen(false);
       setForm({ displayName: '', email: '', phone: '', address: '', city: '', country: '' });
-      notify('Customer profile added.');
+      notify(editingCustomer ? 'Customer profile updated.' : 'Customer profile added.');
       setOffset(0);
       setReloadCount((value) => value + 1);
     } catch (error) {
@@ -651,16 +668,16 @@ function Customers({ token, notify, refreshKey }) {
   return (
     <>
       <PageHeading eyebrow="CUSTOMER DIRECTORY" title="Customers" subtitle="Search and add customer profiles used by the shipping operation.">
-        <button className="button primary" onClick={() => setAddOpen(true)}><UserRound size={16} /> Add customer</button>
+        <button className="button primary" onClick={() => { setEditingCustomer(null); setForm({ displayName: '', email: '', phone: '', address: '', city: '', country: '' }); setAddOpen(true); }}><UserRound size={16} /> Add customer</button>
       </PageHeading>
       <section className="panel table-panel">
         <div className="table-toolbar"><SearchInput value={search} onChange={(value) => { setSearch(value); setOffset(0); }} placeholder="Search name, email, or phone…" /><span className="toolbar-count">{formatNumber(total)} customers</span></div>
         <div className="table-scroll"><table><thead><tr><th>CUSTOMER</th><th>CONTACT</th><th>ADDRESS</th><th>ADDED</th></tr></thead><tbody>
-          {loading ? <tr><td colSpan="4"><LoadingPanel label="Loading customers…" /></td></tr> : customers.length ? customers.map((customer) => <tr key={customer.id}><td><span className="customer-cell"><span className="avatar customer-avatar">{initials(customer.displayName)}</span><span className="user-cell-info"><b>{customer.displayName}</b><small>{customer.userId ? 'Customer app account linked' : 'Staff profile only'}</small></span></span></td><td><b>{customer.email || '—'}</b><small className="cell-sub">{customer.phone || 'No phone provided'}</small></td><td><span className="address-cell">{[customer.address, customer.city, customer.country].filter(Boolean).join(', ') || '—'}</span></td><td>{formatDate(customer.createdAt)}</td></tr>) : <tr><td colSpan="4"><EmptyState icon={UserRound} title="No customers found" text="Customers appear here when added to the shipping records." /></td></tr>}
+          {loading ? <tr><td colSpan="4"><LoadingPanel label="Loading customers…" /></td></tr> : customers.length ? customers.map((customer) => <tr key={customer.id}><td><span className="customer-cell"><span className="avatar customer-avatar">{initials(customer.displayName)}</span><span className="user-cell-info"><button disabled={staffAccess} className="text-button" onClick={() => { setEditingCustomer(customer); setForm(Object.fromEntries(['displayName', 'email', 'phone', 'address', 'city', 'country'].map(key => [key, customer[key] || '']))); setAddOpen(true); }}>{customer.displayName}</button><small>{customer.userId ? 'Customer app account linked' : 'Staff profile only'}</small></span></span></td><td><b>{customer.email || '—'}</b><small className="cell-sub">{customer.phone || 'No phone provided'}</small></td><td><span className="address-cell">{[customer.address, customer.city, customer.country].filter(Boolean).join(', ') || '—'}</span></td><td>{formatDate(customer.createdAt)}</td></tr>) : <tr><td colSpan="4"><EmptyState icon={UserRound} title="No customers found" text="Customers appear here when added to the shipping records." /></td></tr>}
         </tbody></table></div>
         <div className="table-foot"><span>Customer profiles shared with D2F shipping operations</span><PageControls total={total} offset={offset} limit={PAGE_SIZE} onPage={setOffset} /></div>
       </section>
-      {addOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setAddOpen(false); }}><section className="modal invite-modal" role="dialog" aria-modal="true" aria-labelledby="customer-title"><div className="modal-header"><div><span className="eyebrow">CUSTOMER RECORD</span><h2 id="customer-title">Add a customer</h2></div><button className="icon-button" onClick={() => setAddOpen(false)} aria-label="Close customer form"><X size={19} /></button></div><form className="modal-body invite-form" onSubmit={addCustomer}><label>Full name<input autoFocus required maxLength={120} value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} placeholder="Customer name" /></label><div className="form-row"><label>Email address<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@example.com" /></label><label>Phone<input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="+1 402 555 0100" /></label></div><label>Street address<input value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} placeholder="Address (optional)" /></label><div className="form-row"><label>City<input value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} placeholder="City" /></label><label>Country<input value={form.country} onChange={(event) => setForm({ ...form, country: event.target.value })} placeholder="Country" /></label></div><div className="alert info-alert"><ShieldCheck size={16} /> This creates a shipping profile; it does not create an app login account.</div><button className="button primary full-button" disabled={saving}>{saving ? <span className="spinner" /> : <Check size={16} />} Save customer profile</button></form></section></div>}
+      {addOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setAddOpen(false); }}><section className="modal invite-modal" role="dialog" aria-modal="true" aria-labelledby="customer-title"><div className="modal-header"><div><span className="eyebrow">CUSTOMER RECORD</span><h2 id="customer-title">{editingCustomer ? "Edit customer" : "Add a customer"}</h2></div><button className="icon-button" onClick={() => setAddOpen(false)} aria-label="Close customer form"><X size={19} /></button></div><form className="modal-body invite-form" onSubmit={addCustomer}><label>Full name<input autoFocus required maxLength={120} value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} placeholder="Customer name" /></label><div className="form-row"><label>Email address<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@example.com" /></label><label>Phone<input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="+1 402 555 0100" /></label></div><label>Street address<input value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} placeholder="Address (optional)" /></label><div className="form-row"><label>City<input value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} placeholder="City" /></label><label>Country<select value={form.country} onChange={(event) => setForm({ ...form, country: event.target.value })}><option value="">Choose country (optional)</option>{SERVICE_COUNTRIES.map(c => <option key={c}>{c}</option>)}</select></label></div><div className="alert info-alert"><ShieldCheck size={16} /> This creates a shipping profile; it does not create an app login account.</div><button className="button primary full-button" disabled={saving}>{saving ? <span className="spinner" /> : <Check size={16} />} Save customer profile</button></form></section></div>}
     </>
   );
 }
@@ -755,7 +772,7 @@ function Team({ token, notify, refreshKey, currentUserId }) {
       <section className="panel table-panel">
         <div className="table-toolbar"><SearchInput value={search} onChange={(value) => { setSearch(value); setOffset(0); }} placeholder="Search by name or email…" /><label className="select-wrap filter-select"><select value={role} onChange={(event) => { setRole(event.target.value); setOffset(0); }}><option value="ALL">All roles</option><option value="ADMIN">Admin</option><option value="STAFF">Staff</option><option value="DRIVER">Driver</option><option value="CUSTOMER">Customer</option></select><ChevronDown size={15} /></label></div>
         <div className="table-scroll"><table><thead><tr><th>ACCOUNT</th><th>ROLE</th><th>LOCATION</th><th>JOINED</th><th>ACCESS</th><th /></tr></thead><tbody>
-          {loading ? <tr><td colSpan="6"><LoadingPanel label="Loading accounts…" /></td></tr> : users.length ? users.map((user) => <tr key={user.id}><td><span className="customer-cell"><span className="avatar customer-avatar">{initials(user.fullName)}</span><span className="user-cell-info"><b>{user.fullName}</b><small>{user.email}</small></span></span></td><td><span className={`role-tag ${user.role.toLowerCase()}`}>{user.role}</span></td><td>{user.location?.name || '—'}</td><td>{formatDate(user.createdAt)}</td><td><span className={`access-indicator ${user.isActive ? 'enabled' : 'disabled'}`}><i />{user.isActive ? 'Active' : 'Disabled'}</span></td><td>{user.id !== currentUserId && <button className={`text-button account-action ${user.isActive ? 'danger-text' : ''}`} disabled={pending === user.id} onClick={() => toggleActive(user)}>{pending === user.id ? 'Saving…' : user.isActive ? 'Disable' : 'Reactivate'}</button>}</td></tr>) : <tr><td colSpan="6"><EmptyState icon={UsersRound} title="No matching accounts" text="Try a different role or search term." /></td></tr>}
+          {loading ? <tr><td colSpan="6"><LoadingPanel label="Loading accounts…" /></td></tr> : users.length ? users.map((user) => <tr key={user.id}><td><span className="customer-cell"><span className="avatar customer-avatar">{initials(user.fullName)}</span><span className="user-cell-info"><b>{user.fullName}</b><small>{user.email}</small></span></span></td><td><span className={`role-tag ${user.role.toLowerCase()}`}>{user.role}</span></td><td><UserLocation token={token} user={user} notify={notify} onSaved={load} /></td><td>{formatDate(user.createdAt)}</td><td><span className={`access-indicator ${user.isActive ? 'enabled' : 'disabled'}`}><i />{user.isActive ? 'Active' : 'Disabled'}</span></td><td>{user.id !== currentUserId && <button className={`text-button account-action ${user.isActive ? 'danger-text' : ''}`} disabled={pending === user.id} onClick={() => toggleActive(user)}>{pending === user.id ? 'Saving…' : user.isActive ? 'Disable' : 'Reactivate'}</button>}</td></tr>) : <tr><td colSpan="6"><EmptyState icon={UsersRound} title="No matching accounts" text="Try a different role or search term." /></td></tr>}
         </tbody></table></div>
         <div className="table-foot"><span>Roles and access are enforced by the backend</span><PageControls total={total} offset={offset} limit={PAGE_SIZE} onPage={setOffset} /></div>
       </section>
@@ -816,7 +833,7 @@ function Toast({ toast, onClose }) {
 
 export default function App() {
   const [session, setSession] = useState(getSavedSession);
-  const [page, setPage] = useState('overview');
+  const [page, setPage] = useState(() => getSavedSession()?.user?.role === 'STAFF' ? 'shipments' : 'overview');
   const [days, setDays] = useState(30);
   const [overview, setOverview] = useState(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
@@ -825,9 +842,10 @@ export default function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   const notify = useCallback((message, type = 'success') => setToast({ message, type, key: Date.now() }), []);
   const token = session?.token;
+  const isAdmin = session?.user?.role === 'ADMIN';
 
   const loadOverview = useCallback(async () => {
-    if (!token) return;
+    if (!token || !isAdmin) return;
     setOverviewLoading(true);
     try {
       setOverview(await request(`/admin/overview?days=${days}`, { token }));
@@ -836,7 +854,7 @@ export default function App() {
     } finally {
       setOverviewLoading(false);
     }
-  }, [token, days, notify]);
+  }, [token, days, notify, isAdmin]);
 
   useEffect(() => {
     if (token) loadOverview();
@@ -864,8 +882,9 @@ export default function App() {
   async function verifySession(saved) {
     try {
       const result = await request('/auth/me', { token: saved.token });
-      if (result.user?.role !== 'ADMIN') throw new Error('This account no longer has Admin access.');
+      if (!['ADMIN', 'STAFF'].includes(result.user?.role)) throw new Error('This account no longer has Admin access.');
       setSession({ ...saved, user: result.user });
+      if (result.user.role === 'STAFF') setPage('shipments');
     } catch {
       clearSession();
       setSession(null);
@@ -884,19 +903,24 @@ export default function App() {
       <div className="main-shell">
         <Header page={page} onMenu={() => setMenuOpen(true)} user={session.user} onRefresh={page === 'overview' ? loadOverview : () => setRefreshKey((value) => value + 1)} refreshing={refreshing} />
         <main className="content">
-          {page === 'overview' && <Overview data={overview} days={days} onPeriod={setDays} loading={overviewLoading} onGo={setPage} />}
-          {page === 'shipments' && <Shipments token={token} notify={notify} refreshOverview={loadOverview} refreshKey={refreshKey} key="shipments" />}
-          {page === 'customers' && <Customers token={token} notify={notify} refreshKey={refreshKey} key="customers" />}
-          {page === 'team' && <Team token={token} notify={notify} refreshKey={refreshKey} currentUserId={session.user.id} key="team" />}
-          {page === 'system' && <SystemHealth token={token} notify={notify} refreshKey={refreshKey} key="system" />}
-          <footer className="page-footer"><span>© {new Date().getFullYear()} D2F Global</span><span><ShieldCheck size={13} /> Admin operations · Data from D2F API</span></footer>
+          {isAdmin && page === 'overview' && <Overview data={overview} days={days} onPeriod={setDays} loading={overviewLoading} onGo={setPage} />}
+          {page === 'shipments' && <Shipments staffAccess={!isAdmin} token={token} notify={notify} refreshOverview={loadOverview} refreshKey={refreshKey} key="shipments" />}
+          {page === 'containers' && <Containers token={token} notify={notify} refreshKey={refreshKey} />}
+          {isAdmin && page === 'locations' && <Locations token={token} notify={notify} refreshKey={refreshKey} />}
+          {page === 'bookings' && <Shipments staffAccess={!isAdmin} token={token} notify={notify} refreshOverview={loadOverview} refreshKey={refreshKey} bookings key="bookings" />}
+          {isAdmin && page === 'marketplace' && <Commerce kind="MARKETPLACE" token={token} notify={notify} refreshKey={refreshKey} key="marketplace" />}
+          {isAdmin && page === 'buy-for-me' && <Commerce kind="BUY_FOR_ME" token={token} notify={notify} refreshKey={refreshKey} key="buy-for-me" />}
+          {page === 'customers' && <Customers staffAccess={!isAdmin} token={token} notify={notify} refreshKey={refreshKey} key="customers" />}
+          {isAdmin && page === 'team' && <Team token={token} notify={notify} refreshKey={refreshKey} currentUserId={session.user.id} key="team" />}
+          {isAdmin && page === 'system' && <SystemHealth token={token} notify={notify} refreshKey={refreshKey} key="system" />}
+          <footer className="page-footer"><span>© {new Date().getFullYear()} D2F Global</span><span><ShieldCheck size={13} /> {isAdmin ? 'Admin' : 'Staff'} operations · Data from D2F API</span></footer>
         </main>
       </div>
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   ) : (
     <>
-      <Login onSignedIn={(value) => { setSession(value); setToast({ message: 'Welcome to your Admin dashboard.', type: 'success', key: Date.now() }); }} />
+      <Login onSignedIn={(value) => { setSession(value); setPage(value.user.role === 'STAFF' ? 'shipments' : 'overview'); setToast({ message: 'Welcome to your Admin dashboard.', type: 'success', key: Date.now() }); }} />
       <Toast toast={toast} onClose={() => setToast(null)} />
     </>
   );
