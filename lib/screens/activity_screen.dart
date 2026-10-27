@@ -11,7 +11,13 @@ import 'parcel_detail_screen.dart';
 class ActivityScreen extends StatefulWidget {
   final Future<List<Parcel>> Function({String? q})? loadParcels;
   final Future<Map<String, int>> Function()? loadStats;
-  const ActivityScreen({super.key, this.loadParcels, this.loadStats});
+  final Future<ParcelBoardResult> Function({String? q})? loadBoard;
+  const ActivityScreen({
+    super.key,
+    this.loadParcels,
+    this.loadStats,
+    this.loadBoard,
+  });
 
   @override
   State<ActivityScreen> createState() => ActivityScreenState();
@@ -26,8 +32,10 @@ class ActivityScreenState extends State<ActivityScreen> {
     ('RECEIVED', 'Received'),
     ('PROCESSING', 'Processing'),
     ('IN_TRANSIT', 'In Transit'),
-    ('ARRIVED_LOME', 'Arrived'),
+    ('ARRIVED_LOME', 'Arrived Lomé'),
+    ('ARRIVED_DESTINATION', 'Arrived'),
     ('READY_FOR_PICKUP', 'Ready'),
+    ('RELEASED', 'Released'),
     ('DELIVERED', 'Delivered'),
   ];
 
@@ -58,15 +66,38 @@ class ActivityScreenState extends State<ActivityScreen> {
       _error = null;
     });
     try {
-      final results = await Future.wait([
-        widget.loadParcels?.call(q: _query.isEmpty ? null : _query) ??
-            Api.I.parcels(q: _query.isEmpty ? null : _query),
-        widget.loadStats?.call() ?? Api.I.parcelStats(),
-      ]);
+      final q = _query.isEmpty ? null : _query;
+      if (widget.loadBoard != null) {
+        final board = await widget.loadBoard!(q: q);
+        if (!mounted) return;
+        setState(() {
+          _parcels = board.parcels;
+          _counts = board.counts;
+          _loading = false;
+        });
+        return;
+      }
+      // Injected loaders are retained for widget tests and previews.
+      if (widget.loadParcels != null || widget.loadStats != null) {
+        final results = await Future.wait([
+          widget.loadParcels?.call(q: q) ?? Api.I.parcels(q: q),
+          widget.loadStats?.call() ?? Api.I.parcelStats(),
+        ]);
+        if (!mounted) return;
+        setState(() {
+          _parcels = results[0] as List<Parcel>;
+          _counts = results[1] as Map<String, int>;
+          _loading = false;
+        });
+        return;
+      }
+      // One server snapshot keeps "All (n)" and every status chip in sync with
+      // the rows rendered below them.
+      final board = await Api.I.parcelBoard(q: q);
       if (!mounted) return;
       setState(() {
-        _parcels = results[0] as List<Parcel>;
-        _counts = results[1] as Map<String, int>;
+        _parcels = board.parcels;
+        _counts = board.counts;
         _loading = false;
       });
     } on ApiException catch (e) {

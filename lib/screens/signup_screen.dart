@@ -11,6 +11,7 @@ import '../providers/auth_provider.dart';
 import '../widgets/auth_widgets.dart';
 import '../core/theme.dart';
 import '../widgets/country_flag.dart';
+import '../core/service_area.dart';
 
 class SignupScreen extends ConsumerStatefulWidget {
   final VoidCallback? onBack;
@@ -20,18 +21,7 @@ class SignupScreen extends ConsumerStatefulWidget {
 }
 
 class _SignupScreenState extends ConsumerState<SignupScreen> {
-  static const _countries = [
-    ('🇹🇬', 'Togo', '+228', 8),
-    ('🇬🇭', 'Ghana', '+233', 9),
-    ('🇧🇯', 'Benin', '+229', 10),
-    ('🇳🇬', 'Nigeria', '+234', 10),
-    ('🇨🇮', 'Côte d’Ivoire', '+225', 10),
-    ('🇺🇸', 'United States', '+1', 10),
-    ('🇨🇦', 'Canada', '+1', 10),
-    ('🇫🇷', 'France', '+33', 9),
-    ('🇬🇧', 'United Kingdom', '+44', 10),
-    ('🇵🇰', 'Pakistan', '+92', 10),
-  ];
+  static const _countries = kServiceCountries;
   final _name = TextEditingController(),
       _email = TextEditingController(),
       _phone = TextEditingController(),
@@ -66,8 +56,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           'Ghana',
           'Nigeria',
           'France',
-          'United Kingdom',
-          'Pakistan',
+          'Belgium',
         ].contains(_countries[_country].$2) &&
         digits.startsWith('0')) {
       digits = digits.substring(1);

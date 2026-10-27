@@ -9,10 +9,18 @@ import '../models/models.dart';
 class TrackingTimeline extends StatelessWidget {
   final List<TrackingEvent> events;
   final String currentStatus;
+
+  /// Lets authorized staff correct an accidental operational note without
+  /// deleting the original event, actor, time, or location.
+  final bool Function(TrackingEvent event)? canEditNote;
+  final void Function(TrackingEvent event)? onEditNote;
+
   const TrackingTimeline({
     super.key,
     required this.events,
     required this.currentStatus,
+    this.canEditNote,
+    this.onEditNote,
   });
   @override
   Widget build(BuildContext context) {
@@ -139,6 +147,31 @@ class TrackingTimeline extends StatelessWidget {
                               height: 1.5,
                             ),
                           ),
+                          if (canEditNote?.call(event) ?? false)
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton.icon(
+                                onPressed: () => onEditNote?.call(event),
+                                style: TextButton.styleFrom(
+                                  padding: EdgeInsets.zero,
+                                  minimumSize: const Size(0, 28),
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  foregroundColor: AppColors.blue,
+                                ),
+                                icon: const Icon(
+                                  Icons.edit_note_rounded,
+                                  size: 16,
+                                ),
+                                label: const Text(
+                                  'Correct note',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
                         ],
                         if (event.location?.isNotEmpty ?? false) ...[
                           const SizedBox(height: 7),

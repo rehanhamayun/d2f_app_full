@@ -1,6 +1,6 @@
 # D2F Global
 
-Android staff shipping app for D2F Shipping LLC, with a shared Express/Prisma/PostgreSQL backend. This build covers the Milestone 1 staff parcel foundation and the requested UI/label enhancements.
+Android staff shipping app for D2F Shipping LLC, with a shared Express/Prisma/PostgreSQL backend. The repository now includes the Milestone 1 staff parcel foundation and the local Milestone 2 warehouse/admin implementation. Hosted deployments still require the new backend migration and updated clients.
 
 Current Android release: **1.0.7+2011**, including the supplied D2F wordmark launcher icon and updated signup artwork. See [source and build guide](SOURCE_CODE.md) for the repository contents, local setup, and private configuration needed to reproduce a build.
 
@@ -19,6 +19,16 @@ The app defaults to the live HTTPS backend at https://d2f-api-production.up.rail
 - Marketplace (A) and Buy For Me (D) appear as **Coming soon**, as requested. Commerce workflows are not enabled.
 
 See [MILESTONE_1_REVIEW.md](MILESTONE_1_REVIEW.md) for requirement mapping, validation and acceptance items. The existing Flutter/custom backend architecture differs from the original FlutterFlow/Firebase specification; the client’s written architecture decision still needs to be recorded.
+
+See [MILESTONE_1_CORRECTIONS.md](MILESTONE_1_CORRECTIONS.md) for the response to the 15 review messages, the dependency/security outcome, the assessment-only multi-package, sea-pricing and container-routing options, and the outstanding account-ownership transfer actions.
+
+## Milestone 2
+
+Staff can open **Warehouse & Containers** from Home to create a container, load parcels by saved QR/barcode or manual tracking number, preview/print a manifest, and record departure and arrival. The manifest freezes at departure; loaded parcel progress updates atomically and retains its actor/time/location history. Both EU/USA → Africa and return routes are supported through actual configured facilities.
+
+The web portal adds containers/manifests, locations, account facility assignments, customer profile editing, booking intake, Marketplace products/manual orders and Buy For Me requests/quotes. Authorized Staff dispatchers have an operational workspace; account administration, commerce and location changes remain Admin only. Existing labels, tracking identities and authentication are retained.
+
+See [MILESTONE_2_REVIEW.md](MILESTONE_2_REVIEW.md) for requirements, tests, selected service countries, screenshots, migration and release/acceptance limits. Deploy the backend migration before publishing the new clients. Customer shopping, payment collection and invoice integration are later scope.
 
 ## Web Admin dashboard
 

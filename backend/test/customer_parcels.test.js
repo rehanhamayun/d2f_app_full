@@ -27,6 +27,9 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
 
   try {
     const organization = await prisma.organization.findFirstOrThrow();
+    const omaha = await prisma.location.findFirstOrThrow({
+      where: { organizationId: organization.id, code: 'OMA-1' },
+    });
     const customer = await prisma.user.create({
       data: {
         email: `customer-${suffix}@example.com`,
@@ -55,6 +58,7 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
         passwordHash: 'unused',
         role: 'STAFF',
         organizationId: organization.id,
+        locationId: omaha.id,
       },
     });
     createdUsers.push(staff.id);
@@ -175,7 +179,7 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
       {
         token: staffToken,
         method: 'POST',
-        data: { status: 'RECEIVED', location: 'Omaha Warehouse' },
+        data: { status: 'RECEIVED', locationId: omaha.id, confirmed: true },
       },
     );
     assert.equal(staffTransition.status, 201, JSON.stringify(staffTransition.body));

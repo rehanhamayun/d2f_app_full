@@ -28,6 +28,7 @@ class ShipScreenState extends State<ShipScreen> {
   final _recipientName = TextEditingController();
   final _recipientPhone = TextEditingController();
   final _recipientAddress = TextEditingController();
+  final _pickupAddress = TextEditingController();
   final _weight = TextEditingController();
   final _notes = TextEditingController();
 
@@ -63,6 +64,7 @@ class ShipScreenState extends State<ShipScreen> {
     _recipientName.dispose();
     _recipientPhone.dispose();
     _recipientAddress.dispose();
+    _pickupAddress.dispose();
     _weight.dispose();
     _notes.dispose();
     super.dispose();
@@ -153,6 +155,19 @@ class ShipScreenState extends State<ShipScreen> {
       ).showSnackBar(const SnackBar(content: Text('Select a package type.')));
       return;
     }
+    final routeError = validateRouteSelection(
+      origin: _origin,
+      destination: _destination,
+      method: _method,
+      pickupAddress: _pickupAddress.text,
+      recipientAddress: _recipientAddress.text,
+    );
+    if (routeError != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(routeError)));
+      return;
+    }
 
     setState(() => _saving = true);
     try {
@@ -163,6 +178,7 @@ class ShipScreenState extends State<ShipScreen> {
         recipientName: _recipientName.text.trim(),
         recipientPhone: _recipientPhone.text.trim(),
         recipientAddress: _recipientAddress.text.trim(),
+        pickupAddress: _pickupAddress.text.trim(),
         packageType: _packageType!,
         weightKg: double.parse(_weight.text.trim()),
         origin: _origin!,
@@ -192,6 +208,7 @@ class ShipScreenState extends State<ShipScreen> {
     _recipientName.clear();
     _recipientPhone.clear();
     _recipientAddress.clear();
+    _pickupAddress.clear();
     _weight.clear();
     _notes.clear();
     setState(() {
@@ -423,6 +440,40 @@ class ShipScreenState extends State<ShipScreen> {
                               ? 'Required'
                               : null,
                         ),
+                        if (_method == ShippingMethod.ROAD) ...[
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Pickup address',
+                            style: TextStyle(
+                              color: AppColors.navy,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          TextFormField(
+                            key: const ValueKey('parcel-pickup-address'),
+                            controller: _pickupAddress,
+                            decoration: const InputDecoration(
+                              hintText: 'Street address where we collect the parcel',
+                              prefixIcon: Icon(Icons.home_work_outlined),
+                            ),
+                            validator: (v) {
+                              if (_method != ShippingMethod.ROAD) return null;
+                              return (v == null || v.trim().isEmpty)
+                                  ? 'Required for road shipments'
+                                  : null;
+                            },
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Same-city road deliveries are allowed when the pickup and delivery addresses are different.',
+                            style: AppTheme.caption.copyWith(
+                              fontSize: 10.5,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -479,6 +530,14 @@ class ShipScreenState extends State<ShipScreen> {
                                   prefixIcon: Icon(Icons.place_rounded),
                                 ),
                               ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Where the shipment starts. The receiving D2F warehouse is recorded separately at intake.',
+                                style: AppTheme.caption.copyWith(
+                                  fontSize: 10,
+                                  height: 1.4,
+                                ),
+                              ),
                             ],
                           ),
                           second: Column(
@@ -519,11 +578,16 @@ class ShipScreenState extends State<ShipScreen> {
                                   hintText: 'Select destination',
                                   prefixIcon: Icon(Icons.location_on_outlined),
                                 ),
-                                validator: (v) => v == null
-                                    ? 'Required'
-                                    : v == _origin
-                                    ? 'Choose a different destination'
-                                    : null,
+                                validator: (v) =>
+                                    v == null ? 'Required' : null,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Togo cities (Lomé, Kara, Sokodé and more) are available for domestic road deliveries.',
+                                style: AppTheme.caption.copyWith(
+                                  fontSize: 10,
+                                  height: 1.4,
+                                ),
                               ),
                             ],
                           ),

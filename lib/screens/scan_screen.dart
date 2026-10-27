@@ -3,13 +3,15 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../core/api.dart';
 import '../core/theme.dart';
+import '../core/tracking_code.dart';
 import '../widgets/common.dart';
 import 'parcel_detail_screen.dart';
 
 /// Scan Parcel / Manual Tracking Lookup (screen map #6).
 /// Camera scan of a parcel QR/Code-128, plus manual fallback field.
 class ScanScreen extends StatefulWidget {
-  const ScanScreen({super.key});
+  final bool returnTracking;
+  const ScanScreen({super.key, this.returnTracking = false});
 
   @override
   State<ScanScreen> createState() => _ScanScreenState();
@@ -43,6 +45,19 @@ class _ScanScreenState extends State<ScanScreen> {
 
   Future<void> _lookup(String code, {bool scanned = false}) async {
     if (_busy || code.trim().isEmpty) return;
+    final trackingId = normalizeTrackingCode(code);
+    if (trackingId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'This code is not a D2F tracking number. Try the number printed below the barcode.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _busy = true);
     // Pause camera while navigating so repeated frames don't re-trigger.
@@ -50,7 +65,11 @@ class _ScanScreenState extends State<ScanScreen> {
       await _controller.stop();
     } catch (_) {}
     try {
-      final parcel = await Api.I.parcelDetail(code);
+      if (widget.returnTracking) {
+        if (mounted) Navigator.pop(context, trackingId);
+        return;
+      }
+      final parcel = await Api.I.parcelDetail(trackingId);
       if (!mounted) return;
       await Navigator.push(
         context,
@@ -77,7 +96,7 @@ class _ScanScreenState extends State<ScanScreen> {
       );
     } finally {
       try {
-        await _controller.start();
+        if (mounted && !widget.returnTracking) await _controller.start();
       } catch (_) {}
     }
   }

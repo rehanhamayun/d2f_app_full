@@ -57,14 +57,13 @@ void main() {
       expect(parcel.events, isEmpty);
       expect(parcel.destinationFlag, '🇧🇯');
       expect(statusLabel(parcel.status), 'In Transit');
-      expect(statusSubLabel(parcel.status), 'On the way to West Africa');
+      expect(statusSubLabel(parcel.status), 'On the way to destination');
     });
 
     test('status transitions map matches backend contract', () {
-      expect(
-        kAllowedTransitions['RECEIVED'],
-        containsAll(['PROCESSING', 'IN_TRANSIT']),
-      );
+      expect(kAllowedTransitions['RECEIVED'], ['PROCESSING']);
+      expect(kAllowedTransitions['PROCESSING'], ['IN_TRANSIT']);
+      expect(kAllowedTransitions['READY_FOR_PICKUP'], ['RELEASED']);
       expect(kAllowedTransitions['DELIVERED'], isEmpty);
     });
   });

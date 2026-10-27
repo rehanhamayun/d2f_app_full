@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/service_area.dart';
+
 // ── Enums ────────────────────────────────────────────────────────────────────
 
 enum UserRole { ADMIN, STAFF, CUSTOMER, DRIVER }
@@ -47,18 +49,57 @@ const List<String> kParcelStatuses = [
   'PROCESSING',
   'IN_TRANSIT',
   'ARRIVED_LOME',
+  'ARRIVED_DESTINATION',
   'READY_FOR_PICKUP',
+  'RELEASED',
   'DELIVERED',
 ];
 
 const Map<String, List<String>> kAllowedTransitions = {
   'REQUESTED': ['RECEIVED'],
-  'RECEIVED': ['PROCESSING', 'IN_TRANSIT'],
-  'PROCESSING': ['IN_TRANSIT', 'ARRIVED_LOME'],
-  'IN_TRANSIT': ['ARRIVED_LOME'],
+  'RECEIVED': ['PROCESSING'],
+  'PROCESSING': ['IN_TRANSIT'],
+  'IN_TRANSIT': ['ARRIVED_LOME', 'ARRIVED_DESTINATION'],
   'ARRIVED_LOME': ['READY_FOR_PICKUP'],
-  'READY_FOR_PICKUP': ['DELIVERED'],
+  'ARRIVED_DESTINATION': ['READY_FOR_PICKUP'],
+  'READY_FOR_PICKUP': ['RELEASED'],
+  'RELEASED': ['DELIVERED'],
   'DELIVERED': [],
+};
+
+/// Physical updates that require staff to confirm they handled the parcel at
+/// the selected facility.
+const Set<String> kConfirmationStatuses = {
+  'RECEIVED',
+  'IN_TRANSIT',
+  'ARRIVED_LOME',
+  'ARRIVED_DESTINATION',
+  'READY_FOR_PICKUP',
+  'RELEASED',
+  'DELIVERED',
+};
+
+/// Every physical update must name the D2F facility where it happened.
+/// Processing happens at the facility too, but it does not need the separate
+/// "I physically verified this parcel" acknowledgement.
+const Set<String> kFacilityRequiredStatuses = {
+  ...kConfirmationStatuses,
+  'PROCESSING',
+};
+
+const List<String> kDeliveryProofTypes = [
+  'SIGNATURE',
+  'PHOTO',
+  'ID_CONFIRMATION',
+  'RECIPIENT_CONFIRMATION',
+];
+
+String deliveryProofLabel(String type) => switch (type) {
+  'SIGNATURE' => 'Signature',
+  'PHOTO' => 'Photo',
+  'ID_CONFIRMATION' => 'ID confirmation',
+  'RECIPIENT_CONFIRMATION' => 'Recipient confirmation',
+  _ => type,
 };
 
 String statusLabel(String status) => switch (status) {
@@ -67,6 +108,8 @@ String statusLabel(String status) => switch (status) {
   'PROCESSING' => 'Processing',
   'IN_TRANSIT' => 'In Transit',
   'ARRIVED_LOME' => 'Arrived in Lomé',
+  'ARRIVED_DESTINATION' => 'Arrived at Destination',
+  'RELEASED' => 'Released',
   'READY_FOR_PICKUP' => 'Ready for Pickup',
   'DELIVERED' => 'Delivered',
   _ => status,
@@ -79,6 +122,8 @@ String statusShortLabel(String status) => switch (status) {
   'PROCESSING' => 'Processing',
   'IN_TRANSIT' => 'In Transit',
   'ARRIVED_LOME' => 'Arrived',
+  'ARRIVED_DESTINATION' => 'Arrived',
+  'RELEASED' => 'Released',
   'READY_FOR_PICKUP' => 'Ready',
   'DELIVERED' => 'Delivered',
   _ => status,
@@ -87,10 +132,12 @@ String statusShortLabel(String status) => switch (status) {
 /// Short operational sub-label shown under chips / list cards.
 String statusSubLabel(String status) => switch (status) {
   'REQUESTED' => 'Awaiting D2F intake confirmation',
-  'RECEIVED' => 'At warehouse (USA)',
+  'RECEIVED' => 'At warehouse',
   'PROCESSING' => 'Being prepared for shipment',
-  'IN_TRANSIT' => 'On the way to West Africa',
+  'IN_TRANSIT' => 'On the way to destination',
   'ARRIVED_LOME' => 'Arrived at Lomé facility',
+  'ARRIVED_DESTINATION' => 'Arrived at destination facility',
+  'RELEASED' => 'Released for collection or delivery',
   'READY_FOR_PICKUP' => 'Ready for pickup',
   'DELIVERED' => 'Picked up / delivered',
   _ => '',
@@ -101,8 +148,11 @@ String statusHeadline(String status) => switch (status) {
   'REQUESTED' => 'Your shipment request is awaiting D2F intake confirmation.',
   'RECEIVED' => 'Your parcel is registered at our warehouse.',
   'PROCESSING' => 'Your parcel is being prepared for shipment.',
-  'IN_TRANSIT' => 'Your package is on the way to West Africa. Arriving soon!',
+  'IN_TRANSIT' => 'Your parcel is on the way to its destination.',
   'ARRIVED_LOME' => 'Your parcel has arrived at our Lomé facility.',
+  'ARRIVED_DESTINATION' =>
+    'Your parcel has arrived at its destination facility.',
+  'RELEASED' => 'Your parcel has been released for collection or delivery.',
   'READY_FOR_PICKUP' => 'Your parcel is ready at the pickup location.',
   'DELIVERED' => 'Package successfully delivered to the recipient.',
   _ => '',
@@ -182,6 +232,7 @@ class TrackingEvent {
   final String status;
   final String? note;
   final String? location;
+  final String? actorId;
   final String? actorName;
   final DateTime createdAt;
 
@@ -190,6 +241,7 @@ class TrackingEvent {
     required this.status,
     this.note,
     this.location,
+    this.actorId,
     this.actorName,
     required this.createdAt,
   });
@@ -199,8 +251,39 @@ class TrackingEvent {
     status: j['status'] as String,
     note: j['note'] as String?,
     location: j['location'] as String?,
+    actorId: j['actorId'] as String?,
     actorName: (j['actor'] as Map<String, dynamic>?)?['fullName'] as String?,
     createdAt: DateTime.tryParse(j['createdAt'] as String) ?? DateTime.now(),
+  );
+}
+
+class ParcelTransfer {
+  final String id;
+  final String? fromLocationName;
+  final String? toLocationName;
+  final String? actorName;
+  final String? note;
+  final DateTime createdAt;
+
+  const ParcelTransfer({
+    required this.id,
+    this.fromLocationName,
+    this.toLocationName,
+    this.actorName,
+    this.note,
+    required this.createdAt,
+  });
+
+  factory ParcelTransfer.fromJson(Map<String, dynamic> j) => ParcelTransfer(
+    id: j['id'] as String,
+    fromLocationName:
+        (j['fromLocation'] as Map<String, dynamic>?)?['name'] as String?,
+    toLocationName:
+        (j['toLocation'] as Map<String, dynamic>?)?['name'] as String?,
+    actorName: (j['actor'] as Map<String, dynamic>?)?['fullName'] as String?,
+    note: j['note'] as String?,
+    createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ??
+        DateTime.now(),
   );
 }
 
@@ -211,6 +294,7 @@ class Parcel {
   final String recipientName;
   final String? recipientPhone;
   final String? recipientAddress;
+  final String? pickupAddress;
   final String packageType;
   final double weightKg;
   final String origin;
@@ -222,6 +306,15 @@ class Parcel {
   final DateTime updatedAt;
   final Customer? customer;
   final List<TrackingEvent> events;
+  final List<ParcelTransfer> transfers;
+  final String? releasedToName, releasedToIdNumber;
+  final DateTime? releasedAt;
+  final String? deliveredToName, deliveredToIdNumber;
+  final DateTime? deliveredAt;
+  final String? deliveryProofType, deliveryProofReference;
+  final String? containerId, containerCode, containerStatus;
+  bool get containerManaged =>
+      containerId != null && containerStatus != 'ARRIVED';
 
   const Parcel({
     required this.id,
@@ -230,6 +323,7 @@ class Parcel {
     required this.recipientName,
     this.recipientPhone,
     this.recipientAddress,
+    this.pickupAddress,
     required this.packageType,
     required this.weightKg,
     required this.origin,
@@ -241,15 +335,31 @@ class Parcel {
     required this.updatedAt,
     this.customer,
     this.events = const [],
+    this.transfers = const [],
+    this.releasedToName,
+    this.releasedToIdNumber,
+    this.releasedAt,
+    this.deliveredToName,
+    this.deliveredToIdNumber,
+    this.deliveredAt,
+    this.deliveryProofType,
+    this.deliveryProofReference,
+    this.containerId,
+    this.containerCode,
+    this.containerStatus,
   });
 
   factory Parcel.fromJson(Map<String, dynamic> j) => Parcel(
+    containerId: j['containerId'] as String?,
+    containerCode: j['container']?['code'] as String?,
+    containerStatus: j['container']?['status'] as String?,
     id: j['id'] as String,
     trackingId: j['trackingId'] as String,
     customerId: j['customerId'] as String,
     recipientName: j['recipientName'] as String? ?? '',
     recipientPhone: j['recipientPhone'] as String?,
     recipientAddress: j['recipientAddress'] as String?,
+    pickupAddress: j['pickupAddress'] as String?,
     packageType: j['packageType'] as String? ?? 'OTHER',
     weightKg: (j['weightKg'] as num?)?.toDouble() ?? 0,
     origin: j['origin'] as String? ?? '',
@@ -267,21 +377,25 @@ class Parcel {
     events: (j['events'] as List<dynamic>? ?? [])
         .map((e) => TrackingEvent.fromJson(e as Map<String, dynamic>))
         .toList(),
+    transfers: (j['transfers'] as List<dynamic>? ?? [])
+        .map((e) => ParcelTransfer.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    releasedToName: j['releasedToName'] as String?,
+    releasedToIdNumber: j['releasedToIdNumber'] as String?,
+    releasedAt: j['releasedAt'] == null
+        ? null
+        : DateTime.tryParse(j['releasedAt'] as String),
+    deliveredToName: j['deliveredToName'] as String?,
+    deliveredToIdNumber: j['deliveredToIdNumber'] as String?,
+    deliveredAt: j['deliveredAt'] == null
+        ? null
+        : DateTime.tryParse(j['deliveredAt'] as String),
+    deliveryProofType: j['deliveryProofType'] as String?,
+    deliveryProofReference: j['deliveryProofReference'] as String?,
   );
 
   /// Country flag emoji derived from the destination string.
-  String get destinationFlag {
-    final d = destination.toLowerCase();
-    if (d.contains('togo')) return '🇹🇬';
-    if (d.contains('benin')) return '🇧🇯';
-    if (d.contains('burkina')) return '🇧🇫';
-    if (d.contains('gabon')) return '🇬🇦';
-    if (d.contains('ghana')) return '🇬🇭';
-    if (d.contains('senegal')) return '🇸🇳';
-    if (d.contains('nigeria')) return '🇳🇬';
-    if (d.contains('usa') || d.contains('united states')) return '🇺🇸';
-    return '🌍';
-  }
+  String get destinationFlag => serviceCountryFlag(destination);
 
   String get packageTypeLabel => switch (packageType) {
     'BOX' => 'Box',
@@ -305,16 +419,31 @@ const List<String> kOriginOptions = [
   'Houston, TX, USA',
   'Atlanta, GA, USA',
   'Brussels, Belgium',
+  'Paris, France',
+];
+
+const List<String> kTogoDomesticLocations = [
+  'Lomé, Togo',
+  'Kara, Togo',
+  'Sokodé, Togo',
+  'Atakpamé, Togo',
+  'Kpalimé, Togo',
+  'Tsévié, Togo',
+  'Aného, Togo',
+  'Dapaong, Togo',
+  'Bassar, Togo',
+  'Notsé, Togo',
 ];
 
 const List<String> kDestinationOptions = [
-  'Lomé, Togo',
+  ...kTogoDomesticLocations,
   'Cotonou, Benin',
   'Ouagadougou, Burkina Faso',
   'Libreville, Gabon',
   'Accra, Ghana',
   'Dakar, Senegal',
   'Lagos, Nigeria',
+  'Abidjan, Côte d’Ivoire',
 ];
 
 /// Both directions share the same location suggestions. A route may also use
@@ -338,12 +467,83 @@ class ShipmentRoute {
       ShipmentRoute(origin: destination, destination: origin, method: method);
 }
 
-const List<String> kEventLocations = [
-  'Omaha, NE, USA',
-  'Lomé, Togo',
-  'Cotonou, Benin',
-  'Ouagadougou, Burkina Faso',
-  'Libreville, Gabon',
-  'Accra, Ghana',
-  'In Transit',
-];
+String _foldRouteText(String value) => value
+    .toLowerCase()
+    .replaceAll(RegExp(r'[àáâãäå]'), 'a')
+    .replaceAll(RegExp(r'[éèêë]'), 'e')
+    .replaceAll(RegExp(r'[íìîï]'), 'i')
+    .replaceAll(RegExp(r'[óòôõö]'), 'o')
+    .replaceAll(RegExp(r'[úùûü]'), 'u')
+    .replaceAll('ç', 'c')
+    .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+    .trim();
+
+String routeCity(String value) =>
+    _foldRouteText(value.split(',').first.trim());
+
+bool sameRouteCity(String a, String b) {
+  final left = routeCity(a);
+  final right = routeCity(b);
+  return left.isNotEmpty && left == right;
+}
+
+/// Mirrors the backend route rules so staff see a useful message before the
+/// request is sent. Air/sea require different cities; same-city road delivery
+/// is allowed only when pickup and delivery addresses genuinely differ.
+String? validateRouteSelection({
+  required String? origin,
+  required String? destination,
+  required ShippingMethod method,
+  String? pickupAddress,
+  String? recipientAddress,
+}) {
+  if (origin == null || destination == null) return 'Select an origin and destination.';
+  if (!sameRouteCity(origin, destination)) return null;
+  if (method == ShippingMethod.ROAD) {
+    final pickup = pickupAddress?.trim() ?? '';
+    final delivery = recipientAddress?.trim() ?? '';
+    if (pickup.isEmpty || delivery.isEmpty) {
+      return 'Same-city road deliveries require both a pickup address and a delivery address.';
+    }
+    if (_foldRouteText(pickup) == _foldRouteText(delivery)) {
+      return 'Pickup and delivery addresses must be different for a same-city road delivery.';
+    }
+    return null;
+  }
+  return 'Air and sea shipments require different origin and destination cities.';
+}
+
+/// Legacy display suggestions only. Status updates use the organization's
+/// facilities from the API so "In Transit" can never be recorded as a place.
+const List<String> kEventLocations = [...kShippingLocationOptions];
+
+/// Result of `/parcels/board`: rows and filter counters are read in the same
+/// database snapshot, so a chip count always matches its visible list.
+class ParcelBoardResult {
+  final List<Parcel> parcels;
+  final Map<String, int> counts;
+  final int total;
+  final int limit;
+  final int offset;
+
+  const ParcelBoardResult({
+    required this.parcels,
+    required this.counts,
+    required this.total,
+    required this.limit,
+    required this.offset,
+  });
+
+  factory ParcelBoardResult.fromJson(Map<String, dynamic> j) =>
+      ParcelBoardResult(
+        parcels: (j['parcels'] as List<dynamic>? ?? [])
+            .map((p) => Parcel.fromJson(p as Map<String, dynamic>))
+            .toList(),
+        counts: (j['counts'] as Map<dynamic, dynamic>? ?? {}).map(
+          (key, value) => MapEntry(key.toString(), (value as num).toInt()),
+        ),
+        total: (j['total'] as num?)?.toInt() ?? 0,
+        limit: (j['limit'] as num?)?.toInt() ?? 0,
+        offset: (j['offset'] as num?)?.toInt() ?? 0,
+      );
+}

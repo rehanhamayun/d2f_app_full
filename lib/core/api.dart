@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/models.dart';
+import '../models/warehouse.dart';
 
 /// Thrown for any API failure with a human-friendly message.
 class ApiException implements Exception {
@@ -406,6 +407,32 @@ class Api {
     }
   }
 
+  /// Rows and counters from one server snapshot. Use this instead of separate
+  /// list/stats calls so filter chips cannot disagree with the visible rows.
+  Future<ParcelBoardResult> parcelBoard({
+    String? q,
+    String? status,
+    int limit = 500,
+    int offset = 0,
+  }) async {
+    try {
+      final res = await _dio!.get(
+        '/parcels/board',
+        queryParameters: {
+          if (q != null && q.isNotEmpty) 'q': q,
+          if (status != null && status != 'ALL') 'status': status,
+          'limit': limit,
+          'offset': offset,
+        },
+      );
+      return ParcelBoardResult.fromJson(
+        Map<String, dynamic>.from(res.data as Map),
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
   /// Creates a parcel. Returns the created (or previously-created, when the
   /// same [clientRequestId] is retried) parcel.
   Future<Parcel> createParcel({
@@ -413,6 +440,7 @@ class Api {
     required String recipientName,
     String? recipientPhone,
     String? recipientAddress,
+    String? pickupAddress,
     required String packageType,
     required double weightKg,
     required String origin,
@@ -431,6 +459,8 @@ class Api {
             'recipientPhone': recipientPhone,
           if (recipientAddress != null && recipientAddress.isNotEmpty)
             'recipientAddress': recipientAddress,
+          if (pickupAddress != null && pickupAddress.isNotEmpty)
+            'pickupAddress': pickupAddress,
           'packageType': packageType,
           'weightKg': weightKg,
           'origin': origin,
@@ -457,26 +487,127 @@ class Api {
     }
   }
 
-  /// Records a status update. Accepts UUID or tracking ID.
+  /// Records a status update. Accepts UUID or tracking ID. Physical updates
+  /// must name a facility and set [confirmed] after staff verification.
   Future<void> updateStatus(
     String idOrTracking, {
     required String status,
+    String? locationId,
     String? location,
     String? note,
+    bool confirmed = false,
+    String? releasedToName,
+    String? releasedToIdNumber,
+    DateTime? releasedAt,
+    String? deliveredToName,
+    String? deliveredToIdNumber,
+    DateTime? deliveredAt,
+    String? deliveryProofType,
+    String? deliveryProofReference,
   }) async {
     try {
       await _dio!.post(
         '/parcels/$idOrTracking/events',
         data: {
           'status': status,
+          if (locationId != null && locationId.isNotEmpty)
+            'locationId': locationId,
           if (location != null && location.isNotEmpty) 'location': location,
           if (note != null && note.isNotEmpty) 'note': note,
+          if (confirmed) 'confirmed': true,
+          if (releasedToName != null && releasedToName.isNotEmpty)
+            'releasedToName': releasedToName,
+          if (releasedToIdNumber != null && releasedToIdNumber.isNotEmpty)
+            'releasedToIdNumber': releasedToIdNumber,
+          if (releasedAt != null) 'releasedAt': releasedAt.toIso8601String(),
+          if (deliveredToName != null && deliveredToName.isNotEmpty)
+            'deliveredToName': deliveredToName,
+          if (deliveredToIdNumber != null && deliveredToIdNumber.isNotEmpty)
+            'deliveredToIdNumber': deliveredToIdNumber,
+          if (deliveredAt != null) 'deliveredAt': deliveredAt.toIso8601String(),
+          if (deliveryProofType != null && deliveryProofType.isNotEmpty)
+            'deliveryProofType': deliveryProofType,
+          if (deliveryProofReference != null &&
+              deliveryProofReference.isNotEmpty)
+            'deliveryProofReference': deliveryProofReference,
         },
       );
     } on DioException catch (e) {
       throw _map(e);
     }
   }
+
+  /// Corrects an operational note in place. The original event, actor,
+  /// timestamp and location remain; the server records the before/after audit.
+  Future<void> correctParcelNote(
+    String parcelId,
+    String eventId,
+    String note,
+  ) async {
+    try {
+      await _dio!.patch(
+        '/parcels/$parcelId/events/$eventId/note',
+        data: {'note': note},
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<User> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/auth/password/change',
+        data: {
+          'currentPassword': currentPassword,
+          'newPassword': newPassword,
+        },
+      );
+      _token = response.data['token'] as String;
+      await _storage.write(key: _tokenKey, value: _token!);
+      return User.fromJson(
+        Map<String, dynamic>.from(response.data['user'] as Map),
+      );
+    } on DioException catch (error) {
+      throw _map(error);
+    }
+  }
+
+  // Warehouse operations use the same authenticated session as parcel intake.
+  Future<List<WarehouseLocation>> warehouseLocations() async {
+    final data = await warehouseRequest('/locations');
+    return (data as List)
+        .map((j) => WarehouseLocation.fromJson(Map<String, dynamic>.from(j)))
+        .toList();
+  }
+
+  Future<dynamic> warehouseRequest(
+    String path, {
+    String method = 'GET',
+    Map<String, dynamic>? data,
+    Map<String, dynamic>? query,
+  }) async {
+    try {
+      return (await _dio!.request(
+        '/warehouse$path',
+        data: data,
+        queryParameters: query,
+        options: Options(method: method),
+      )).data;
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<FreightContainer> containerDetail(String id) async =>
+      FreightContainer.fromJson(
+        Map<String, dynamic>.from(
+          await warehouseRequest('/containers/${Uri.encodeComponent(id)}'),
+        ),
+      );
 
   ApiException _map(DioException e) {
     if (e.type == DioExceptionType.connectionTimeout ||

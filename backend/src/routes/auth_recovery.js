@@ -4,9 +4,56 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../db.js';
 import { JWT_SECRET } from '../config.js';
 import { authRateLimit } from '../middleware/auth_rate_limit.js';
+import { authenticate } from '../middleware/auth.js';
+import { sessionFor } from '../auth_session.js';
 
 const router = Router();
 const hash = (ticket, code) => createHmac('sha256', JWT_SECRET).update(`${ticket}:${code}`).digest('hex');
+
+// Change a password while signed in. A successful change revokes every other
+// session but returns a fresh token so the current device stays signed in.
+router.post('/change', authenticate, authRateLimit(20), async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    if (typeof currentPassword !== 'string' || !currentPassword || Buffer.byteLength(currentPassword) > 72) {
+      return res.status(400).json({ error: 'Enter your current password.' });
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 8 || Buffer.byteLength(newPassword) > 72) {
+      return res.status(400).json({ error: 'Use at least 8 characters and at most 72 bytes for the new password.' });
+    }
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ error: 'Choose a new password that is different from your current password.' });
+    }
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: { organization: true, location: true },
+    });
+    if (!user?.isActive) return res.status(401).json({ error: 'Account disabled or not found.' });
+    if (!await bcrypt.compare(currentPassword, user.passwordHash)) {
+      return res.status(400).json({ error: 'Your current password is incorrect.' });
+    }
+    const updated = await prisma.$transaction(async (tx) => {
+      const saved = await tx.user.update({
+        where: { id: user.id },
+        data: { passwordHash: await bcrypt.hash(newPassword, 10), authVersion: { increment: 1 } },
+        include: { organization: true, location: true },
+      });
+      // Any outstanding recovery code belongs to the previous password.
+      await tx.passwordReset.deleteMany({ where: { userId: user.id } });
+      await tx.auditLog.create({
+        data: {
+          actorId: user.id,
+          action: 'PASSWORD_CHANGE',
+          entity: 'User',
+          entityId: user.id,
+          detail: 'Password changed from an authenticated session',
+        },
+      });
+      return saved;
+    });
+    res.json({ ...sessionFor(updated), message: 'Password updated. Other devices have been signed out.' });
+  } catch (error) { next(error); }
+});
 
 router.post('/forgot', authRateLimit(5), async (req, res, next) => {
   try {

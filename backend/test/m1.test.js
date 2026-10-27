@@ -94,7 +94,7 @@ test('M1: authentication, permissions, concurrent retries, tracking and history'
       assert.equal((await request(`/parcels/${parcel.id}/events`,{token,method:'POST',data:{status:'RECEIVED'}})).status,400);
       const saved=(await request(`/parcels/${parcel.trackingId}`,{token})).body;
       assert.equal(saved.status,'PROCESSING');assert.equal(saved.events.length,2);
-      assert.equal(saved.events[1].note,'Prepared for shipment');assert.equal(saved.events[1].location,'Omaha Warehouse');
+      assert.equal(saved.events[1].note,'Prepared for shipment');assert.equal(saved.events[1].location,'Omaha, NE, United States');
       assert.ok(saved.events.every(e=>e.createdAt&&e.actor));
     });
   } finally {

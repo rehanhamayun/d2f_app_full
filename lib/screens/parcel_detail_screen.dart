@@ -1,20 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../core/api.dart';
 import '../core/theme.dart';
 import '../models/models.dart';
+import '../providers/auth_provider.dart';
 import '../widgets/common.dart';
 import '../widgets/reference_widgets.dart';
 import 'label_preview_screen.dart';
 import '../widgets/timeline.dart';
 import 'update_status_screen.dart';
+import 'container_detail_screen.dart';
 import '../services/parcel_report.dart';
 
 /// Parcel Details (design screen 9): header status card + segmented tabs
 /// Overview / Tracking / Details + "Update Status" staff action. The
 /// Tracking tab carries a "Download parcel details" PDF action.
-class ParcelDetailScreen extends StatefulWidget {
+class ParcelDetailScreen extends ConsumerStatefulWidget {
   final String parcelId; // UUID or public tracking ID
   final Future<Parcel> Function(String)? loadParcel;
 
@@ -25,10 +28,11 @@ class ParcelDetailScreen extends StatefulWidget {
   });
 
   @override
-  State<ParcelDetailScreen> createState() => _ParcelDetailScreenState();
+  ConsumerState<ParcelDetailScreen> createState() =>
+      _ParcelDetailScreenState();
 }
 
-class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
+class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
   int _tab = 0;
   Parcel? _parcel;
   String? _error;
@@ -215,7 +219,39 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
         const SizedBox(height: 20),
         _shipmentGrid(parcel),
         const SizedBox(height: 20),
-        if (canUpdate)
+        if (parcel.containerManaged)
+          SectionCard(
+            tint: AppColors.blueSoft,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Container: ${parcel.containerCode ?? 'Assigned'}',
+                  style: AppTheme.sectionTitle,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Departure and arrival are managed together from the container.',
+                  style: AppTheme.caption,
+                ),
+                TextButton(
+                  onPressed: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ContainerDetailScreen(
+                          containerId: parcel.containerId!,
+                        ),
+                      ),
+                    );
+                    if (mounted) _fetch();
+                  },
+                  child: const Text('Open container'),
+                ),
+              ],
+            ),
+          )
+        else if (canUpdate)
           PrimaryButton(
             label: 'Update Status',
             onPressed: () async {
@@ -369,6 +405,8 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
               TrackingTimeline(
                 events: parcel.events,
                 currentStatus: parcel.status,
+                canEditNote: _canCorrectNote,
+                onEditNote: (event) => _editNote(parcel, event),
               ),
             ],
           ),
@@ -392,6 +430,70 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
         const SizedBox(height: 20),
       ],
     );
+  }
+
+  bool _canCorrectNote(TrackingEvent event) {
+    final user = ref.watch(authControllerProvider).valueOrNull;
+    if (user == null || !user.isStaff) return false;
+    return user.role == UserRole.ADMIN || event.actorId == user.id;
+  }
+
+  Future<void> _editNote(Parcel parcel, TrackingEvent event) async {
+    final controller = TextEditingController(text: event.note ?? '');
+    final note = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Correct operational note', style: AppTheme.sectionTitle),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'The event, actor, time and location stay unchanged. The correction is recorded in the audit trail.',
+                style: AppTheme.caption.copyWith(height: 1.4),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                maxLength: 1000,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  hintText: 'Operational note',
+                  alignLabelWithHint: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Save correction'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (note == null || !mounted) return;
+    try {
+      await Api.I.correctParcelNote(parcel.id, event.id, note);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Operational note corrected.')),
+      );
+      await _fetch();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.message)));
+    }
   }
 
   Future<void> _downloadDetails(Parcel parcel) async {

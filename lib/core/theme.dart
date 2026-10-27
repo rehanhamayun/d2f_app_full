@@ -78,6 +78,7 @@ class StatusVisual {
           AppColors.blueSoft,
           AppColors.blue,
         );
+      case 'ARRIVED_DESTINATION':
       case 'ARRIVED_LOME':
         return const StatusVisual(
           AppColors.tealSoft,
@@ -92,6 +93,7 @@ class StatusVisual {
           AppColors.blueSoft,
           AppColors.blue,
         );
+      case 'RELEASED':
       case 'DELIVERED':
         return const StatusVisual(
           AppColors.greenSoft,

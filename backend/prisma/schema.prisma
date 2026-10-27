@@ -1,5 +1,5 @@
-// D2F Shipping — Prisma schema (Milestone 1: staff parcel foundation)
-// Conceptual model per project memory section 8.2, scoped to M1.
+// D2F Shipping — staff parcel foundation, warehouse operations and admin commerce.
+// Existing permanent tracking identities and role boundaries are retained.
 
 generator client {
   provider = "prisma-client-js"
@@ -12,16 +12,19 @@ datasource db {
 
 // Organizations: D2F and permitted partner orgs (future SaaS-ready)
 model Organization {
-  id              String     @id @default(uuid())
+  id              String         @id @default(uuid())
   name            String
-  trackingPrefix  String     @unique
-  trackingCounter BigInt     @default(1)
-  isActive        Boolean    @default(true)
-  createdAt       DateTime   @default(now())
+  trackingPrefix  String         @unique
+  trackingCounter BigInt         @default(1)
+  isActive        Boolean        @default(true)
+  createdAt       DateTime       @default(now())
   users           User[]
   locations       Location[]
   customers       Customer[]
   parcels         Parcel[]
+  containers      Container[]
+  products        Product[]
+  serviceOrders   ServiceOrder[]
 }
 
 // These identity reservations intentionally outlive deleted organizations/parcels.
@@ -53,9 +56,13 @@ model Location {
   timezone       String   @default("America/Chicago")
   createdAt      DateTime @default(now())
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  users        User[]
-  parcels      Parcel[]
+  organization       Organization     @relation(fields: [organizationId], references: [id])
+  users              User[]
+  parcels            Parcel[]
+  transfersFrom      ParcelTransfer[] @relation("transferFrom")
+  transfersTo        ParcelTransfer[] @relation("transferTo")
+  outboundContainers Container[]      @relation("containerOrigin")
+  inboundContainers  Container[]      @relation("containerDestination")
 
   @@unique([organizationId, code])
 }
@@ -88,6 +95,7 @@ model User {
   parcelsCreated   Parcel[]         @relation("parcelsCreatedBy")
   customerProfile  Customer?
   events           TrackingEvent[]
+  transfers        ParcelTransfer[] @relation("transferActor")
   socialIdentities SocialIdentity[]
   passwordResets   PasswordReset[]
 }
@@ -143,40 +151,55 @@ model Customer {
   country        String?
   createdAt      DateTime @default(now())
 
-  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
-  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  parcels      Parcel[]
+  user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organization  Organization?  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  parcels       Parcel[]
+  serviceOrders ServiceOrder[]
 }
 
 // Parcels: permanent UUID + public tracking ID
 model Parcel {
-  id               String   @id @default(uuid()) // permanent internal UUID
-  trackingId       String   @unique // immutable, globally unique public tracking ID
-  organizationId   String
-  trackingSequence BigInt?
-  customerId       String // shipper
-  recipientName    String
-  recipientPhone   String?
-  recipientAddress String?
-  packageType      String // BOX, BARREL, TV, APPLIANCE, FURNITURE, PALLET, VEHICLE...
-  weightKg         Float
-  origin           String
-  destination      String
-  method           String   @default("SEA") // AIR | SEA | ROAD
-  notes            String?
-  status           String   @default("RECEIVED")
-  createdById      String
-  locationId       String?
-  clientRequestId  String? // retry keys belong to the organization that issued them
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                     String    @id @default(uuid()) // permanent internal UUID
+  trackingId             String    @unique // immutable, globally unique public tracking ID
+  organizationId         String
+  trackingSequence       BigInt?
+  customerId             String // shipper
+  recipientName          String
+  recipientPhone         String?
+  recipientAddress       String?
+  packageType            String // BOX, BARREL, TV, APPLIANCE, FURNITURE, PALLET, VEHICLE...
+  weightKg               Float
+  origin                 String // commercial shipping origin, separate from the intake warehouse
+  destination            String
+  pickupAddress          String? // required for same-city road pickups
+  method                 String    @default("SEA") // AIR | SEA | ROAD
+  notes                  String?
+  status                 String    @default("RECEIVED")
+  createdById            String
+  locationId             String? // current physical facility; separate from origin/destination
+  containerId            String?
+  clientRequestId        String? // retry keys belong to the organization that issued them
+  // Handover and delivery evidence. These are written once and retained with the parcel.
+  releasedToName         String?
+  releasedToIdNumber     String?
+  releasedAt             DateTime?
+  deliveredToName        String?
+  deliveredToIdNumber    String?
+  deliveredAt            DateTime?
+  deliveryProofType      String? // SIGNATURE | PHOTO | ID_CONFIRMATION
+  deliveryProofReference String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
-  organization  Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  customer      Customer        @relation(fields: [customerId], references: [id])
-  createdBy     User            @relation("parcelsCreatedBy", fields: [createdById], references: [id])
-  location      Location?       @relation(fields: [locationId], references: [id])
-  events        TrackingEvent[] @relation("parcelEvents")
+  organization  Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer      Customer         @relation(fields: [customerId], references: [id])
+  createdBy     User             @relation("parcelsCreatedBy", fields: [createdById], references: [id])
+  location      Location?        @relation(fields: [locationId], references: [id])
+  events        TrackingEvent[]  @relation("parcelEvents")
+  transfers     ParcelTransfer[]
   trackingIndex TrackingIndex?
+  serviceOrders ServiceOrder[]
+  container     Container?       @relation(fields: [containerId], references: [id], onDelete: Restrict)
 
   @@unique([organizationId, trackingSequence])
   @@unique([organizationId, clientRequestId])
@@ -208,6 +231,25 @@ model TrackingEvent {
   @@index([parcelId, createdAt])
 }
 
+// Physical facility-to-facility movement after international arrival. A parcel
+// must be received at the named destination before it can be released there.
+model ParcelTransfer {
+  id             String   @id @default(uuid())
+  parcelId       String
+  fromLocationId String?
+  toLocationId   String
+  actorId        String?
+  note           String?
+  createdAt      DateTime @default(now())
+
+  parcel       Parcel    @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  fromLocation Location? @relation("transferFrom", fields: [fromLocationId], references: [id], onDelete: SetNull)
+  toLocation   Location  @relation("transferTo", fields: [toLocationId], references: [id], onDelete: Restrict)
+  actor        User?     @relation("transferActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([parcelId, createdAt])
+}
+
 // Audit log for material actions (M1: registration + status updates)
 model AuditLog {
   id        String   @id @default(uuid())
@@ -219,4 +261,82 @@ model AuditLog {
   createdAt DateTime @default(now())
 
   @@index([entity, entityId])
+}
+
+// M2: a parcel belongs to at most one container. Loading closes at departure.
+model Container {
+  id             String           @id @default(uuid())
+  organizationId String
+  code           String
+  originId       String
+  destinationId  String
+  method         String           @default("SEA")
+  status         String           @default("LOADING")
+  sealNumber     String?
+  notes          String?
+  manifest       Json?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  origin         Location         @relation("containerOrigin", fields: [originId], references: [id], onDelete: Restrict)
+  destination    Location         @relation("containerDestination", fields: [destinationId], references: [id], onDelete: Restrict)
+  parcels        Parcel[]
+  events         ContainerEvent[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, createdAt])
+}
+
+model ContainerEvent {
+  id          String    @id @default(uuid())
+  containerId String
+  action      String
+  detail      String?
+  actorName   String
+  createdAt   DateTime  @default(now())
+  container   Container @relation(fields: [containerId], references: [id], onDelete: Restrict)
+
+  @@index([containerId, createdAt])
+}
+
+// Administrative records for the selected Marketplace and Buy For Me modules.
+model Product {
+  id             String         @id @default(uuid())
+  organizationId String
+  title          String
+  category       String
+  description    String?
+  priceMinor     Int
+  currency       String         @default("USD")
+  isActive       Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  orders         ServiceOrder[]
+
+  @@index([organizationId, createdAt])
+}
+
+model ServiceOrder {
+  id             String       @id @default(uuid())
+  organizationId String
+  kind           String
+  customerId     String
+  productId      String?
+  parcelId       String?
+  title          String
+  sourceUrl      String?
+  quantity       Int          @default(1)
+  amountMinor    Int?
+  currency       String       @default("USD")
+  status         String       @default("REQUESTED")
+  notes          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  product        Product?     @relation(fields: [productId], references: [id], onDelete: Restrict)
+  parcel         Parcel?      @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, kind, createdAt])
 }

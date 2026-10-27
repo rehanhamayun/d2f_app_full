@@ -15,7 +15,7 @@ describe('Admin API client', () => {
     vi.restoreAllMocks();
   });
 
-  it('rejects a non-Admin login without saving a session', async () => {
+  it('rejects a Customer login without saving a session', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -35,7 +35,7 @@ describe('Admin API client', () => {
     expect(sessionStorage.getItem('d2f_admin_token')).toBeNull();
   });
 
-  it('stores only Admin sessions in the current tab', () => {
+  it('stores authorized sessions in the current tab', () => {
     saveSession('admin-token', {
       id: 'admin-1',
       role: 'ADMIN',

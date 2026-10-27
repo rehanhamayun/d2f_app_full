@@ -1,6 +1,6 @@
 # D2F Milestone 1 review
 
-Reviewed 20 October 2026 against the Milestone 1 section of `design/screens/D2F_Shipping_Complete_AI_Project_Memory.md` and the UI/label requests in this development session.
+Reviewed 20 October 2026 against the Milestone 1 section of `design/screens/D2F_Shipping_Complete_AI_Project_Memory.md` and the UI/label requests in this development session. The post-walkthrough corrections and outstanding ownership/assessment items are recorded in [MILESTONE_1_CORRECTIONS.md](MILESTONE_1_CORRECTIONS.md).
 
 ## Software requirements
 

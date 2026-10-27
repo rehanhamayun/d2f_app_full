@@ -212,6 +212,7 @@ test('organization tracking allocation is isolated, concurrent-safe, and permane
     await prisma.parcel.deleteMany({ where: { id: { in: parcels } } });
     await prisma.customer.deleteMany({ where: { id: { in: customers } } });
     await prisma.user.deleteMany({ where: { id: { in: users } } });
+    await prisma.location.deleteMany({ where: { organizationId: { in: organizations } } });
     await prisma.organization.deleteMany({ where: { id: { in: organizations } } });
     await prisma.$disconnect();
   }
@@ -238,9 +239,14 @@ test('organizations can concurrently retry the same request key without sharing 
         data: { name: `Retry organization ${requestKey} ${i}`, trackingPrefix: testPrefix() },
       });
       organizations.push(organization.id);
+      const intake = await prisma.location.create({ data: {
+        organizationId: organization.id, name: 'Retry intake', code: 'INT',
+        city: 'Omaha', country: 'United States',
+      } });
       const user = await prisma.user.create({ data: {
         email: `retry-${organization.id}@example.com`, fullName: 'Retry fixture',
         passwordHash: 'unused', role: 'STAFF', organizationId: organization.id,
+        locationId: intake.id,
       } });
       users.push(user.id);
       const customer = await prisma.customer.create({ data: {
@@ -278,6 +284,7 @@ test('organizations can concurrently retry the same request key without sharing 
     await prisma.parcel.deleteMany({ where: { id: { in: parcels } } });
     await prisma.customer.deleteMany({ where: { id: { in: customers } } });
     await prisma.user.deleteMany({ where: { id: { in: users } } });
+    await prisma.location.deleteMany({ where: { organizationId: { in: organizations } } });
     await prisma.organization.deleteMany({ where: { id: { in: organizations } } });
     await new Promise(resolve => server.close(resolve));
     await prisma.$disconnect();

@@ -13,6 +13,7 @@ import '../widgets/route_planner.dart';
 import 'ship_screen.dart';
 import 'parcel_detail_screen.dart';
 import 'scan_screen.dart';
+import 'warehouse_screen.dart';
 
 /// Staff and admin dashboard. Counts and recents come from the existing API.
 class HomeScreen extends ConsumerStatefulWidget {
@@ -265,6 +266,37 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                   ),
                 ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            SectionCard(
+              tint: AppColors.tealSoft,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(
+                  Icons.warehouse_outlined,
+                  color: AppColors.deepTeal,
+                  size: 30,
+                ),
+                title: const Text(
+                  'Warehouse & Containers',
+                  style: AppTheme.sectionTitle,
+                ),
+                subtitle: const Text(
+                  'Load parcels, print manifests and follow freight.',
+                  style: AppTheme.caption,
+                ),
+                trailing: const Icon(
+                  Icons.arrow_forward_rounded,
+                  color: AppColors.deepTeal,
+                ),
+                onTap: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const WarehouseScreen()),
+                  );
+                  if (mounted) _refresh();
+                },
               ),
             ),
             const SizedBox(height: 22),

@@ -26,8 +26,9 @@ test('registration, role invitations, password recovery and provider sign-in', a
   const input = { email, password, fullName: 'Auth QA Customer', phone: '+22890123456' };
   let customer, admin;
   try {
+    const organization = await prisma.organization.findFirstOrThrow();
     admin = await prisma.user.create({ data: { email: `admin-${suffix}@example.com`, fullName: 'Auth QA Admin',
-      role: 'ADMIN', passwordHash: await bcrypt.hash(password, 10) } }); users.push(admin.id);
+      role: 'ADMIN', passwordHash: await bcrypt.hash(password, 10), organizationId: organization.id } }); users.push(admin.id);
     await t.test('public registration defaults to Customer and never requires email or phone verification', async () => {
       const created = await request('/auth/register', input);
       assert.equal(created.status, 201, JSON.stringify(created.body));
@@ -40,7 +41,7 @@ test('registration, role invitations, password recovery and provider sign-in', a
     await t.test('roles cannot be escalated and invitations are email/role bound', async () => {
       for (const role of ['STAFF', 'DRIVER', 'ADMIN']) {
         const rejected = await request('/auth/register', { ...input, email: `${role}-${suffix}@example.com`, role });
-        assert.equal(rejected.status, role === 'ADMIN' ? 400 : 403);
+        assert.equal(rejected.status, 403, `${role} must require an invitation`);
       }
       assert.equal((await request('/auth/invitations', { email, role: 'STAFF' }, customer.token)).status, 403);
       const driverEmail = `driver-${suffix}@example.com`;
@@ -54,6 +55,37 @@ test('registration, role invitations, password recovery and provider sign-in', a
       users.push(registered.body.user.id);
       assert.equal(registered.body.user.role, 'DRIVER');
       assert.equal((await request('/parcels', null, registered.body.token)).status, 403);
+
+      // D2F administrators may create another administrator only through an
+      // authenticated, email-bound invitation. Public registration cannot.
+      const adminEmail = `invited-admin-${suffix}@example.com`;
+      const adminInvitation = (await request('/auth/invitations', { email: adminEmail, role: 'ADMIN' }, sessionFor(admin).token)).body.invitation;
+      assert.ok(adminInvitation);
+      const invitedAdmin = await request('/auth/register', { ...input, email: adminEmail, role: 'ADMIN', invitation: adminInvitation });
+      assert.equal(invitedAdmin.status, 201, JSON.stringify(invitedAdmin.body));
+      users.push(invitedAdmin.body.user.id);
+      assert.equal(invitedAdmin.body.user.role, 'ADMIN');
+      assert.equal((await request('/admin/users', null, invitedAdmin.body.token)).status, 200);
+    });
+    await t.test('signed-in password changes verify the current password and revoke other sessions', async () => {
+      const driverEmail = `driver-${suffix}@example.com`;
+      const before = await request('/auth/login', { email: driverEmail, password });
+      assert.equal(before.status, 200);
+      assert.equal((await request('/auth/password/change', {
+        currentPassword: 'wrong-password', newPassword: 'Driver-password-456',
+      }, before.body.token)).status, 400);
+      assert.equal((await request('/auth/password/change', {
+        currentPassword: password, newPassword: password,
+      }, before.body.token)).status, 400);
+      const changed = await request('/auth/password/change', {
+        currentPassword: password, newPassword: 'Driver-password-456',
+      }, before.body.token);
+      assert.equal(changed.status, 200, JSON.stringify(changed.body));
+      assert.ok(changed.body.token);
+      assert.equal((await request('/auth/me', null, before.body.token)).status, 401);
+      assert.equal((await request('/auth/me', null, changed.body.token)).status, 200);
+      assert.equal((await request('/auth/login', { email: driverEmail, password })).status, 401);
+      assert.equal((await request('/auth/login', { email: driverEmail, password: 'Driver-password-456' })).status, 200);
     });
     await t.test('duplicate registration and wrong credentials return useful errors', async () => {
       assert.equal((await request('/auth/register', input)).status, 409);

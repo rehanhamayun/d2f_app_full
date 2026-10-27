@@ -61,6 +61,18 @@ class AuthController extends AsyncNotifier<User?> {
     state = AsyncData(await Api.I.updateProfile(fullName: name, phone: phone));
   }
 
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    state = AsyncData(
+      await Api.I.changePassword(
+        currentPassword: currentPassword,
+        newPassword: newPassword,
+      ),
+    );
+  }
+
   Future<void> signOut() async {
     await Api.I.signOut();
     state = const AsyncData(null);

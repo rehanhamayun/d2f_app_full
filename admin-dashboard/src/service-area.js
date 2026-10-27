@@ -1,0 +1,5 @@
+export const SERVICE_COUNTRIES = ['United States', 'Belgium', 'France', 'Togo', 'Benin', 'Burkina Faso', 'Gabon', 'Ghana', 'Senegal', 'Nigeria', 'Côte d’Ivoire'];
+export const TOGO_DOMESTIC_LOCATIONS = ['Lomé, Togo', 'Kara, Togo', 'Sokodé, Togo', 'Atakpamé, Togo', 'Kpalimé, Togo', 'Tsévié, Togo', 'Aného, Togo', 'Dapaong, Togo', 'Bassar, Togo', 'Notsé, Togo'];
+export const ROUTE_LOCATIONS = ['Omaha, NE, USA', 'New York, NY, USA', 'Houston, TX, USA', 'Atlanta, GA, USA', 'Brussels, Belgium', 'Paris, France', ...TOGO_DOMESTIC_LOCATIONS, 'Cotonou, Benin', 'Ouagadougou, Burkina Faso', 'Libreville, Gabon', 'Accra, Ghana', 'Dakar, Senegal', 'Lagos, Nigeria', 'Abidjan, Côte d’Ivoire'];
+
+export const COUNTRY_TIMEZONES = { 'United States': 'America/Chicago', Belgium: 'Europe/Brussels', France: 'Europe/Paris', Togo: 'Africa/Lome', Benin: 'Africa/Porto-Novo', 'Burkina Faso': 'Africa/Ouagadougou', Gabon: 'Africa/Libreville', Ghana: 'Africa/Accra', Senegal: 'Africa/Dakar', Nigeria: 'Africa/Lagos', 'Côte d’Ivoire': 'Africa/Abidjan' };
