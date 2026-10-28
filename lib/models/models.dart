@@ -56,9 +56,9 @@ extension DeliveryModeX on DeliveryMode {
 
 extension ShippingMethodX on ShippingMethod {
   String get label => switch (this) {
-    ShippingMethod.AIR => 'Air',
+    ShippingMethod.AIR => 'Air Cargo',
     ShippingMethod.SEA => 'Sea',
-    ShippingMethod.ROAD => 'Traveler cargo',
+    ShippingMethod.ROAD => 'Road',
   };
 
   String get tagline => switch (this) {
@@ -110,6 +110,7 @@ const Set<String> kPickupOnlyStatuses = {'PICKUP_SCHEDULED', 'PICKED_UP'};
 
 /// Mode-aware view of the transition map, mirroring the server rule.
 List<String> allowedStatusesFor(Parcel parcel) {
+  if (parcel.serviceType == 'AIR_TRAVELLER') return const [];
   final base = kAllowedTransitions[parcel.status] ?? const [];
   if (parcel.deliveryMode == DeliveryMode.PICKUP) return List.of(base);
   return base.where((s) => !kPickupOnlyStatuses.contains(s)).toList();
@@ -151,6 +152,17 @@ String deliveryProofLabel(String type) => switch (type) {
 };
 
 String statusLabel(String status) => switch (status) {
+  'UNDER_REVIEW' => 'Under D2F Review',
+  'TRAVELLER_PROPOSED' => 'Traveller Review Pending',
+  'TRAVELLER_ACCEPTED' => 'Traveller Accepted',
+  'TRAVELLER_ASSIGNED' => 'Traveller Confirmed',
+  'PAYMENT_CONFIRMED' => 'Payment Confirmed',
+  'DOMESTIC_IN_TRANSIT' => 'Domestic Shipping in Transit',
+  'RECEIVED_BY_D2F' => 'Received by D2F',
+  'HANDOVER_AUTHORIZED' => 'Collection Authorized',
+  'HANDED_TO_TRAVELLER' => 'Collected by Traveller',
+  'TRAVELLER_DEPARTED' => 'Traveller Departed',
+  'REJECTED' => 'Contents Rejected',
   'REQUESTED' => 'Request Submitted',
   'PICKUP_SCHEDULED' => 'Pickup Scheduled',
   'PICKED_UP' => 'Picked Up',
@@ -462,6 +474,9 @@ class Parcel {
   final String destination;
   final ShippingMethod method;
   final String? notes;
+  final String serviceType;
+  final String? connectBookingId;
+  final String? awbNumber, airline, flightNumber;
   final String status;
   final DeliveryMode deliveryMode;
   final DateTime? pickupScheduledAt;
@@ -512,6 +527,11 @@ class Parcel {
     required this.destination,
     required this.method,
     this.notes,
+    this.serviceType = 'SEA',
+    this.connectBookingId,
+    this.awbNumber,
+    this.airline,
+    this.flightNumber,
     required this.status,
     this.deliveryMode = DeliveryMode.DROP_OFF,
     this.pickupScheduledAt,
@@ -552,6 +572,13 @@ class Parcel {
     origin: j['origin'] as String? ?? '',
     destination: j['destination'] as String? ?? '',
     method: shippingMethodFrom(j['method'] as String?),
+    serviceType:
+        j['serviceType'] as String? ??
+        (j['method'] == 'AIR' ? 'AIR_CARGO' : j['method'] as String? ?? 'SEA'),
+    connectBookingId: j['connectBooking']?['id'] as String?,
+    awbNumber: j['awbNumber'] as String?,
+    airline: j['airline'] as String?,
+    flightNumber: j['flightNumber'] as String?,
     notes: j['notes'] as String?,
     status: j['status'] as String? ?? 'RECEIVED',
     deliveryMode: deliveryModeFrom(j['deliveryMode'] as String?),

@@ -458,7 +458,7 @@ void main() {
       // the request goes through carrying the full pickup contract.
       await tester.tap(find.byKey(const ValueKey('customer-pickup-schedule')));
       await tester.pumpAndSettle();
-      expect(find.textContaining('Nov 15'), findsOneWidget);
+      expect(find.textContaining('Nov 15'), findsNWidgets(2));
       await reveal(tester, const ValueKey('customer-restrictions-check'));
       await tester.tap(
         find.byKey(const ValueKey('customer-restrictions-check')),

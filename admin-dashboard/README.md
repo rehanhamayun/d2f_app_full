@@ -77,3 +77,18 @@ Deploy the new Prisma migration and backend before this client. New APIs are und
 Manifests use authenticated data. Draft previews change while loading; departure saves the final snapshot. Web **Print / Save PDF** opens the system print flow with only the manifest content. Flutter also provides a multipage A4 PDF preview/print/share flow. USB scanners enter tracking IDs into the web load field; Android camera scanning uses the existing mobile scanner.
 
 See [milestone review](../MILESTONE_2_REVIEW.md) for the validated journeys, service-country set and remaining deployment/hardware acceptance work.
+
+## D2F Connect and Air Cargo
+
+The separate **D2F Connect** workspace reviews traveller trips, customer bookings,
+contents and verified weights, compatible assignments, traveller acceptance,
+accepted quotation snapshots, manual payment instructions/confirmations, domestic
+carrier labels/tracking, receiving-location intake, single-use collection codes,
+manifests and recipient delivery evidence. Admin manages directional rates,
+approved public receiving addresses, traveller compensation and trip expenses.
+Traveller and customer private details are separated by server-side projections.
+
+Conventional Air Cargo keeps its separate AWB, airline/flight, volumetric weight
+and customs references in the shipment record. Connect parcels are excluded from
+conventional shipment queues and cargo containers. Deploy the Connect migration and
+backend before this portal. See [operator guide](../CONNECT_WORKFLOW.md).

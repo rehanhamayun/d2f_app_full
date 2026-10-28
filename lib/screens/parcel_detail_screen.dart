@@ -1,3 +1,5 @@
+import 'connect_screen.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -71,6 +73,16 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final parcel = _parcel;
+    if (parcel?.serviceType == 'AIR_TRAVELLER' &&
+        parcel?.connectBookingId != null) {
+      final role = ref.watch(authControllerProvider).valueOrNull?.role;
+      return ConnectBookingScreen(
+        id: parcel!.connectBookingId!,
+        request: Api.I.connect,
+        staff: [UserRole.ADMIN, UserRole.STAFF].contains(role),
+        admin: role == UserRole.ADMIN,
+      );
+    }
 
     return Scaffold(
       appBar: D2FAppBar(
@@ -635,6 +647,12 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
                   ),
               ],
               _row('Method', parcel.method.label),
+              if (parcel.awbNumber != null)
+                _row('Air Waybill / AWB', parcel.awbNumber!),
+              if (parcel.airline != null)
+                _row('Airline / carrier', parcel.airline!),
+              if (parcel.flightNumber != null)
+                _row('Flight number', parcel.flightNumber!),
               _row('Package', parcel.packageTypeLabel),
               _row(
                 'Weight',

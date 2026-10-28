@@ -2,7 +2,7 @@
 
 Android staff shipping app for D2F Shipping LLC, with a shared Express/Prisma/PostgreSQL backend. The repository now includes the Milestone 1 staff parcel foundation and the local Milestone 2 warehouse/admin implementation. Hosted deployments still require the new backend migration and updated clients.
 
-Current Android source: **1.0.8+2013**. The included release APK in `output/apk/` is **1.0.8+2012**. See [source and build guide](SOURCE_CODE.md) for the repository contents, local setup, and private configuration needed to reproduce a build.
+Current Android release: **1.1.0+2014**. The signed ARM64 APK is in `output/apk/`. See [source and build guide](SOURCE_CODE.md) for the repository contents, local setup, and private configuration needed to reproduce a build.
 
 The app defaults to the live HTTPS backend at https://d2f-api-production.up.railway.app, hosted in **production_house**, Managing Consultant’s Railway Pro workspace. It works independently of this development computer. Private account details are in `.local/ACCESS_DETAILS.md` and must not be committed or included in an APK.
 
@@ -91,3 +91,10 @@ D2F_SCREENSHOT_DIR=design/verification-v3 flutter drive --profile \
 ```
 
 Regenerate Android launcher artwork from the supplied originals with `python3 tool/generate_brand_icons.py`. Physical printed-label scanning and printer-specific compatibility still require real hardware acceptance.
+
+## D2F Connect · Air Traveller
+
+D2F Connect has a separate home card, customer bookings, verified traveller trips,
+privacy-preserving domestic shipping and recorded handovers. Air Cargo retains its
+own AWB/carrier fields and cargo workflow. See [Connect workflow and operator guide](CONNECT_WORKFLOW.md)
+for rates, receiving locations, acceptance, payment and delivery controls.

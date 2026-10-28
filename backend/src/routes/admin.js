@@ -202,6 +202,7 @@ router.get('/parcels', async (req, res, next) => {
 
     const where = {
       organizationId: req.organizationId,
+      serviceType: { not: 'AIR_TRAVELLER' },
       ...(status && status !== 'ALL' ? { status } : {}),
       ...(q
         ? {

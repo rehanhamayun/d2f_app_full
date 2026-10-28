@@ -290,6 +290,24 @@ class Api {
     await _storage.delete(key: _tokenKey);
   }
 
+  /// Authenticated D2F Connect API, separate from cargo operations.
+  Future<dynamic> connect(
+    String path, {
+    String method = 'GET',
+    Map<String, dynamic>? data,
+  }) async {
+    try {
+      final response = await _dio!.request(
+        '/connect$path',
+        data: data,
+        options: Options(method: method),
+      );
+      return response.data;
+    } on DioException catch (error) {
+      throw _map(error);
+    }
+  }
+
   // ── Customers ──────────────────────────────────────────────────────────────
 
   Future<List<Customer>> customers({String? q}) async {

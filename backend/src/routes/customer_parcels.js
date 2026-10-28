@@ -47,6 +47,12 @@ const parcelSelect = {
   origin: true,
   destination: true,
   method: true,
+  serviceType: true,
+  awbNumber: true,
+  airline: true,
+  flightNumber: true,
+  volumetricWeightKg: true,
+  customsDocuments: true,
   notes: true,
   deliveryMode: true,
   pickupScheduledAt: true,
@@ -100,7 +106,7 @@ router.get('/', async (req, res, next) => {
     if (!customer) return res.json([]);
 
     const parcels = await prisma.parcel.findMany({
-      where: { customerId: customer.id },
+      where: { customerId: customer.id, serviceType: { not: 'AIR_TRAVELLER' } },
       orderBy: { createdAt: 'desc' },
       take: 100,
       select: parcelSelect,
@@ -423,6 +429,7 @@ router.post('/', async (req, res, next) => {
           origin: origin.trim(),
           destination: destination.trim(),
           method,
+          serviceType: method === 'AIR' ? 'AIR_CARGO' : method,
           notes: notes?.trim() || null,
           deliveryMode,
           pickupAddress: deliveryMode === 'PICKUP' ? pickupAddress.trim() : pickupAddress?.trim() || null,

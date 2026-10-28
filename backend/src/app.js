@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import './config.js';
 import { prisma } from './db.js';
+import connectRouter from './routes/connect.js';
 import authRouter from './routes/auth.js';
 import parcelsRouter from './routes/parcels.js';
 import customerParcelsRouter from './routes/customer_parcels.js';
@@ -69,12 +70,13 @@ app.get('/tracking/:trackingId', authenticate, authRateLimit(60), async (req, re
       { trackingId: req.params.trackingId },
       { items: { some: { packageCode: req.params.trackingId } } },
     ] },
-      select: { trackingId: true, status: true, method: true,
+      select: { trackingId: true, status: true, method: true, serviceType: true,
         events: { select: { status: true, createdAt: true }, orderBy: { createdAt: 'asc' } } } });
     if (!parcel) return res.status(404).json({ error: 'No shipment found. Check your tracking number.' });
     res.json(parcel);
   } catch (error) { next(error); }
 });
+app.use('/connect', connectRouter);
 app.use('/parcels', parcelsRouter);
 app.use('/customer/parcels', customerParcelsRouter);
 app.use('/customers', customersRouter);

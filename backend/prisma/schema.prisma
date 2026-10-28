@@ -12,12 +12,12 @@ datasource db {
 
 // Organizations: D2F and permitted partner orgs (future SaaS-ready)
 model Organization {
-  id              String         @id @default(uuid())
+  id              String           @id @default(uuid())
   name            String
-  trackingPrefix  String         @unique
-  trackingCounter BigInt         @default(1)
-  isActive        Boolean        @default(true)
-  createdAt       DateTime       @default(now())
+  trackingPrefix  String           @unique
+  trackingCounter BigInt           @default(1)
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
   users           User[]
   locations       Location[]
   customers       Customer[]
@@ -25,6 +25,9 @@ model Organization {
   containers      Container[]
   products        Product[]
   serviceOrders   ServiceOrder[]
+  connectTrips    ConnectTrip[]
+  connectRates    ConnectRate[]
+  connectBookings ConnectBooking[]
 }
 
 // These identity reservations intentionally outlive deleted organizations/parcels.
@@ -47,14 +50,16 @@ model TrackingNumberReservation {
 
 // Locations: Omaha warehouse, Lomé facility, etc.
 model Location {
-  id             String   @id @default(uuid())
-  organizationId String
-  name           String
-  code           String // e.g. OMA-1, LOME-1
-  city           String?
-  country        String?
-  timezone       String   @default("America/Chicago")
-  createdAt      DateTime @default(now())
+  id               String   @id @default(uuid())
+  organizationId   String
+  name             String
+  code             String // e.g. OMA-1, LOME-1
+  city             String?
+  country          String?
+  timezone         String   @default("America/Chicago")
+  address          String?
+  connectReceiving Boolean  @default(false)
+  createdAt        DateTime @default(now())
 
   organization       Organization     @relation(fields: [organizationId], references: [id])
   users              User[]
@@ -63,6 +68,8 @@ model Location {
   transfersTo        ParcelTransfer[] @relation("transferTo")
   outboundContainers Container[]      @relation("containerOrigin")
   inboundContainers  Container[]      @relation("containerDestination")
+  connectTrips       ConnectTrip[]
+  connectBookings    ConnectBooking[]
 
   @@unique([organizationId, code])
 }
@@ -99,6 +106,7 @@ model User {
   transfers        ParcelTransfer[] @relation("transferActor")
   socialIdentities SocialIdentity[]
   passwordResets   PasswordReset[]
+  connectTrips     ConnectTrip[]
 }
 
 model SocialIdentity {
@@ -160,8 +168,8 @@ model Customer {
 
 // Parcels: permanent UUID + public tracking ID
 model Parcel {
-  id                         String        @id @default(uuid()) // permanent internal UUID
-  trackingId                 String        @unique // immutable, globally unique public tracking ID
+  id                         String          @id @default(uuid()) // permanent internal UUID
+  trackingId                 String          @unique // immutable, globally unique public tracking ID
   organizationId             String
   trackingSequence           BigInt?
   customerId                 String // shipper
@@ -173,13 +181,20 @@ model Parcel {
   origin                     String // commercial shipping origin, separate from the intake warehouse
   destination                String
   pickupAddress              String? // required for same-city road pickups
-  method                     String        @default("SEA") // AIR | SEA | ROAD
+  method                     String          @default("SEA") // AIR | SEA | ROAD
+  serviceType                String          @default("SEA") // AIR_CARGO | AIR_TRAVELLER | SEA | ROAD
+  awbNumber                  String?
+  airline                    String?
+  flightNumber               String?
+  volumetricWeightKg         Float?
+  customsDocuments           String?
+  connectBooking             ConnectBooking?
   notes                      String?
-  status                     String        @default("RECEIVED")
+  status                     String          @default("RECEIVED")
   // Customer shipment requests: how goods reach D2F.
   // PICKUP = D2F collects from the customer's address (pickupScheduledAt).
   // DROP_OFF = the customer brings the goods to the D2F warehouse.
-  deliveryMode               String        @default("DROP_OFF") // PICKUP | DROP_OFF
+  deliveryMode               String          @default("DROP_OFF") // PICKUP | DROP_OFF
   pickupScheduledAt          DateTime? // customer's preferred pickup date and time
   restrictionsAcknowledgedAt DateTime? // customer acknowledged the content/shipping rules when requesting
   createdById                String
@@ -197,8 +212,8 @@ model Parcel {
   deliveredAt                DateTime?
   deliveryProofType          String? // SIGNATURE | PHOTO | ID_CONFIRMATION
   deliveryProofReference     String?
-  createdAt                  DateTime      @default(now())
-  updatedAt                  DateTime      @updatedAt
+  createdAt                  DateTime        @default(now())
+  updatedAt                  DateTime        @updatedAt
 
   organization  Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   customer      Customer         @relation(fields: [customerId], references: [id])
@@ -395,4 +410,128 @@ model ServiceOrder {
   parcel         Parcel?      @relation(fields: [parcelId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, kind, createdAt])
+}
+
+// D2F Connect has its own commercial and custody workflow. Traveller access is
+// projected by the API: never return customer identities, addresses or contacts.
+model ConnectTrip {
+  id                    String              @id @default(uuid())
+  organizationId        String
+  travellerId           String
+  origin                String
+  destination           String
+  departureAt           DateTime
+  flightNumber          String
+  capacityKg            Float
+  categories            String[]
+  verificationReference String
+  status                String              @default("PENDING_REVIEW")
+  reviewNote            String?
+  receivingLocationId   String?
+  compensationMinor     Int                 @default(0)
+  expensesMinor         Int                 @default(0)
+  currency              String              @default("USD")
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  organization          Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  traveller             User                @relation(fields: [travellerId], references: [id], onDelete: Restrict)
+  receivingLocation     Location?           @relation(fields: [receivingLocationId], references: [id], onDelete: Restrict)
+  requestedBookings     ConnectBooking[]    @relation("requestedTrip")
+  assignments           ConnectAssignment[]
+
+  @@index([organizationId, status, departureAt])
+}
+
+model ConnectRate {
+  id             String       @id @default(uuid())
+  organizationId String
+  origin         String
+  destination    String
+  category       String
+  unit           String // KG | ITEM | FLAT | MANUAL
+  amountMinor    Int
+  maxWeightKg    Float?
+  currency       String       @default("USD")
+  isActive       Boolean      @default(true)
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, origin, destination, category])
+}
+
+model ConnectBooking {
+  id                       String              @id @default(uuid())
+  organizationId           String
+  parcelId                 String              @unique
+  category                 String
+  quantity                 Int
+  declaredValueMinor       Int
+  preferredDate            DateTime
+  requestedTripId          String?
+  verifiedWeightKg         Float?
+  contentsVerifiedAt       DateTime?
+  contentsVerificationNote String?
+  internationalFeeMinor    Int?
+  domesticCostMinor        Int?
+  currency                 String              @default("USD")
+  paymentInstructions      String?
+  pricingSnapshot          Json?
+  quoteAcceptedAt          DateTime?
+  handoverMode             String // DOMESTIC_SHIPPING | DROP_OFF | PICKUP
+  senderCity               String
+  senderAddress            String?
+  deliveryPreference       String              @default("D2F_PICKUP")
+  domesticCarrier          String?
+  domesticTrackingNumber   String?
+  domesticLabelUrl         String?
+  domesticStatus           String              @default("NOT_REQUIRED")
+  receivingLocationId      String?
+  originReceivedAt         DateTime?
+  handoverCodeHash         String?
+  handoverCodeExpiresAt    DateTime?
+  handoverAttempts         Int                 @default(0)
+  collectedAt              DateTime?
+  destinationReceivedAt    DateTime?
+  deliveredAt              DateTime?
+  deliveryEvidence         String?
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+  organization             Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  parcel                   Parcel              @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  requestedTrip            ConnectTrip?        @relation("requestedTrip", fields: [requestedTripId], references: [id], onDelete: Restrict)
+  receivingLocation        Location?           @relation(fields: [receivingLocationId], references: [id], onDelete: Restrict)
+  assignments              ConnectAssignment[]
+  payment                  ConnectPayment?
+
+  @@index([organizationId, createdAt])
+}
+
+model ConnectAssignment {
+  id           String         @id @default(uuid())
+  bookingId    String
+  tripId       String
+  status       String         @default("PROPOSED")
+  responseNote String?
+  createdAt    DateTime       @default(now())
+  acceptedAt   DateTime?
+  confirmedAt  DateTime?
+  booking      ConnectBooking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  trip         ConnectTrip    @relation(fields: [tripId], references: [id], onDelete: Restrict)
+
+  @@index([tripId, status])
+  @@index([bookingId, status])
+}
+
+model ConnectPayment {
+  id             String         @id @default(uuid())
+  organizationId String
+  bookingId      String         @unique
+  reference      String
+  amountMinor    Int
+  currency       String         @default("USD")
+  recordedById   String
+  createdAt      DateTime       @default(now())
+  booking        ConnectBooking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, reference])
 }

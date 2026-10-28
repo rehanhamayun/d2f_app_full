@@ -374,7 +374,7 @@ test('declared packages carry type and dimensions, collection records misses and
     assert.equal(packageLookup.body.id, parcel.id);
     const packageTracking = await request(`/tracking/${collectedRow.packageCode}`, { token: customerToken });
     assert.equal(packageTracking.status, 200);
-    assert.deepEqual(Object.keys(packageTracking.body).sort(), ['events', 'method', 'status', 'trackingId']);
+    assert.deepEqual(Object.keys(packageTracking.body).sort(), ['events', 'method', 'serviceType', 'status', 'trackingId']);
     assert.equal(packageTracking.body.trackingId, parcel.trackingId);
     const unknownCode = await request(`/parcels/${parcel.trackingId}-P02`, { token: staffToken });
     assert.equal(unknownCode.status, 404);

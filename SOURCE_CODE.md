@@ -1,8 +1,8 @@
 # D2F Global source and build guide
 
 This repository contains the implemented mobile app, backend API, and web Admin
-dashboard. The current Android source version is `1.0.8+2013`. The included release
-APK in `output/apk/` is version `1.0.8+2012`.
+dashboard. The current Android source version is `1.1.0+2014`. The signed ARM64 release
+APK is `output/apk/D2F-Global-1.1.0+2014-arm64-v8a.apk`; the prior APK is retained.
 
 ## Source inventory
 
@@ -44,7 +44,7 @@ flutter build apk --release --split-per-abi --dart-define=API_BASE_URL=https://d
 
 The build outputs are under `build/app/outputs/flutter-apk/`. Flutter regenerates
 ignored platform/build files as needed. Android build codes include the ABI
-offset applied by Flutter; `2013` is the current source base build number.
+offset applied by Flutter; `2014` is the current source base build number.
 
 Existing production updates require the original release signing key and the
 private `android/key.properties` configuration. These must be transferred
@@ -112,3 +112,13 @@ are excluded. Supply private values through the hosting platform or secure hando
 Their exclusion does not remove application source. This repository records the
 implemented scope; later roadmap features are described separately in the
 milestone review and client report.
+
+## D2F Connect release build
+
+Run `python3 tool/build_android_release.py` with Flutter on PATH. This builds in a
+disposable directory and excludes the development-only integration-test plugin from
+that release pubspec, working around its registration issue in the current SDK.
+The real source, lockfile and integration tests remain intact. Existing private
+signing configuration is used locally; signing keys are never published.
+
+Connect operations and setup are documented in [CONNECT_WORKFLOW.md](CONNECT_WORKFLOW.md).

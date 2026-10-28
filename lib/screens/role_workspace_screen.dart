@@ -1,3 +1,5 @@
+import 'connect_screen.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -437,6 +439,8 @@ class _RoleWorkspaceScreenState extends ConsumerState<RoleWorkspaceScreen> {
                             ),
                           ),
                           const SizedBox(height: 8),
+                          const ConnectServiceCard(),
+                          const SizedBox(height: 12),
                           D2FSearchField(
                             controller: _tracking,
                             hint: 'Enter tracking number',
@@ -750,7 +754,9 @@ class PublicTrackingScreen extends StatelessWidget {
           ParcelSummaryCard(
             trackingId: shipment['trackingId'] as String,
             status: shipment['status'] as String,
-            method: shippingMethodFrom(shipment['method'] as String).label,
+            method: shipment['serviceType'] == 'AIR_TRAVELLER'
+                ? 'D2F Connect · Air Traveller'
+                : shippingMethodFrom(shipment['method'] as String).label,
             onCopy: () =>
                 copyToClipboard(context, shipment['trackingId'] as String),
           ),

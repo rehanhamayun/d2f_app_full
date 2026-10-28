@@ -29,6 +29,7 @@ const DELIVERY_MODES = ['PICKUP', 'DROP_OFF'];
 const text = (value, max = 1000) => typeof value === 'string' && value.trim().length > 0 && value.trim().length <= max;
 
 const parcelInclude = {
+  connectBooking: { select: { id: true } },
   items: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
   images: {
     orderBy: { createdAt: 'asc' },
@@ -159,6 +160,7 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
           origin: origin.trim(),
           destination: destination.trim(),
           method,
+          serviceType: method === 'AIR' ? 'AIR_CARGO' : method,
           notes: notes?.trim() || null,
           status: 'RECEIVED',
           createdById: req.user.id,
@@ -211,7 +213,7 @@ router.get('/', async (req, res, next) => {
       return res.status(400).json({ error: 'limit must be 1-500 and offset must be a non-negative integer.' });
     }
     const organizationId = await resolveOrganizationId(prisma, req.user);
-    const where = { organizationId };
+    const where = { organizationId, serviceType: { not: 'AIR_TRAVELLER' } };
 
     if (status && status !== 'ALL') {
       const statuses = Array.isArray(status) ? status : String(status).split(',');
@@ -261,7 +263,7 @@ router.get('/board', async (req, res, next) => {
           ],
         }
       : {};
-    const baseWhere = { organizationId, ...search };
+    const baseWhere = { organizationId, serviceType: { not: 'AIR_TRAVELLER' }, ...search };
     const listWhere = status && status !== 'ALL' ? { ...baseWhere, status } : baseWhere;
     const [parcels, total, grouped] = await prisma.$transaction([
       prisma.parcel.findMany({
@@ -324,6 +326,7 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
       });
     }
     if (!parcel) return res.status(404).json({ error: 'Parcel not found' });
+    if (parcel.serviceType === 'AIR_TRAVELLER') fail(409, 'Use D2F Connect to update traveller bookings.');
 
     const {
       status,
@@ -397,6 +400,7 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
       await warehouseLock(tx, organizationId);
       const current = await tx.parcel.findUnique({ where: { id: parcel.id }, include: { container: true } });
       if (!current) fail(404, 'Parcel not found');
+      if (current.serviceType === 'AIR_TRAVELLER') fail(409, 'Use D2F Connect to manage traveller bookings.');
       if (current.container && current.container.status !== 'ARRIVED') {
         const conflict = new Error('This parcel is in a container. Record departure and arrival from the container workspace.');
         conflict.status = 409;
@@ -637,6 +641,7 @@ router.post('/:id/transfers', requireRole('STAFF', 'ADMIN'), async (req, res, ne
         include: { location: true, container: true },
       });
       if (!parcel) fail(404, 'Parcel not found.');
+      if (parcel.serviceType === 'AIR_TRAVELLER') fail(409, 'Use D2F Connect to record traveller handovers.');
       if (!['ARRIVED_LOME', 'ARRIVED_DESTINATION'].includes(parcel.status)) {
         fail(409, 'A parcel can only be transferred after it has been received at a facility.');
       }
@@ -776,6 +781,7 @@ router.patch('/:id', requireRole('ADMIN'), async (req, res, next) => {
       await warehouseLock(tx, organizationId);
       const current = await tx.parcel.findFirst({ where: { id: req.params.id, organizationId }, include: { container: true } });
       if (!current) fail(404, 'Parcel not found');
+      if (current.serviceType === 'AIR_TRAVELLER') fail(409, 'Use D2F Connect to manage traveller bookings.');
       if (data.deliveryMode && data.deliveryMode !== current.deliveryMode && data.deliveryMode === 'PICKUP' && !data.pickupAddress && !current.pickupAddress) {
         fail(400, 'A pickup needs a collection address before it can be scheduled.');
       }
@@ -805,7 +811,7 @@ router.patch('/:id', requireRole('ADMIN'), async (req, res, next) => {
       if (Object.keys(changes).length) {
         const updated = await tx.parcel.updateMany({
           where: { id: current.id, organizationId, updatedAt: new Date(body.updatedAt) },
-          data: { ...changes, updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)) },
+          data: { ...changes, ...(changes.method ? { serviceType: changes.method === 'AIR' ? 'AIR_CARGO' : changes.method } : {}), updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)) },
         });
         if (updated.count !== 1) fail(409, 'This parcel has changed. Refresh it before editing again.');
         await tx.auditLog.create({ data: {
@@ -834,6 +840,35 @@ router.patch('/:id', requireRole('ADMIN'), async (req, res, next) => {
       return tx.parcel.findUnique({ where: { id: current.id }, include: parcelInclude });
     });
     res.json(parcel);
+  } catch (error) { next(error); }
+});
+
+router.patch('/:id/air-cargo', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
+  try {
+    const organizationId = await resolveOrganizationId(prisma, req.user);
+    const result = await prisma.$transaction(async tx => {
+      await warehouseLock(tx, organizationId);
+      const parcel = await tx.parcel.findFirst({ where: { id: req.params.id, organizationId } });
+      if (!parcel) fail(404, 'Parcel not found.');
+      if (parcel.serviceType !== 'AIR_CARGO') fail(409, 'AWB and airline references belong only to Air Cargo.');
+      const fields = ['awbNumber', 'airline', 'flightNumber', 'customsDocuments'];
+      const data = {};
+      for (const field of fields) {
+        if (!(field in (req.body || {}))) continue;
+        const value = req.body[field];
+        if (value !== null && (typeof value !== 'string' || value.trim().length > (field === 'customsDocuments' ? 2000 : 120))) fail(400, `Invalid ${field}.`);
+        data[field] = value?.trim() || null;
+      }
+      if ('volumetricWeightKg' in (req.body || {})) {
+        const value = req.body.volumetricWeightKg;
+        if (value !== null && (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > 100000)) fail(400, 'Enter a valid volumetric weight.');
+        data.volumetricWeightKg = value;
+      }
+      if (!Object.keys(data).length) fail(400, 'Enter cargo carrier details.');
+      await tx.auditLog.create({ data: { actorId: req.user.id, action: 'AIR_CARGO_REFERENCE_UPDATED', entity: 'Parcel', entityId: parcel.id, detail: JSON.stringify(data) } });
+      return tx.parcel.update({ where: { id: parcel.id }, data });
+    });
+    res.json(result);
   } catch (error) { next(error); }
 });
 

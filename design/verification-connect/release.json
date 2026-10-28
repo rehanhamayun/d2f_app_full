@@ -1,0 +1,17 @@
+{
+  "version": "1.1.0+2014",
+  "androidVersionCode": 4014,
+  "abi": "arm64-v8a",
+  "apk": "output/apk/D2F-Global-1.1.0+2014-arm64-v8a.apk",
+  "sha256": "384e480413b8bc03a9f4d609dda712cd40eaf63a7789e4801f397987ee7cf36a",
+  "signerSha256": "303fbf3e4b24aa81454e33c915c99d330893042f0aa506e0710a5ac79a3e290e",
+  "railwayProject": "production_house",
+  "railwayDeploymentId": "2f421144-d099-4864-9f05-3c476990b031",
+  "preDeploymentBackupId": "35b3d954-c248-4197-b219-1932ce662644",
+  "tests": {
+    "flutter": 90,
+    "backend": 61,
+    "adminPortal": 21
+  },
+  "verificationScreens": "design/verification-connect/"
+}

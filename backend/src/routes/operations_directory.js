@@ -12,6 +12,7 @@ for (const [kind, model, field] of [['parcels', 'parcel', 'createdAt'], ['custom
       if (status && !['ALL', 'REQUESTED', 'PICKUP_SCHEDULED', 'PICKED_UP', 'RECEIVED', 'PROCESSING', 'IN_TRANSIT', 'ARRIVED_LOME', 'ARRIVED_DESTINATION', 'READY_FOR_PICKUP', 'RELEASED', 'DELIVERED'].includes(status)) fail(400, 'Choose a valid shipment status.');
       const where = { organizationId: req.organizationId };
       if (kind === 'parcels') {
+        where.serviceType = { not: 'AIR_TRAVELLER' };
         if (status && status !== 'ALL') where.status = status;
         if (q) where.OR = [{ trackingId: { contains: q, mode: 'insensitive' } }, { recipientName: { contains: q, mode: 'insensitive' } }, { customer: { is: { displayName: { contains: q, mode: 'insensitive' } } } }];
       } else if (q) where.OR = [{ displayName: { contains: q, mode: 'insensitive' } }, { email: { contains: q, mode: 'insensitive' } }, { phone: { contains: q } }];

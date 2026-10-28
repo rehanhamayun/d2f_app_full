@@ -82,7 +82,7 @@ test('M1: authentication, permissions, concurrent retries, tracking and history'
       const customerToken=jwt.sign({id:createdUsers[0],purpose:'session',ver:0},JWT_SECRET);
       const result=await request(`/tracking/${parcel.trackingId}`,{token:customerToken});
       assert.equal(result.status,200);
-      assert.deepEqual(Object.keys(result.body).sort(),['events','method','status','trackingId']);
+      assert.deepEqual(Object.keys(result.body).sort(),['events','method','serviceType','status','trackingId']);
       assert.equal(result.body.events[0].status,'RECEIVED');
       assert.deepEqual(Object.keys(result.body.events[0]).sort(),['createdAt','status']);
       assert.equal((await request(`/parcels/${parcel.id}`,{token:customerToken})).status,403);

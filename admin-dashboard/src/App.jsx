@@ -1,3 +1,4 @@
+import { ConnectOperations, AirCargoReference } from './connect.jsx';
 import { UserLocation } from './team-location.jsx';
 import { Containers, Locations } from './warehouse.jsx';
 import { Commerce } from './commerce.jsx';
@@ -58,6 +59,7 @@ import {
 const NAV = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'shipments', label: 'Shipments', icon: Box },
+  { id: 'connect', label: 'D2F Connect', icon: Globe2 },
   { id: 'containers', label: 'Containers', icon: PackageCheck },
   { id: 'bookings', label: 'Bookings', icon: Truck },
   { id: 'locations', label: 'Locations', icon: Globe2 },
@@ -375,7 +377,7 @@ function Sidebar({ page, setPage, user, onLogout, open, setOpen }) {
         <div className="workspace-chip"><span className="workspace-dot" /><span><small>WORKSPACE</small><b>D2F Shipping</b></span><ChevronDown size={15} /></div>
         <div className="nav-caption">WORKSPACE</div>
         <nav className="side-nav" aria-label="Admin dashboard">
-          {NAV.filter(item => user.role === 'ADMIN' || ['shipments', 'containers', 'bookings', 'customers'].includes(item.id)).map(({ id, label, icon: Icon }) => (
+          {NAV.filter(item => user.role === 'ADMIN' || ['shipments', 'connect', 'containers', 'bookings', 'customers'].includes(item.id)).map(({ id, label, icon: Icon }) => (
             <button key={id} className={`nav-link ${page === id ? 'nav-active' : ''}`} onClick={() => { setPage(id); setOpen(false); }}>
               <Icon size={18} strokeWidth={1.9} /><span>{label}</span>
               {id === 'shipments' && page === id && <span className="nav-active-dot" />}
@@ -1018,8 +1020,10 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
             <div><small>Pickup scheduled</small><b>{parcel.pickupScheduledAt ? formatDate(parcel.pickupScheduledAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'To be confirmed'}</b></div>
             <div><small>Goods pieces</small><b>{goodsCount ? `${goodsCount} package${goodsCount === 1 ? '' : 's'}` : '—'}</b></div>
           </div>
+          <div className="detail-grid"><div><small>Service</small><b>{parcel.serviceType === 'AIR_CARGO' ? 'D2F Air Cargo' : parcel.serviceType === 'AIR_TRAVELLER' ? 'D2F Connect · Air Traveller' : parcel.method}</b></div><div><small>Customer contents declaration</small><b>{parcel.restrictionsAcknowledgedAt ? formatDate(parcel.restrictionsAcknowledgedAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Not recorded on this legacy / staff registration'}</b></div></div>
           {missingGoods.length > 0 && <div className="alert error-alert" role="status">Collected {goods.length - missingGoods.length} of {goods.length} packages. Missing packages remain recorded below.</div>}
-          {goods.length > 0 && <div className="goods-list">{goods.map((item, index) => <div className="goods-row" key={item.id || index}>
+          <AirCargoReference parcel={parcel} token={token} notify={notify} onSaved={onRefreshDetail} />
+      {goods.length > 0 && <div className="goods-list">{goods.map((item, index) => <div className="goods-row" key={item.id || index}>
             <b>{`${item.type || 'BOX'} ${index + 1} of ${goods.length}`} · {item.name}</b>
             <span>{item.quantity} contents unit{item.quantity === 1 ? '' : 's'}{item.weightKg != null ? ` · ${item.weightKg} kg` : ''}{item.details ? ` · ${item.details}` : ''}</span>
             {item.lengthCm != null && item.widthCm != null && item.heightCm != null && <span>{`${item.lengthCm} × ${item.widthCm} × ${item.heightCm} cm`}</span>}
@@ -1391,6 +1395,7 @@ export default function App() {
         <main className="content">
           {isAdmin && page === 'overview' && <Overview data={overview} days={days} onPeriod={setDays} loading={overviewLoading} onGo={setPage} />}
           {page === 'shipments' && <Shipments staffAccess={!isAdmin} token={token} notify={notify} refreshOverview={loadOverview} refreshKey={refreshKey} currentUserId={session.user.id} key="shipments" />}
+          {page === 'connect' && <ConnectOperations token={token} notify={notify} refreshKey={refreshKey} isAdmin={isAdmin} />}
           {page === 'containers' && <Containers token={token} notify={notify} refreshKey={refreshKey} />}
           {isAdmin && page === 'locations' && <Locations token={token} notify={notify} refreshKey={refreshKey} />}
           {page === 'bookings' && <Shipments staffAccess={!isAdmin} token={token} notify={notify} refreshOverview={loadOverview} refreshKey={refreshKey} currentUserId={session.user.id} bookings key="bookings" />}

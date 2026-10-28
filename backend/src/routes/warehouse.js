@@ -102,6 +102,7 @@ router.post('/containers/:id/parcels', async (req, res, next) => {
       if (!isFacilityAuthorized(req.user, container.origin)) fail(403, facilityDeniedMessage(container.origin));
       const parcel = await tx.parcel.findFirst({ where: { trackingId: trackingId.trim().toUpperCase(), organizationId: req.organizationId } });
       if (!parcel) fail(404, 'Parcel not found.');
+      if (parcel.serviceType === 'AIR_TRAVELLER') fail(409, 'D2F Connect parcels use a traveller manifest, not a cargo container.');
       if (parcel.containerId === container.id) return { parcel, alreadyLoaded: true };
       if (parcel.containerId) fail(409, 'This parcel is already assigned to another container.');
       if (!['RECEIVED', 'PROCESSING'].includes(parcel.status)) fail(409, 'Only received or processing parcels can be loaded.');

@@ -665,10 +665,13 @@ class _CustomerShipmentScreenState
             // create action validates the entire request in a single pass.
             child: Form(
               key: _formKey,
+              onChanged: () {
+                if (mounted) setState(() {});
+              },
               child: ListView(
                 padding: AppSpacing.pageInsets,
                 children: [
-                  Text('New shipment request', style: AppTheme.display),
+                  _requestIntro(),
                   const SizedBox(height: 6),
                   const Text(
                     'List everything you are sending. Pick a route, tell us '
@@ -679,16 +682,34 @@ class _CustomerShipmentScreenState
                   const SizedBox(height: 18),
                   _contactCard(user, hasPhone),
                   const SizedBox(height: 18),
+                  _formStep(
+                    '01',
+                    'Choose your route',
+                    'Air Cargo, sea or road · your destination comes first.',
+                  ),
                   _routeCard(),
                   const SizedBox(height: 18),
+                  _formStep(
+                    '02',
+                    'Tell us what’s inside',
+                    'One physical package per row. Photos help our team prepare.',
+                  ),
                   _goodsSection(),
                   const SizedBox(height: 18),
+                  _formStep(
+                    '03',
+                    'Recipient & shipment',
+                    'Contact details that help your parcel arrive safely.',
+                  ),
                   _shipmentForm(),
                   const SizedBox(height: 18),
+                  _formStep(
+                    '04',
+                    'Handover & review',
+                    'Choose how your goods reach D2F, then check your request.',
+                  ),
                   _handoverSection(),
                   const SizedBox(height: 22),
-                  _restrictionsSection(),
-                  const SizedBox(height: 12),
                   SectionCard(
                     tint: AppColors.goldSoft,
                     padding: const EdgeInsets.all(13),
@@ -738,6 +759,136 @@ class _CustomerShipmentScreenState
       ),
     );
   }
+
+  Widget _requestIntro() => Container(
+    padding: const EdgeInsets.all(22),
+    decoration: BoxDecoration(
+      gradient: const LinearGradient(
+        colors: [AppColors.navy, Color(0xff234d70)],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ),
+      borderRadius: BorderRadius.circular(26),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Row(
+          children: [
+            Icon(Icons.inventory_2_outlined, color: AppColors.gold),
+            SizedBox(width: 8),
+            Text(
+              'D2F SHIPPING',
+              style: TextStyle(
+                color: AppColors.gold,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 2,
+                fontSize: 10,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'New shipment request',
+          style: AppTheme.display.copyWith(color: Colors.white, fontSize: 27),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'A little care. A smooth journey.',
+          style: TextStyle(color: Colors.white70, height: 1.5),
+        ),
+        const SizedBox(height: 18),
+        const Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            Chip(
+              label: Text('Itemized goods'),
+              avatar: Icon(Icons.check, size: 15),
+            ),
+            Chip(
+              label: Text('D2F tracking'),
+              avatar: Icon(Icons.qr_code_2, size: 15),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+
+  Widget _formStep(String number, String title, String subtitle) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        CircleAvatar(
+          radius: 17,
+          backgroundColor: AppColors.navy,
+          child: Text(
+            number,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: AppTheme.sectionTitle),
+              const SizedBox(height: 3),
+              Text(subtitle, style: AppTheme.caption.copyWith(fontSize: 11)),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _reviewSummary() => SectionCard(
+    tint: AppColors.blueSoft,
+    padding: const EdgeInsets.all(18),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Your request at a glance', style: AppTheme.sectionTitle),
+        const SizedBox(height: 12),
+        Text(
+          '${_route.origin} → ${_route.destination}',
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            color: AppColors.navy,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '${_collectGoods().length} packages · ${_weight.text.isEmpty ? 'Weight to add' : '${_weight.text} kg'} · ${_route.method.label}',
+          style: AppTheme.caption,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'To: ${_recipientName.text.trim().isEmpty ? 'Add your recipient above' : _recipientName.text.trim()}',
+          style: AppTheme.caption,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          _deliveryMode == DeliveryMode.PICKUP
+              ? 'D2F pickup · ${_pickupWhen == null ? 'Choose your preferred time' : DateFormat('EEE, MMM d · h:mm a').format(_pickupWhen!)}'
+              : 'Drop off at a D2F warehouse',
+          style: AppTheme.caption,
+        ),
+        const Divider(height: 24),
+        const Text(
+          'Submitting registers your request and tracking number. D2F reviews the goods and confirms collection before transport.',
+          style: TextStyle(fontSize: 11, height: 1.5, color: AppColors.navy),
+        ),
+      ],
+    ),
+  );
 
   Widget _contactCard(User? user, bool hasPhone) {
     return SectionCard(
@@ -1166,6 +1317,10 @@ class _CustomerShipmentScreenState
             : _dropOffDetails(),
       ),
       const SizedBox(height: 18),
+      _reviewSummary(),
+      const SizedBox(height: 16),
+      _restrictionsSection(),
+      const SizedBox(height: 14),
       PrimaryButton(
         key: const ValueKey('customer-create-shipment'),
         label: 'Create shipment request',
@@ -2043,6 +2198,14 @@ class CustomerParcelDetailsScreen extends StatelessWidget {
                   '${parcel.method.label} · ${parcel.method.tagline}',
                 ),
                 const Divider(height: 22),
+                if (parcel.awbNumber != null) ...[
+                  _detailRow('Air Waybill', parcel.awbNumber!),
+                  const Divider(height: 22),
+                ],
+                if (parcel.airline != null) ...[
+                  _detailRow('Airline', parcel.airline!),
+                  const Divider(height: 22),
+                ],
                 _detailRow('Packing', parcel.packageTypeLabel),
                 const Divider(height: 22),
                 _detailRow('Total weight', '${parcel.weightKg} kg'),
@@ -2216,7 +2379,7 @@ class CustomerParcelDetailsScreen extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
-                        'Agreed for ${DateFormat('EEE, MMM d · h:mm a').format(parcel.pickupScheduledAt!)}',
+                        'Preferred time: ${DateFormat('EEE, MMM d · h:mm a').format(parcel.pickupScheduledAt!)}',
                         style: const TextStyle(
                           color: AppColors.navy,
                           fontSize: 11.5,

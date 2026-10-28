@@ -1,3 +1,5 @@
+import 'connect_screen.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -150,6 +152,8 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                 ],
               ),
             ),
+            const SizedBox(height: 16),
+            const ConnectServiceCard(),
             const SizedBox(height: 16),
             LayoutBuilder(
               builder: (context, c) => Wrap(
