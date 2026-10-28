@@ -298,12 +298,49 @@ class _FullScreenPhoto extends StatelessWidget {
   }
 }
 
-/// Small tile summarizing one itemized good in a shipment.
+/// Small tile summarizing one declared package in a shipment. Shows the
+/// package type, optional L×W×H reading, the allocated sub-code ("P01") and
+/// the pickup collection outcome so customers and staff see the same story.
 class GoodsItemTile extends StatelessWidget {
   final ParcelItem item;
   final String? trailingNote;
 
-  const GoodsItemTile({super.key, required this.item, this.trailingNote});
+  /// Total declared packages, for the "Box 2 of 6" position caption.
+  final int itemCount;
+
+  const GoodsItemTile({
+    super.key,
+    required this.item,
+    this.trailingNote,
+    this.itemCount = 0,
+  });
+
+  String _cm(double? value) {
+    if (value == null) return '';
+    return value % 1 == 0 ? value.toStringAsFixed(0) : value.toStringAsFixed(1);
+  }
+
+  String? get _metaLine {
+    final parts = <String>[
+      if (itemCount > 0)
+        '${item.typeLabel} ${item.position + 1} of $itemCount'
+      else if (item.type != 'BOX')
+        item.typeLabel,
+      if (item.lengthCm != null &&
+          item.widthCm != null &&
+          item.heightCm != null)
+        '${_cm(item.lengthCm)}×${_cm(item.widthCm)}×${_cm(item.heightCm)} cm',
+      if (item.packageCode != null) _codeLabel(item.packageCode!),
+    ];
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
+
+  /// Only the short "P01" segment is shown in rows; the full
+  /// `trackingId-P01` code travels on the printed label for scanning.
+  String _codeLabel(String packageCode) {
+    final separator = packageCode.lastIndexOf('-P');
+    return separator >= 0 ? packageCode.substring(separator + 1) : packageCode;
+  }
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -315,13 +352,13 @@ class GoodsItemTile extends StatelessWidget {
           width: 34,
           height: 34,
           decoration: BoxDecoration(
-            color: AppColors.goldSoft,
+            color: item.missed ? AppColors.coralSoft : AppColors.goldSoft,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: const Icon(
-            Icons.inventory_2_outlined,
+          child: Icon(
+            item.missed ? Icons.unarchive_outlined : Icons.inventory_2_outlined,
             size: 17,
-            color: AppColors.navy,
+            color: item.missed ? AppColors.coral : AppColors.navy,
           ),
         ),
         const SizedBox(width: 10),
@@ -337,6 +374,19 @@ class GoodsItemTile extends StatelessWidget {
                   fontSize: 13,
                 ),
               ),
+              if (_metaLine != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    _metaLine!,
+                    style: const TextStyle(
+                      color: AppColors.textGrey,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
               if (item.details != null && item.details!.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
@@ -346,6 +396,19 @@ class GoodsItemTile extends StatelessWidget {
                       color: AppColors.textGrey,
                       fontSize: 11.5,
                       height: 1.3,
+                    ),
+                  ),
+                ),
+              if (item.missed)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Text(
+                    'Not collected · ${item.notCollectedReason}',
+                    style: const TextStyle(
+                      color: AppColors.coral,
+                      fontSize: 10.5,
+                      height: 1.3,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),

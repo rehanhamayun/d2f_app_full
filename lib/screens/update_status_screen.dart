@@ -41,6 +41,12 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
   final _deliveredToId = TextEditingController();
   final _proofReference = TextEditingController();
 
+  // Pickup collection outcome: crew checks off every declared package that
+  // was NOT on hand and records why — a partial collection is a fact, not
+  // an error, and is never silently completed.
+  final Set<int> _missedRows = <int>{};
+  final Map<int, TextEditingController> _missedReasons = {};
+
   DateTime _releasedAt = DateTime.now();
   DateTime _deliveredAt = DateTime.now();
   String? _proofType;
@@ -66,6 +72,9 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
     _deliveredToName.dispose();
     _deliveredToId.dispose();
     _proofReference.dispose();
+    for (final controller in _missedReasons.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -75,8 +84,7 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
       _locationsError = null;
     });
     try {
-      final list =
-          await (widget.loadLocations ?? Api.I.warehouseLocations)();
+      final list = await (widget.loadLocations ?? Api.I.warehouseLocations)();
       if (!mounted) return;
       setState(() {
         _locations = list;
@@ -87,8 +95,7 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
       if (!mounted) return;
       setState(() {
         _locationsLoading = false;
-        _locationsError =
-            'Could not load D2F facilities. Check the connection and try again.';
+        _locationsError = 'Could not load D2F facilities. Check the connection and try again.';
       });
     }
   }
@@ -99,6 +106,9 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
       _selected != null && kConfirmationStatuses.contains(_selected);
   bool get _isReleased => _selected == 'RELEASED';
   bool get _isDelivered => _selected == 'DELIVERED';
+  // The collection checklist applies only to pickups with itemized goods.
+  bool get _isCollection =>
+      _selected == 'PICKED_UP' && widget.parcel.items.isNotEmpty;
 
   void _chooseStatus(String status) {
     setState(() {
@@ -115,6 +125,20 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
           _deliveredToId.text = widget.parcel.releasedToIdNumber!;
         }
       }
+    });
+  }
+
+  /// Ticks/unticks one row of the collection checklist. Reasons live in a
+  /// controller retained on untick so an accidental tap does not lose text.
+  void _toggleMissed(int row) {
+    setState(() {
+      if (_missedRows.contains(row)) {
+        _missedRows.remove(row);
+      } else {
+        _missedRows.add(row);
+        _missedReasons.putIfAbsent(row, () => TextEditingController());
+      }
+      _error = null;
     });
   }
 
@@ -143,6 +167,17 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
     }
     if (_needsConfirmation && !_confirmed) {
       return 'Confirm that you have physically verified this shipment at the selected facility.';
+    }
+    if (_isCollection) {
+      // Every declared package the crew did not take needs a reason.
+      for (final entry in _missedReasons.entries) {
+        if (!_missedRows.contains(entry.key)) continue;
+        final reason = entry.value.text.trim();
+        if (reason.isEmpty) {
+          return 'Record why “${widget.parcel.items[entry.key].name}” was not '
+              'collected, or untick it if it was collected.';
+        }
+      }
     }
     if (_isReleased) {
       if (_releasedToName.text.trim().isEmpty) {
@@ -187,6 +222,15 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
         locationId: _locationId,
         note: _note.text.trim(),
         confirmed: _confirmed,
+        missedItems: _isCollection
+            ? [
+                for (final row in _missedRows)
+                  (
+                    itemId: widget.parcel.items[row].id,
+                    reason: _missedReasons[row]!.text.trim(),
+                  ),
+              ]
+            : const [],
         releasedToName: _isReleased ? _releasedToName.text.trim() : null,
         releasedToIdNumber: _isReleased ? _releasedToId.text.trim() : null,
         releasedAt: _isReleased ? _releasedAt : null,
@@ -194,8 +238,9 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
         deliveredToIdNumber: _isDelivered ? _deliveredToId.text.trim() : null,
         deliveredAt: _isDelivered ? _deliveredAt : null,
         deliveryProofType: _isDelivered ? _proofType : null,
-        deliveryProofReference:
-            _isDelivered ? _proofReference.text.trim() : null,
+        deliveryProofReference: _isDelivered
+            ? _proofReference.text.trim()
+            : null,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -349,10 +394,7 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
                   color: AppColors.blue,
                 )
               else if (_locationsError != null)
-                _InlineError(
-                  message: _locationsError!,
-                  onRetry: _loadLocations,
-                )
+                _InlineError(message: _locationsError!, onRetry: _loadLocations)
               else
                 DropdownButtonFormField<String>(
                   key: ValueKey('facility-$_locationId'),
@@ -369,8 +411,7 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
                         ),
                       ),
                   ],
-                  onChanged: (value) =>
-                      setState(() => _locationId = value),
+                  onChanged: (value) => setState(() => _locationId = value),
                   decoration: const InputDecoration(
                     hintText: 'Select D2F facility',
                     prefixIcon: Icon(Icons.warehouse_outlined),
@@ -408,6 +449,68 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
                   style: AppTheme.caption.copyWith(fontSize: 10.5),
                 ),
               ),
+              const SizedBox(height: 12),
+            ],
+            if (_isCollection) ...[
+              _SectionLabel('Collection checklist'),
+              const SizedBox(height: 6),
+              Text(
+                'Tick only the declared packages you could NOT take — record '
+                'why. Everything unticked is recorded as collected, so a '
+                'partial collection is never hidden.',
+                style: AppTheme.caption.copyWith(fontSize: 10.5, height: 1.4),
+              ),
+              const SizedBox(height: 6),
+              ...[
+                for (var row = 0; row < widget.parcel.items.length; row += 1)
+                  Column(
+                    key: ValueKey('collect-$row'),
+                    children: [
+                      CheckboxListTile(
+                        dense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                        ),
+                        controlAffinity: ListTileControlAffinity.leading,
+                        activeColor: AppColors.coral,
+                        value: _missedRows.contains(row),
+                        onChanged: (_) => _toggleMissed(row),
+                        title: Text(
+                          '${widget.parcel.items[row].name} '
+                          '(${widget.parcel.items[row].typeLabel} ${row + 1} of ${widget.parcel.items.length})',
+                          style: const TextStyle(
+                            color: AppColors.navy,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                          ),
+                        ),
+                        subtitle: Text(
+                          _missedRows.contains(row)
+                              ? 'Not collected'
+                              : 'Collected',
+                          style: TextStyle(
+                            color: AppColors.textGrey,
+                            fontSize: 10.5,
+                          ),
+                        ),
+                      ),
+                      if (_missedRows.contains(row))
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(26, 0, 12, 8),
+                          child: _TextField(
+                            key: ValueKey('missed-reason-$row'),
+                            controller: _missedReasons[row]!,
+                            label: 'Why was it not collected?',
+                            hint:
+                                'e.g. driver at location, still at the '
+                                'house, refused on sight…',
+                            icon: Icons.help_outline_rounded,
+                            maxLength: 300,
+                          ),
+                        ),
+                    ],
+                  ),
+              ],
               const SizedBox(height: 12),
             ],
             if (_isReleased) ...[
@@ -580,6 +683,7 @@ class _TextField extends StatelessWidget {
   final int maxLength;
 
   const _TextField({
+    super.key,
     required this.controller,
     required this.label,
     required this.hint,

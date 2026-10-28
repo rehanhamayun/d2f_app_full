@@ -160,44 +160,45 @@ model Customer {
 
 // Parcels: permanent UUID + public tracking ID
 model Parcel {
-  id                     String    @id @default(uuid()) // permanent internal UUID
-  trackingId             String    @unique // immutable, globally unique public tracking ID
-  organizationId         String
-  trackingSequence       BigInt?
-  customerId             String // shipper
-  recipientName          String
-  recipientPhone         String?
-  recipientAddress       String?
-  packageType            String // BOX, BARREL, TV, APPLIANCE, FURNITURE, PALLET, VEHICLE...
-  weightKg               Float
-  origin                 String // commercial shipping origin, separate from the intake warehouse
-  destination            String
-  pickupAddress          String? // required for same-city road pickups
-  method                 String    @default("SEA") // AIR | SEA | ROAD
-  notes                  String?
-  status                 String    @default("RECEIVED")
+  id                         String        @id @default(uuid()) // permanent internal UUID
+  trackingId                 String        @unique // immutable, globally unique public tracking ID
+  organizationId             String
+  trackingSequence           BigInt?
+  customerId                 String // shipper
+  recipientName              String
+  recipientPhone             String?
+  recipientAddress           String?
+  packageType                String // BOX, BARREL, TV, APPLIANCE, FURNITURE, PALLET, VEHICLE...
+  weightKg                   Float
+  origin                     String // commercial shipping origin, separate from the intake warehouse
+  destination                String
+  pickupAddress              String? // required for same-city road pickups
+  method                     String        @default("SEA") // AIR | SEA | ROAD
+  notes                      String?
+  status                     String        @default("RECEIVED")
   // Customer shipment requests: how goods reach D2F.
   // PICKUP = D2F collects from the customer's address (pickupScheduledAt).
   // DROP_OFF = the customer brings the goods to the D2F warehouse.
-  deliveryMode           String    @default("DROP_OFF") // PICKUP | DROP_OFF
-  pickupScheduledAt      DateTime? // customer's preferred pickup date and time
-  createdById            String
-  locationId             String? // current physical facility; separate from origin/destination
-  containerId            String?
-  items                  ParcelItem[]
-  images                 ParcelImage[]
-  clientRequestId        String? // retry keys belong to the organization that issued them
+  deliveryMode               String        @default("DROP_OFF") // PICKUP | DROP_OFF
+  pickupScheduledAt          DateTime? // customer's preferred pickup date and time
+  restrictionsAcknowledgedAt DateTime? // customer acknowledged the content/shipping rules when requesting
+  createdById                String
+  locationId                 String? // current physical facility; separate from origin/destination
+  containerId                String?
+  items                      ParcelItem[]
+  images                     ParcelImage[]
+  clientRequestId            String? // retry keys belong to the organization that issued them
   // Handover and delivery evidence. These are written once and retained with the parcel.
-  releasedToName         String?
-  releasedToIdNumber     String?
-  releasedAt             DateTime?
-  deliveredToName        String?
-  deliveredToIdNumber    String?
-  deliveredAt            DateTime?
-  deliveryProofType      String? // SIGNATURE | PHOTO | ID_CONFIRMATION
-  deliveryProofReference String?
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  releasedToName             String?
+  releasedToIdNumber         String?
+  releasedAt                 DateTime?
+  deliveredToName            String?
+  deliveredToIdNumber        String?
+  deliveredAt                DateTime?
+  deliveryProofType          String? // SIGNATURE | PHOTO | ID_CONFIRMATION
+  deliveryProofReference     String?
+  createdAt                  DateTime      @default(now())
+  updatedAt                  DateTime      @updatedAt
 
   organization  Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   customer      Customer         @relation(fields: [customerId], references: [id])
@@ -226,26 +227,36 @@ model TrackingIndex {
 // Goods the customer is sending, itemized under one shipment request.
 // A shipment can hold many things (5–6 boxes, clothing, appliances...).
 model ParcelItem {
-  id         String   @id @default(uuid())
-  parcelId   String
-  name       String // "Clothing box", "60-inch TV", "Spices"...
-  details    String? // short free-form description for the intake team
-  quantity   Int      @default(1)
-  weightKg   Float? // optional per-item estimate
-  position   Int      @default(0)
-  createdAt  DateTime @default(now())
+  id                 String    @id @default(uuid())
+  parcelId           String
+  name               String // "Clothing box", "60-inch TV", "Spices"...
+  details            String? // short free-form description for the intake team
+  quantity           Int       @default(1)
+  weightKg           Float? // optional per-item estimate
+  position           Int       @default(0)
+  type               String    @default("BOX") // BOX | SUITCASE | BARREL | TV | APPLIANCE | FURNITURE | PALLET | VEHICLE | DOCUMENTS | OTHER
+  lengthCm           Float? // optional package dimensions, recorded together
+  widthCm            Float?
+  heightCm           Float?
+  packageCode        String? // D2F…-P01-style sub-ID allocated when goods enter D2F custody
+  collectedAt        DateTime? // set for every observed package at a pickup collection
+  notCollectedReason String? // why a declared package was not on hand
+  createdAt          DateTime  @default(now())
 
-  parcel Parcel @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+  parcel       Parcel        @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+  parcelImages ParcelImage[]
 
   @@index([parcelId, position])
 }
 
 // Photos of the goods, attached by the customer. Stored as bytes so the
 // shipped-evidence gallery survives hosting redeploys without object storage.
-// Images are held at shipment level; the items describe the contents.
+// An image attaches to the whole shipment or, via itemId, to one declared
+// package; the association freezes once the shipment leaves intake editing.
 model ParcelImage {
   id           String   @id @default(uuid())
   parcelId     String
+  itemId       String? // optional: this photo documents one declared package
   fileName     String
   contentType  String // image/jpeg | image/png | image/webp
   sizeBytes    Int
@@ -253,8 +264,9 @@ model ParcelImage {
   uploadedById String?
   createdAt    DateTime @default(now())
 
-  parcel     Parcel @relation(fields: [parcelId], references: [id], onDelete: Cascade)
-  uploadedBy User?  @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  parcel     Parcel      @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+  item       ParcelItem? @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  uploadedBy User?       @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
 
   @@index([parcelId, createdAt])
 }

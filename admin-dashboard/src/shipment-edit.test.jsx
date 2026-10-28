@@ -15,13 +15,17 @@ const original = {
 };
 beforeEach(() => { vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); });
 
-function setup({ role = 'ADMIN', failSave = false, container = null } = {}) {
+function setup({ role = 'ADMIN', failSave = false, container = null, parcelData = {} } = {}) {
   const actor = { id: 'actor-1', role, fullName: 'Shipment Operator' };
   saveSession('local-test-session', actor);
-  let parcel = { ...structuredClone(original), container }, failure = failSave;
+  let parcel = { ...structuredClone(original), ...parcelData, container }, failure = failSave;
   const writes = [], reads = [];
   vi.stubGlobal('fetch', vi.fn(async (url, options = {}) => {
     const path = new URL(url).pathname;
+    if (options.method === 'POST' && path.endsWith('/events')) {
+      writes.push({ path, body: JSON.parse(options.body) });
+      return json({ id: 'collected-event' }, 201);
+    }
     if (options.method === 'PATCH') {
       const body = JSON.parse(options.body); writes.push({ path, body });
       if (failure) return json({ error: 'This parcel has changed. Refresh before editing again.' }, 409);
@@ -140,4 +144,27 @@ it('Staff can review the shipment without access to Edit shipment', async () => 
   const details = await openShipment(user);
   expect(within(details).queryByRole('button', { name: 'Edit shipment' })).toBeNull();
   expect(writes).toHaveLength(0);
+});
+
+it('collection checklist records missing package reasons and preserves package details', async () => {
+  const { writes } = setup({ parcelData: {
+    status: 'PICKUP_SCHEDULED', deliveryMode: 'PICKUP',
+    items: [
+      { id: 'box-1', name: 'Books', type: 'BOX', quantity: 4, lengthCm: 50, widthCm: 40, heightCm: 30 },
+      { id: 'barrel-1', name: 'Household goods', type: 'BARREL', quantity: 1 },
+    ],
+  } });
+  const user = userEvent.setup();
+  render(<App />);
+  const details = await openShipment(user);
+  expect(within(details).getByText('50 × 40 × 30 cm')).toBeInTheDocument();
+  expect(within(details).getByText('4 contents units')).toBeInTheDocument();
+  await user.click(within(details).getByLabelText('Not collected: Household goods (2 of 2)'));
+  await user.click(within(details).getByRole('button', { name: 'Save status update' }));
+  expect(within(details).getByRole('alert')).toHaveTextContent('Record why each missing package');
+  expect(writes).toHaveLength(0);
+  await user.type(within(details).getByLabelText('Reason for Household goods'), 'Barrel was not ready');
+  await user.click(within(details).getByRole('button', { name: 'Save status update' }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].body).toMatchObject({ status: 'PICKED_UP', missedItems: [{ itemId: 'barrel-1', reason: 'Barrel was not ready' }] });
 });

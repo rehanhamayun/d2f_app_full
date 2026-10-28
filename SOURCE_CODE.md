@@ -1,7 +1,8 @@
 # D2F Global source and build guide
 
 This repository contains the implemented mobile app, backend API, and web Admin
-dashboard. The current Android source version is `1.0.7+2011`.
+dashboard. The current Android source version is `1.0.8+2013`. The included release
+APK in `output/apk/` is version `1.0.8+2012`.
 
 ## Source inventory
 
@@ -24,8 +25,8 @@ dashboard. The current Android source version is `1.0.7+2011`.
 ## Get the source
 
 ```sh
-git clone https://github.com/rehanhamayun/d2f_application.git
-cd d2f_application
+git clone https://github.com/rehanhamayun/d2f_app_full.git
+cd d2f_app_full
 ```
 
 Use a Flutter SDK that satisfies the Dart constraint in `pubspec.yaml`, an Android
@@ -43,7 +44,7 @@ flutter build apk --release --split-per-abi --dart-define=API_BASE_URL=https://d
 
 The build outputs are under `build/app/outputs/flutter-apk/`. Flutter regenerates
 ignored platform/build files as needed. Android build codes include the ABI
-offset applied by Flutter; `2011` is the base build number.
+offset applied by Flutter; `2013` is the current source base build number.
 
 Existing production updates require the original release signing key and the
 private `android/key.properties` configuration. These must be transferred
@@ -105,8 +106,9 @@ configuration and Cloudflare Pages or Netlify deployment instructions.
 ## Intentionally outside source control
 
 Production secrets, `.env` files, account passwords, signing keys, local database
-data/backups, dependency folders, temporary authoring files and compiled APKs are
-excluded. Supply private values through the hosting platform or secure handover.
+data/backups, dependency folders and temporary authoring files are excluded.
+The supplied release APK is included under `output/apk/`; generated build folders
+are excluded. Supply private values through the hosting platform or secure handover.
 Their exclusion does not remove application source. This repository records the
 implemented scope; later roadmap features are described separately in the
 milestone review and client report.

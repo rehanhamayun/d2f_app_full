@@ -2,7 +2,7 @@
 
 Android staff shipping app for D2F Shipping LLC, with a shared Express/Prisma/PostgreSQL backend. The repository now includes the Milestone 1 staff parcel foundation and the local Milestone 2 warehouse/admin implementation. Hosted deployments still require the new backend migration and updated clients.
 
-Current Android release: **1.0.7+2011**, including the supplied D2F wordmark launcher icon and updated signup artwork. See [source and build guide](SOURCE_CODE.md) for the repository contents, local setup, and private configuration needed to reproduce a build.
+Current Android source: **1.0.8+2013**. The included release APK in `output/apk/` is **1.0.8+2012**. See [source and build guide](SOURCE_CODE.md) for the repository contents, local setup, and private configuration needed to reproduce a build.
 
 The app defaults to the live HTTPS backend at https://d2f-api-production.up.railway.app, hosted in **production_house**, Managing Consultant’s Railway Pro workspace. It works independently of this development computer. Private account details are in `.local/ACCESS_DETAILS.md` and must not be committed or included in an APK.
 
@@ -33,7 +33,7 @@ See [MILESTONE_2_REVIEW.md](MILESTONE_2_REVIEW.md) for requirements, tests, sele
 
 ## Customer shipment requests
 
-The client's functional workflow reference (in `design/screens/`) is the blueprint for the booking flow: requests are submitted before receipt or pricing, one booking carries multiple goods lines with optional photos, and collection is either staff pickup with a confirmed slot or warehouse drop-off. The implemented contracts — goods lines, photo rules, schedule windows, mode-aware statuses shared by backend, app and admin — are recorded in [design/customer-workflow-notes.md](design/customer-workflow-notes.md), together with the next alignment block (per-package type/dimensions/photos/labels, pickup failure and reschedule reasons, partial-collection discrepancy flags).
+The client's functional workflow reference (in `design/screens/`) is the blueprint for the booking flow: requests are submitted before receipt or pricing, one booking carries multiple goods lines with optional photos, and collection is either staff pickup with a confirmed slot or warehouse drop-off. The implemented contracts — goods lines, photo rules, schedule windows, mode-aware statuses shared by backend, app and admin — are recorded in [design/customer-workflow-notes.md](design/customer-workflow-notes.md), together with the current package alignment: per-package type/dimensions/photos, explicit declaration acknowledgment, collection discrepancy reasons, reschedule history and distinct scannable package labels. The notes also identify remaining requirements from the revised reference, including independent package histories, package-level container reconciliation and pricing.
 
 ## Web Admin dashboard
 

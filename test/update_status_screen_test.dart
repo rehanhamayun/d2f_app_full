@@ -5,27 +5,31 @@ import 'package:d2f_application/screens/update_status_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-Parcel parcelWithStatus(String status, {String? deliveryMode}) =>
-    Parcel.fromJson({
-      'id': 'parcel-1',
-      'trackingId': 'D2F000000000005',
-      'customerId': 'customer-1',
-      'recipientName': 'Kossi Mensah',
-      'recipientPhone': '+228 90000000',
-      'recipientAddress': 'Rue du Marché 10, Lomé',
-      'pickupAddress': 'Boulevard du 13 Janvier 4, Lomé',
-      'packageType': 'BOX',
-      'weightKg': 2.5,
-      'origin': 'Lomé, Togo',
-      'destination': 'Lomé, Togo',
-      'method': 'ROAD',
-      'status': status,
-      if (deliveryMode != null) 'deliveryMode': deliveryMode,
-      'createdAt': '2026-10-18T09:00:00Z',
-      'updatedAt': '2026-10-21T10:00:00Z',
-      'releasedToName': 'Ama Boateng',
-      'releasedToIdNumber': 'TG-12345',
-    });
+Parcel parcelWithStatus(
+  String status, {
+  String? deliveryMode,
+  List<Map<String, dynamic>> items = const [],
+}) => Parcel.fromJson({
+  'id': 'parcel-1',
+  'trackingId': 'D2F000000000005',
+  'customerId': 'customer-1',
+  'recipientName': 'Kossi Mensah',
+  'recipientPhone': '+228 90000000',
+  'recipientAddress': 'Rue du Marché 10, Lomé',
+  'pickupAddress': 'Boulevard du 13 Janvier 4, Lomé',
+  'packageType': 'BOX',
+  'weightKg': 2.5,
+  'origin': 'Lomé, Togo',
+  'destination': 'Lomé, Togo',
+  'method': 'ROAD',
+  'status': status,
+  'items': items,
+  if (deliveryMode != null) 'deliveryMode': deliveryMode,
+  'createdAt': '2026-10-18T09:00:00Z',
+  'updatedAt': '2026-10-21T10:00:00Z',
+  'releasedToName': 'Ama Boateng',
+  'releasedToIdNumber': 'TG-12345',
+});
 
 final location = WarehouseLocation.fromJson({
   'id': 'loc-1',
@@ -112,20 +116,68 @@ void main() {
     expect(note.maxLength, 1000);
   });
 
-  testWidgets('drop-off request offers only warehouse intake, pickup offers both',
+  testWidgets(
+    'drop-off request offers only warehouse intake, pickup offers both',
     (tester) async {
-    // Default (legacy) records are drop-offs: a REQUESTED shipment can only be
-    // received at the warehouse.
-    await pumpScreen(tester, parcelWithStatus('REQUESTED'));
-    expect(find.text('Received'), findsOneWidget);
-    expect(find.text('Pickup Scheduled'), findsNothing);
-    expect(find.text('Picked Up'), findsNothing);
+      // Default (legacy) records are drop-offs: a REQUESTED shipment can only be
+      // received at the warehouse.
+      await pumpScreen(tester, parcelWithStatus('REQUESTED'));
+      expect(find.text('Received'), findsOneWidget);
+      expect(find.text('Pickup Scheduled'), findsNothing);
+      expect(find.text('Picked Up'), findsNothing);
 
-    // A customer-requested pickup adds the scheduling and collection steps.
-    final pickup = parcelWithStatus('REQUESTED', deliveryMode: 'PICKUP');
-    await pumpScreen(tester, pickup);
-    expect(find.text('Pickup Scheduled'), findsOneWidget);
-    expect(find.text('Picked Up'), findsOneWidget);
-    expect(find.text('Received'), findsOneWidget);
-  });
+      // A customer-requested pickup adds the scheduling and collection steps.
+      final pickup = parcelWithStatus('REQUESTED', deliveryMode: 'PICKUP');
+      await pumpScreen(tester, pickup);
+      expect(find.text('Pickup Scheduled'), findsOneWidget);
+      expect(find.text('Picked Up'), findsOneWidget);
+      expect(find.text('Received'), findsOneWidget);
+    },
+  );
+  testWidgets(
+    'pickup checklist distinguishes missed packages and opens a reason field',
+    (tester) async {
+      await pumpScreen(
+        tester,
+        parcelWithStatus(
+          'PICKUP_SCHEDULED',
+          deliveryMode: 'PICKUP',
+          items: [
+            {
+              'id': 'p1',
+              'name': 'Books',
+              'type': 'BOX',
+              'quantity': 4,
+              'position': 0,
+            },
+            {
+              'id': 'p2',
+              'name': 'Personal goods',
+              'type': 'SUITCASE',
+              'quantity': 1,
+              'position': 1,
+            },
+          ],
+        ),
+      );
+      await tester.tap(find.text('Picked Up'));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('collect-1')),
+        180,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.text('Personal goods (Suitcase 2 of 2)'), findsOneWidget);
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('collect-1')),
+          matching: find.byType(CheckboxListTile),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Not collected'), findsOneWidget);
+      expect(find.byKey(const ValueKey('missed-reason-1')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

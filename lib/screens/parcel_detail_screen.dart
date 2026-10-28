@@ -19,7 +19,7 @@ import '../services/parcel_report.dart';
 /// Overview / Tracking / Details + "Update Status" staff action. The
 /// Tracking tab carries a "Download parcel details" PDF action.
 class ParcelDetailScreen extends ConsumerStatefulWidget {
-  final String parcelId; // UUID or public tracking ID
+  final String parcelId; // UUID, shipment tracking ID, or package code
   final Future<Parcel> Function(String)? loadParcel;
 
   const ParcelDetailScreen({
@@ -29,8 +29,7 @@ class ParcelDetailScreen extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<ParcelDetailScreen> createState() =>
-      _ParcelDetailScreenState();
+  ConsumerState<ParcelDetailScreen> createState() => _ParcelDetailScreenState();
 }
 
 class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
@@ -510,7 +509,10 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
     final note = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Correct operational note', style: AppTheme.sectionTitle),
+        title: const Text(
+          'Correct operational note',
+          style: AppTheme.sectionTitle,
+        ),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -557,9 +559,8 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
       await _fetch();
     } on ApiException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
     }
   }
 
@@ -624,7 +625,8 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
                     : 'Warehouse drop-off',
               ),
               if (parcel.deliveryMode == DeliveryMode.PICKUP) ...[
-                if (parcel.pickupAddress != null && parcel.pickupAddress!.isNotEmpty)
+                if (parcel.pickupAddress != null &&
+                    parcel.pickupAddress!.isNotEmpty)
                   _row('Collection address', parcel.pickupAddress!),
                 if (parcel.pickupScheduledAt != null)
                   _row(
@@ -664,7 +666,10 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
         Row(
           children: [
             const Expanded(
-              child: Text('Goods in this shipment', style: AppTheme.sectionTitle),
+              child: Text(
+                'Goods in this shipment',
+                style: AppTheme.sectionTitle,
+              ),
             ),
             Text(
               '${parcel.items.length} lines · ${parcel.totalPieces} pieces',
@@ -673,12 +678,53 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
           ],
         ),
         const SizedBox(height: 10),
+        // Staff see the same collection discrepancy customers see: a package
+        // the crew could not take stays visible until it reaches the hub.
+        if (parcel.hasCollectionDiscrepancy)
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.coralSoft,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.report_problem_rounded,
+                  color: AppColors.coral,
+                  size: 18,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Collected ${parcel.items.length - parcel.missedItems.length} '
+                    'of ${parcel.items.length} packages at the pickup. '
+                    'Missing items are marked below.',
+                    style: const TextStyle(
+                      color: AppColors.coral,
+                      fontSize: 11,
+                      height: 1.35,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         SectionCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               for (final item in parcel.items) ...[
-                GoodsItemTile(item: item),
+                if (item.packageCode == widget.parcelId)
+                  const Text('Scanned package', style: AppTheme.sectionTitle),
+                GoodsItemTile(
+                  key: ValueKey('staff-item-${item.position}'),
+                  item: item,
+                  itemCount: parcel.items.length,
+                ),
                 if (item != parcel.items.last) const Divider(height: 18),
               ],
             ],
@@ -691,6 +737,40 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
 
   Widget _photosCard(Parcel parcel) {
     if (parcel.images.isEmpty) return const SizedBox.shrink();
+    // Photos grouped by the package they document; per-package shots carry
+    // the package caption so staff can match photos to counted items.
+    final shipmentPhotos = parcel.photosFor(null);
+    final sections = <Widget>[];
+    for (final item in parcel.items) {
+      final photos = parcel.photosFor(item.id);
+      if (photos.isEmpty) continue;
+      sections.add(
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${item.name} (${item.typeLabel} ${item.position + 1} of ${parcel.items.length})',
+                style: const TextStyle(
+                  color: AppColors.navy,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              GoodsPhotoGallery(
+                images: photos,
+                compact: true,
+                loadBytes: (image) =>
+                    Api.I.parcelImageBytes(parcel.id, image.id),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    final hasShipmentOnly = shipmentPhotos.isNotEmpty && sections.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -708,9 +788,31 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
         const SizedBox(height: 10),
         SectionCard(
           padding: const EdgeInsets.all(12),
-          child: GoodsPhotoGallery(
-            images: parcel.images,
-            loadBytes: (image) => Api.I.parcelImageBytes(parcel.id, image.id),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (shipmentPhotos.isNotEmpty) ...[
+                if (hasShipmentOnly)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      'Shipment as a whole',
+                      style: TextStyle(
+                        color: AppColors.navy,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                GoodsPhotoGallery(
+                  images: shipmentPhotos,
+                  compact: sections.isNotEmpty,
+                  loadBytes: (image) =>
+                      Api.I.parcelImageBytes(parcel.id, image.id),
+                ),
+              ],
+              ...sections,
+            ],
           ),
         ),
         const SizedBox(height: 20),

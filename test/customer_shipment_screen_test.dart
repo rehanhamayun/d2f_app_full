@@ -48,7 +48,8 @@ final customerParcel = Parcel(
     TrackingEvent(
       id: 'request-event',
       status: 'REQUESTED',
-      note: 'Shipment request submitted by customer · goods brought to the '
+      note:
+          'Shipment request submitted by customer · goods brought to the '
           'warehouse.',
       createdAt: DateTime.utc(2026, 10, 22, 8),
     ),
@@ -93,9 +94,8 @@ void main() {
       builder: (context, child) => RepaintBoundary(
         key: boundary,
         child: MediaQuery(
-          data: MediaQuery.of(
-            context,
-          ).copyWith(textScaler: TextScaler.linear(1)),
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: TextScaler.linear(1)),
           child: child!,
         ),
       ),
@@ -147,47 +147,67 @@ void main() {
     size(tester, const Size(390, 844));
     final boundaryKey = GlobalKey();
     var parcelLoadCount = 0;
+    var uploadedItemId = '';
+    var detailReloads = 0;
     Map<String, Object?>? submitted;
     await tester.pumpWidget(
       wrap(
         CustomerShipmentScreen(
+          pickPhoto: () async => PhotoDraft(
+            'books.png',
+            'image/png',
+            (await rootBundle.load('assets/images/d2f_2.png')).buffer
+                .asUint8List(),
+          ),
+          uploadPhoto: (parcelId, itemId, photo) async {
+            expect(parcelId, customerParcel.id);
+            expect(photo.fileName, 'books.png');
+            uploadedItemId = itemId;
+          },
+          loadParcel: (id) async {
+            detailReloads++;
+            return customerParcel;
+          },
           loadParcels: () async {
             parcelLoadCount++;
             return parcelLoadCount > 1 ? [customerParcel] : [];
           },
-          createParcel: ({
-            required recipientName,
-            required recipientPhone,
-            required recipientAddress,
-            required packageType,
-            required weightKg,
-            required origin,
-            required destination,
-            required method,
-            required deliveryMode,
-            pickupAddress,
-            pickupScheduledAt,
-            items = const [],
-            notes,
-            required clientRequestId,
-          }) async {
-            submitted = {
-              'recipientName': recipientName,
-              'recipientPhone': recipientPhone,
-              'recipientAddress': recipientAddress,
-              'packageType': packageType,
-              'weightKg': weightKg,
-              'origin': origin,
-              'destination': destination,
-              'method': method,
-              'deliveryMode': deliveryMode,
-              'pickupAddress': pickupAddress,
-              'items': items,
-              'notes': notes,
-              'clientRequestId': clientRequestId,
-            };
-            return customerParcel;
-          },
+          createParcel:
+              ({
+                required recipientName,
+                required recipientPhone,
+                required recipientAddress,
+                required packageType,
+                required weightKg,
+                required origin,
+                required destination,
+                required method,
+                required deliveryMode,
+                restrictionsAcknowledged = false,
+                pickupAddress,
+                pickupScheduledAt,
+                items = const [],
+                notes,
+                required clientRequestId,
+              }) async {
+                submitted = {
+                  'recipientName': recipientName,
+                  'recipientPhone': recipientPhone,
+                  'recipientAddress': recipientAddress,
+                  'packageType': packageType,
+                  'weightKg': weightKg,
+                  'origin': origin,
+                  'destination': destination,
+                  'method': method,
+                  'deliveryMode': deliveryMode,
+                  'restrictionsAcknowledged': restrictionsAcknowledged,
+                  'pickupAddress': pickupAddress,
+                  'items': items,
+                  'notes': notes,
+                  'clientRequestId': clientRequestId,
+                };
+                return customerParcel;
+              },
         ),
         boundaryKey,
       ),
@@ -212,24 +232,34 @@ void main() {
 
     await capture('06-customer-new-shipment');
 
-    // Goods repeater: an itemized goods list travels with the request.
+    // Goods repeater: physical packages travel with type and dimensions.
+    await tester.enterText(
+      find.byKey(const ValueKey('goods-size-0')),
+      '60x40x45',
+    );
     await tester.enterText(
       find.byKey(const ValueKey('goods-name-0')),
       'Clothing box',
     );
     await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('goods-qty-0')),
-      '2',
-    );
+    await tester.enterText(find.byKey(const ValueKey('goods-qty-0')), '2');
     await tester.pumpAndSettle();
     await reveal(tester, const ValueKey('customer-add-item'));
     await tester.tap(find.byKey(const ValueKey('customer-add-item')));
     await tester.pumpAndSettle();
+    // A blank draft before this package must not move its photo to another row.
+    await reveal(tester, const ValueKey('customer-add-item'));
+    await tester.tap(find.byKey(const ValueKey('customer-add-item')));
+    await tester.pumpAndSettle();
     await tester.enterText(
-      find.byKey(const ValueKey('goods-name-1')),
+      find.byKey(const ValueKey('goods-name-2')),
       'Kitchen blender',
     );
+    await reveal(tester, const ValueKey('goods-photo-add-2'));
+    await tester.tap(find.byKey(const ValueKey('goods-photo-add-2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose from gallery'));
+    await tester.pumpAndSettle();
     await tester.pumpAndSettle();
 
     await reveal(tester, const ValueKey('customer-recipient-name'));
@@ -264,6 +294,17 @@ void main() {
     await reveal(tester, const ValueKey('customer-create-shipment'));
     await tester.tap(submit);
     await tester.pumpAndSettle();
+    expect(submitted, isNull);
+    expect(find.textContaining('Confirm that your goods list'), findsOneWidget);
+    await reveal(tester, const ValueKey('customer-restrictions-check'));
+    await tester.tap(find.byKey(const ValueKey('customer-restrictions-check')));
+    await reveal(tester, const ValueKey('customer-create-shipment'));
+    await tester.tap(submit);
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 1));
+    expect(submitted?['restrictionsAcknowledged'], isTrue);
+    expect(uploadedItemId, 'item-2');
+    expect(detailReloads, 1);
 
     expect(submitted?['recipientName'], 'Kossi Mensah');
     expect(submitted?['recipientPhone'], '+22890000000');
@@ -279,6 +320,9 @@ void main() {
     final items = submitted?['items'] as List<ParcelItem>;
     expect(items.map((item) => item.name), ['Clothing box', 'Kitchen blender']);
     expect(items.first.quantity, 2);
+    expect(items.first.lengthCm, 60);
+    expect(items.first.widthCm, 40);
+    expect(items.first.heightCm, 45);
     expect(submitted?['clientRequestId'], isNotEmpty);
     expect(find.text('Request created.'), findsOneWidget);
     expect(find.text('Request submitted'), findsOneWidget);
@@ -322,30 +366,33 @@ void main() {
           CustomerShipmentScreen(
             loadParcels: () async => [],
             selectSchedule: () async => DateTime(2026, 11, 15, 10, 30),
-            createParcel: ({
-              required recipientName,
-              required recipientPhone,
-              required recipientAddress,
-              required packageType,
-              required weightKg,
-              required origin,
-              required destination,
-              required method,
-              required deliveryMode,
-              pickupAddress,
-              pickupScheduledAt,
-              items = const [],
-              notes,
-              required clientRequestId,
-            }) async {
-              submitted = {
-                'deliveryMode': deliveryMode,
-                'pickupAddress': pickupAddress,
-                'pickupScheduledAt': pickupScheduledAt,
-                'items': items,
-              };
-              return customerParcel;
-            },
+            createParcel:
+                ({
+                  required recipientName,
+                  required recipientPhone,
+                  required recipientAddress,
+                  required packageType,
+                  required weightKg,
+                  required origin,
+                  required destination,
+                  required method,
+                  required deliveryMode,
+                  restrictionsAcknowledged = false,
+                  pickupAddress,
+                  pickupScheduledAt,
+                  items = const [],
+                  notes,
+                  required clientRequestId,
+                }) async {
+                  submitted = {
+                    'deliveryMode': deliveryMode,
+                    'restrictionsAcknowledged': restrictionsAcknowledged,
+                    'pickupAddress': pickupAddress,
+                    'pickupScheduledAt': pickupScheduledAt,
+                    'items': items,
+                  };
+                  return customerParcel;
+                },
           ),
           GlobalKey(),
         ),
@@ -384,10 +431,7 @@ void main() {
       // Choose the pickup module: the schedule card appears.
       await tester.tap(find.byKey(const ValueKey('handover-pickup')));
       await tester.pumpAndSettle();
-      expect(
-        find.byKey(const ValueKey('pickup-details')),
-        findsOneWidget,
-      );
+      expect(find.byKey(const ValueKey('pickup-details')), findsOneWidget);
 
       final submit = find.byKey(const ValueKey('customer-create-shipment'));
       await reveal(tester, const ValueKey('customer-create-shipment'));
@@ -415,6 +459,11 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('customer-pickup-schedule')));
       await tester.pumpAndSettle();
       expect(find.textContaining('Nov 15'), findsOneWidget);
+      await reveal(tester, const ValueKey('customer-restrictions-check'));
+      await tester.tap(
+        find.byKey(const ValueKey('customer-restrictions-check')),
+      );
+      await reveal(tester, const ValueKey('customer-create-shipment'));
       await tester.tap(submit);
       await tester.pumpAndSettle();
       expect(submitted?['deliveryMode'], 'PICKUP');
@@ -447,6 +496,7 @@ void main() {
                 required destination,
                 required method,
                 required deliveryMode,
+                restrictionsAcknowledged = false,
                 pickupAddress,
                 pickupScheduledAt,
                 items = const [],

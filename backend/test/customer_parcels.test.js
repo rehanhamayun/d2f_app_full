@@ -82,6 +82,7 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
       origin: 'Omaha, NE, USA',
       destination: 'Lomé, Togo',
       method: 'AIR',
+      restrictionsAcknowledged: true,
       clientRequestId: `customer-${suffix}`,
     };
 

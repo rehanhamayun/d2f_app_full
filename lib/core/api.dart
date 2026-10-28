@@ -345,6 +345,15 @@ class Api {
     }
   }
 
+  Future<Parcel> customerParcelDetail(String parcelId) async {
+    try {
+      final res = await _dio!.get('/customer/parcels/$parcelId');
+      return Parcel.fromJson(res.data as Map<String, dynamic>);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
   /// Creates a shipment request. Returns the created (or previously-created,
   /// when the same [clientRequestId] is retried) shipment with its itemized
   /// goods list.
@@ -358,6 +367,7 @@ class Api {
     required String destination,
     required String method,
     required String deliveryMode,
+    bool restrictionsAcknowledged = false,
     String? pickupAddress,
     DateTime? pickupScheduledAt,
     List<ParcelItem> items = const [],
@@ -377,6 +387,7 @@ class Api {
           'destination': destination,
           'method': method,
           'deliveryMode': deliveryMode,
+          'restrictionsAcknowledged': restrictionsAcknowledged,
           if (pickupAddress != null && pickupAddress.isNotEmpty)
             'pickupAddress': pickupAddress,
           if (pickupScheduledAt != null)
@@ -403,11 +414,13 @@ class Api {
     required String fileName,
     required String contentType,
     String? label,
+    String? itemId,
   }) async {
     try {
       final query = {
         'name': fileName,
         if (label != null && label.isNotEmpty) 'label': label,
+        if (itemId != null && itemId.isNotEmpty) 'itemId': itemId,
       };
       final res = await _dio!.post(
         '/customer/parcels/$parcelId/images',
@@ -573,6 +586,7 @@ class Api {
     String? location,
     String? note,
     bool confirmed = false,
+    List<({String itemId, String reason})> missedItems = const [],
     String? releasedToName,
     String? releasedToIdNumber,
     DateTime? releasedAt,
@@ -592,6 +606,11 @@ class Api {
           if (location != null && location.isNotEmpty) 'location': location,
           if (note != null && note.isNotEmpty) 'note': note,
           if (confirmed) 'confirmed': true,
+          if (missedItems.isNotEmpty)
+            'missedItems': [
+              for (final missed in missedItems)
+                {'itemId': missed.itemId, 'reason': missed.reason},
+            ],
           if (releasedToName != null && releasedToName.isNotEmpty)
             'releasedToName': releasedToName,
           if (releasedToIdNumber != null && releasedToIdNumber.isNotEmpty)

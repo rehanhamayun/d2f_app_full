@@ -516,3 +516,5 @@ td b { color: #263354; font-size: 9px; font-weight: 750; }
 .sidebar .side-nav { overflow-y:auto; min-height:100px; flex-shrink:1; }
 .sidebar .workspace-chip, .sidebar .side-brand, .sidebar .profile-card, .sidebar .side-help, .sidebar .nav-caption { flex-shrink:0; }
 .sidebar .side-grow { min-height:14px; }
+
+.photo-grid figcaption { margin-top: 4px; font-size: 10px; line-height: 1.35; color: #5d6880; overflow-wrap: anywhere; }

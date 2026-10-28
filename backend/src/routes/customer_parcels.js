@@ -7,6 +7,7 @@ import { generateTrackingId, resolveOrganizationId } from '../tracking.js';
 const router = Router();
 const packageTypes = [
   'BOX',
+  'SUITCASE',
   'BARREL',
   'TV',
   'APPLIANCE',
@@ -49,6 +50,7 @@ const parcelSelect = {
   notes: true,
   deliveryMode: true,
   pickupScheduledAt: true,
+  restrictionsAcknowledgedAt: true,
   status: true,
   createdAt: true,
   updatedAt: true,
@@ -60,12 +62,20 @@ const parcelSelect = {
       quantity: true,
       weightKg: true,
       position: true,
+      type: true,
+      lengthCm: true,
+      widthCm: true,
+      heightCm: true,
+      packageCode: true,
+      collectedAt: true,
+      notCollectedReason: true,
     },
     orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
   },
   images: {
     select: {
       id: true,
+      itemId: true,
       fileName: true,
       contentType: true,
       sizeBytes: true,
@@ -148,8 +158,42 @@ function normalizeItem(rawItem, index) {
     }
     details = rawItem.details.trim() || null;
   }
+  // Optional package dimensions are stored as one L×W×H set: accepting half a
+  // measurement would produce meaningless volume data at the intake desk.
+  const hasAnyDimension =
+    rawItem.lengthCm != null || rawItem.widthCm != null || rawItem.heightCm != null;
+  const hasAllDimensions =
+    rawItem.lengthCm != null && rawItem.widthCm != null && rawItem.heightCm != null;
+  let lengthCm = null;
+  let widthCm = null;
+  let heightCm = null;
+  if (hasAllDimensions) {
+    for (const [field, raw] of [
+      ['lengthCm', rawItem.lengthCm],
+      ['widthCm', rawItem.widthCm],
+      ['heightCm', rawItem.heightCm],
+    ]) {
+      const dimension = Number(raw);
+      if (!Number.isFinite(dimension) || dimension < 1 || dimension > 1000) {
+        return {
+          error: `Item ${index + 1}: every package dimension must be between 1 and 1,000 cm.`,
+        };
+      }
+      if (field === 'lengthCm') lengthCm = Math.round(dimension * 10) / 10;
+      if (field === 'widthCm') widthCm = Math.round(dimension * 10) / 10;
+      if (field === 'heightCm') heightCm = Math.round(dimension * 10) / 10;
+    }
+  } else if (hasAnyDimension) {
+    return {
+      error: `Item ${index + 1}: enter all three package dimensions (L×W×H) or leave them out.`,
+    };
+  }
+  const type = rawItem.type == null ? 'BOX' : rawItem.type;
+  if (!packageTypes.includes(type)) {
+    return { error: `Item ${index + 1}: choose a valid package type.` };
+  }
   return {
-    value: { name, details, quantity, weightKg, position: index },
+    value: { name, details, quantity, weightKg, position: index, type, lengthCm, widthCm, heightCm },
   };
 }
 
@@ -245,6 +289,14 @@ router.post('/', async (req, res, next) => {
       return res
         .status(400)
         .json({ error: 'Choose how goods reach D2F: warehouse drop-off or pickup.' });
+    }
+    // Truthful-declaration acknowledgment (functional workflow §1): the form
+    // requires the customer to confirm contents and shipping restrictions.
+    if (req.body?.restrictionsAcknowledged !== true) {
+      return res.status(400).json({
+        error:
+          'Confirm that the goods are accurately described and comply with shipping restrictions.',
+      });
     }
 
     // Collection details are compulsory for pickups: the address tells the
@@ -375,6 +427,7 @@ router.post('/', async (req, res, next) => {
           deliveryMode,
           pickupAddress: deliveryMode === 'PICKUP' ? pickupAddress.trim() : pickupAddress?.trim() || null,
           pickupScheduledAt: scheduledPickup,
+          restrictionsAcknowledgedAt: new Date(),
           status: 'REQUESTED',
           createdById: req.user.id,
           clientRequestId: clientRequestId || null,
@@ -477,16 +530,29 @@ router.post('/:parcelId/images', raw({ type: Object.keys(IMAGE_CONTENT_TYPES), l
     const label = validImageLabel(req.query.label?.toString());
     const fileName = validImageFileName(req.query.name?.toString(), extension);
 
+    // Optional per-package attachment: the photo documents one declared
+    // package instead of the shipment as a whole.
+    let itemLink;
+    if (req.query.itemId != null) {
+      const itemId = req.query.itemId.toString();
+      const item = await prisma.parcelItem.findFirst({ where: { id: itemId, parcelId: parcel.id }, select: { id: true } });
+      if (!item) {
+        return res.status(400).json({ error: 'That photo does not match a declared package of this shipment.' });
+      }
+      itemLink = item.id;
+    }
+
     const image = await prisma.parcelImage.create({
       data: {
         parcelId: parcel.id,
+        ...(itemLink ? { itemId: itemLink } : {}),
         fileName,
         contentType: req.headers['content-type'],
         sizeBytes: req.body.length,
         bytes: req.body,
         uploadedById: req.user.id,
       },
-      select: { id: true, fileName: true, contentType: true, sizeBytes: true, createdAt: true },
+      select: { id: true, itemId: true, fileName: true, contentType: true, sizeBytes: true, createdAt: true },
     });
     await prisma.auditLog.create({
       data: {
@@ -494,7 +560,7 @@ router.post('/:parcelId/images', raw({ type: Object.keys(IMAGE_CONTENT_TYPES), l
         action: 'PARCEL_IMAGE_UPLOAD',
         entity: 'Parcel',
         entityId: parcel.id,
-        detail: `image=${image.fileName} bytes=${image.sizeBytes}${label ? ` label=${label}` : ''}`,
+        detail: `image=${image.fileName} bytes=${image.sizeBytes}${image.itemId ? ` item=${image.itemId}` : ''}${label ? ` label=${label}` : ''}`,
       },
     });
     res.status(201).json(image);

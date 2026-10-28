@@ -23,7 +23,7 @@ import {
 const router = Router();
 
 // ── Domain rules ────────────────────────────────────────────────────────────
-const PACKAGE_TYPES = ['BOX', 'BARREL', 'TV', 'APPLIANCE', 'FURNITURE', 'PALLET', 'VEHICLE', 'DOCUMENTS', 'OTHER'];
+const PACKAGE_TYPES = ['BOX', 'SUITCASE', 'BARREL', 'TV', 'APPLIANCE', 'FURNITURE', 'PALLET', 'VEHICLE', 'DOCUMENTS', 'OTHER'];
 const METHODS = ['AIR', 'SEA', 'ROAD'];
 const DELIVERY_MODES = ['PICKUP', 'DROP_OFF'];
 const text = (value, max = 1000) => typeof value === 'string' && value.trim().length > 0 && value.trim().length <= max;
@@ -32,7 +32,7 @@ const parcelInclude = {
   items: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
   images: {
     orderBy: { createdAt: 'asc' },
-    select: { id: true, fileName: true, contentType: true, sizeBytes: true, createdAt: true },
+    select: { id: true, itemId: true, fileName: true, contentType: true, sizeBytes: true, createdAt: true },
   },
   container: { select: { id: true, code: true, status: true } },
   customer: { select: { id: true, displayName: true, email: true, phone: true } },
@@ -332,6 +332,7 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
       locationId,
       confirmed,
       pickupScheduledAt,
+      missedItems,
       releasedToName,
       releasedToIdNumber,
       releasedAt,
@@ -470,6 +471,19 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
         conflict.status = 409;
         throw conflict;
       }
+      // Collection outcome for pickups: every declared package is either
+      // observed (collectedAt) or explicitly missing with a recorded reason,
+      // so a six-package request collected as five shows the discrepancy.
+      let collection;
+      if (status === 'PICKED_UP') {
+        collection = await recordCollection(tx, current, missedItems);
+      }
+      // Warehouse custody: allocate stable package sub-IDs (P01, P02…) the
+      // first time the goods physically enter D2F handling. Existing codes
+      // never change, and the sequence follows the declared pack order.
+      if (status === 'PICKED_UP' || status === 'RECEIVED') {
+        await allocatePackageCodes(tx, current);
+      }
       const recorded = await tx.trackingEvent.create({
         data: {
           parcelId: parcel.id,
@@ -477,6 +491,9 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
           note: note?.trim()
             || (status === 'PICKUP_SCHEDULED' && current.pickupScheduledAt
               ? `Pickup confirmed for ${current.pickupScheduledAt.toISOString()}.`
+              : null)
+            || (status === 'PICKED_UP' && collection && collection.collected < collection.total
+              ? `Collected ${collection.collected} of ${collection.total} packages.`
               : null),
           location: facility ? locationLabel(facility) : location?.trim() || null,
           actorId: req.user.id,
@@ -488,7 +505,7 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
           action: 'PARCEL_STATUS_UPDATE',
           entity: 'Parcel',
           entityId: parcel.id,
-          detail: `${parcel.status} → ${status}${facility ? ` @ ${locationLabel(facility)}` : ''}${status === 'DELIVERED' ? ` · proof=${deliveryProofType}` : ''}`,
+          detail: `${parcel.status} → ${status}${facility ? ` @ ${locationLabel(facility)}` : ''}${status === 'DELIVERED' ? ` · proof=${deliveryProofType}` : ''}${collection && collection.collected < collection.total ? ` · collected ${collection.collected}/${collection.total}` : ''}`,
         },
       });
       return recorded;
@@ -499,6 +516,70 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
     next(e);
   }
 });
+
+/**
+ * Records the outcome of a pickup collection across declared packages.
+ * missedItems (optional array of { itemId, reason }) names the packages that
+ * were not on hand; everything else is stamped collectedAt.
+ */
+async function recordCollection(tx, parcel, missedItems) {
+  if (missedItems != null && !Array.isArray(missedItems)) {
+    fail(400, 'missedItems must be an array of { itemId, reason }.');
+  }
+  const items = await tx.parcelItem.findMany({
+    where: { parcelId: parcel.id },
+    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+  });
+  if (!items.length) return null;
+  const missed = [];
+  if (Array.isArray(missedItems)) {
+    for (const entry of missedItems) {
+      const itemId = entry?.itemId;
+      const reason = typeof entry?.reason === 'string' ? entry.reason.trim() : '';
+      if (!items.some((item) => item.id === itemId)) {
+        fail(400, 'Every missed package must be one of the goods declared on this shipment.');
+      }
+      if (!reason || reason.length > 300) {
+        fail(400, 'Record why a package was not collected (up to 300 characters).');
+      }
+      if (missed.some((entry) => entry.itemId === itemId)) {
+        fail(400, 'A package was listed more than once in the collection outcome.');
+      }
+      missed.push({ itemId, reason });
+    }
+  }
+  if (missed.length === items.length) {
+    fail(400, 'No packages were collected. Keep the pickup open and record or reschedule the attempt.');
+  }
+  const collectedAt = new Date();
+  for (const item of items) {
+    const missedEntry = missed.find((entry) => entry.itemId === item.id);
+    await tx.parcelItem.update({
+      where: { id: item.id },
+      data: missedEntry
+        ? { notCollectedReason: missedEntry.reason, collectedAt: null }
+        : { notCollectedReason: null, collectedAt },
+    });
+  }
+  return { collected: items.length - missed.length, total: items.length };
+}
+
+/** Allocates {@link ParcelItem.packageCode} `TRK-P01…` codes by declared order. */
+async function allocatePackageCodes(tx, parcel) {
+  const items = await tx.parcelItem.findMany({
+    where: { parcelId: parcel.id },
+    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+  });
+  for (const [index, item] of items.entries()) {
+    if (item.packageCode || item.notCollectedReason) continue;
+    await tx.parcelItem.update({
+      where: { id: item.id },
+      data: {
+        packageCode: `${parcel.trackingId}-P${String(index + 1).padStart(2, '0')}`,
+      },
+    });
+  }
+}
 
 // PATCH /parcels/:id/events/:eventId/note — correct an accidental note without
 // deleting the event, actor, timestamp or location. Staff may correct their own
@@ -644,8 +725,11 @@ router.patch('/:id', requireRole('ADMIN'), async (req, res, next) => {
   try {
     const body = req.body;
     const fields = ['customerId', 'recipientName', 'recipientPhone', 'recipientAddress', 'pickupAddress', 'packageType', 'weightKg', 'origin', 'destination', 'method', 'notes', 'deliveryMode', 'pickupScheduledAt'];
-    if (!body || Array.isArray(body) || typeof body !== 'object' || Object.keys(body).some(key => ![...fields, 'updatedAt'].includes(key))) {
+    if (!body || Array.isArray(body) || typeof body !== 'object' || Object.keys(body).some(key => ![...fields, 'rescheduleReason', 'updatedAt'].includes(key))) {
       return res.status(400).json({ error: 'Only parcel input details can be edited.' });
+    }
+    if (body.rescheduleReason != null && (typeof body.rescheduleReason !== 'string' || body.rescheduleReason.length > 300)) {
+      return res.status(400).json({ error: 'The reschedule reason must be at most 300 characters.' });
     }
     if (typeof body.updatedAt !== 'string' || !Number.isFinite(Date.parse(body.updatedAt))) {
       return res.status(400).json({ error: 'Reload the parcel before editing (updatedAt is required).' });
@@ -655,6 +739,9 @@ router.patch('/:id', requireRole('ADMIN'), async (req, res, next) => {
     const optional = ['recipientPhone', 'recipientAddress', 'pickupAddress', 'notes'];
     for (const field of fields) {
       if (!Object.hasOwn(body, field)) continue;
+      // Pickup slots are date values, not enum choices; the dedicated block
+      // below validates them with the schedule window rules.
+      if (field === 'pickupScheduledAt') continue;
       const value = body[field];
       if (field in textLimits) {
         if (optional.includes(field) && value === null) { data[field] = null; continue; }
@@ -699,7 +786,8 @@ router.patch('/:id', requireRole('ADMIN'), async (req, res, next) => {
         // Linked shopping orders must continue to belong to the same customer.
         if (await tx.serviceOrder.count({ where: { parcelId: current.id } })) fail(409, 'This parcel is linked to a shopping order. Its customer cannot be changed.');
       }
-      const changes = Object.fromEntries(Object.entries(data).filter(([field, value]) => current[field] !== value));
+      const changes = Object.fromEntries(Object.entries(data).filter(([field, value]) =>
+        value instanceof Date ? current[field]?.getTime() !== value.getTime() : current[field] !== value));
       if (current.container && current.container.status !== 'ARRIVED' && ['origin', 'destination', 'method'].some(field => field in changes)) {
         fail(409, 'Remove this parcel from its loading container before changing its route or shipping method. Departed containers must arrive first.');
       }
@@ -724,6 +812,24 @@ router.patch('/:id', requireRole('ADMIN'), async (req, res, next) => {
           actorId: req.user.id, action: 'PARCEL_EDIT', entity: 'Parcel', entityId: current.id,
           detail: JSON.stringify({ trackingId: current.trackingId, changes: Object.fromEntries(Object.entries(changes).map(([field, value]) => [field, { from: current[field], to: value }])) }),
         } });
+        // Pickup slots are part of the operational story: changing one leaves
+        // an event (with the recorded reason) so rescheduled pickups and
+        // failed attempts stay visible in the customer-facing timeline.
+        if ('pickupScheduledAt' in changes && current.deliveryMode === 'PICKUP') {
+          const reason = typeof body.rescheduleReason === 'string' ? body.rescheduleReason.trim() : '';
+          await tx.trackingEvent.create({
+            data: {
+              parcelId: current.id,
+              status: current.status,
+              note: `${data.pickupScheduledAt ? `Pickup rescheduled to ${data.pickupScheduledAt.toISOString()}` : 'Pickup slot cleared'}${reason ? ` · ${reason}` : ''}.`,
+              actorId: req.user.id,
+            },
+          });
+          await tx.auditLog.create({ data: {
+            actorId: req.user.id, action: 'PARCEL_PICKUP_RESCHEDULE', entity: 'Parcel', entityId: current.id,
+            detail: `to=${data.pickupScheduledAt?.toISOString() || 'unscheduled'}${reason ? ` · reason=${reason}` : ''}`,
+          } });
+        }
       }
       return tx.parcel.findUnique({ where: { id: current.id }, include: parcelInclude });
     });
@@ -744,7 +850,10 @@ router.get('/:idOrTracking', async (req, res, next) => {
 
     if (!parcel) {
       parcel = await prisma.parcel.findFirst({
-        where: { trackingId: idOrTracking.toUpperCase(), organizationId },
+        where: { organizationId, OR: [
+          { trackingId: idOrTracking.toUpperCase() },
+          { items: { some: { packageCode: idOrTracking.toUpperCase() } } },
+        ] },
         include: parcelInclude,
       });
     }

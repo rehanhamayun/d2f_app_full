@@ -69,12 +69,12 @@ class _ScanScreenState extends State<ScanScreen> {
         if (mounted) Navigator.pop(context, trackingId);
         return;
       }
-      final parcel = await Api.I.parcelDetail(trackingId);
+      await Api.I.parcelDetail(trackingId);
       if (!mounted) return;
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => ParcelDetailScreen(parcelId: parcel.id),
+          builder: (_) => ParcelDetailScreen(parcelId: trackingId),
         ),
       );
       if (mounted) setState(() => _busy = false);

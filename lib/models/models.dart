@@ -352,6 +352,13 @@ class ParcelItem {
   final int quantity;
   final double? weightKg;
   final int position;
+  final String type; // BOX | SUITCASE | BARREL | …, see kParcelItemTypes
+  final double? lengthCm;
+  final double? widthCm;
+  final double? heightCm;
+  final String? packageCode; // allocated once the goods enter D2F custody
+  final DateTime? collectedAt; // observed by staff at a pickup collection
+  final String? notCollectedReason; // recorded when a package was not on hand
 
   const ParcelItem({
     required this.id,
@@ -360,6 +367,13 @@ class ParcelItem {
     required this.quantity,
     this.weightKg,
     required this.position,
+    this.type = 'BOX',
+    this.lengthCm,
+    this.widthCm,
+    this.heightCm,
+    this.packageCode,
+    this.collectedAt,
+    this.notCollectedReason,
   });
 
   factory ParcelItem.fromJson(Map<String, dynamic> j) => ParcelItem(
@@ -369,6 +383,15 @@ class ParcelItem {
     quantity: (j['quantity'] as num?)?.toInt() ?? 1,
     weightKg: (j['weightKg'] as num?)?.toDouble(),
     position: (j['position'] as num?)?.toInt() ?? 0,
+    type: j['type'] as String? ?? 'BOX',
+    lengthCm: (j['lengthCm'] as num?)?.toDouble(),
+    widthCm: (j['widthCm'] as num?)?.toDouble(),
+    heightCm: (j['heightCm'] as num?)?.toDouble(),
+    packageCode: j['packageCode'] as String?,
+    collectedAt: j['collectedAt'] == null
+        ? null
+        : DateTime.tryParse(j['collectedAt'] as String),
+    notCollectedReason: j['notCollectedReason'] as String?,
   );
 
   Map<String, dynamic> toCreateJson() => {
@@ -376,7 +399,22 @@ class ParcelItem {
     if (details != null && details!.isNotEmpty) 'details': details,
     'quantity': quantity,
     if (weightKg != null) 'weightKg': weightKg,
+    'type': type,
+    if (lengthCm != null && widthCm != null && heightCm != null) ...{
+      'lengthCm': lengthCm,
+      'widthCm': widthCm,
+      'heightCm': heightCm,
+    },
   };
+
+  String get typeLabel => parcelItemTypeLabel(type);
+
+  /// True once the pickup crew recorded this package as not on hand.
+  bool get missed => notCollectedReason != null && collectedAt == null;
+
+  /// "Box 2 of 6" style display name; falls back to the type label.
+  String displayName(int itemCount) =>
+      '$typeLabel ${position + 1} of $itemCount';
 }
 
 /// Metadata of a photo of the goods attached to the shipment. Image bytes are
@@ -387,6 +425,7 @@ class ParcelImageMeta {
   final String contentType;
   final int sizeBytes;
   final DateTime? createdAt;
+  final String? itemId; // set when the photo documents one declared package
 
   const ParcelImageMeta({
     required this.id,
@@ -394,6 +433,7 @@ class ParcelImageMeta {
     required this.contentType,
     required this.sizeBytes,
     this.createdAt,
+    this.itemId,
   });
 
   factory ParcelImageMeta.fromJson(Map<String, dynamic> j) => ParcelImageMeta(
@@ -404,6 +444,7 @@ class ParcelImageMeta {
     createdAt: j['createdAt'] == null
         ? null
         : DateTime.tryParse(j['createdAt'] as String),
+    itemId: j['itemId'] as String?,
   );
 }
 
@@ -424,6 +465,7 @@ class Parcel {
   final String status;
   final DeliveryMode deliveryMode;
   final DateTime? pickupScheduledAt;
+  final DateTime? restrictionsAcknowledgedAt;
   final List<ParcelItem> items;
   final List<ParcelImageMeta> images;
   final DateTime createdAt;
@@ -444,6 +486,18 @@ class Parcel {
   int get totalPieces =>
       items.isEmpty ? 0 : items.fold(0, (sum, item) => sum + item.quantity);
 
+  /// Packages the pickup crew recorded as not on hand.
+  List<ParcelItem> get missedItems =>
+      items.where((item) => item.missed).toList();
+
+  /// True when a collection observed fewer packages than were declared.
+  bool get hasCollectionDiscrepancy =>
+      items.isNotEmpty && missedItems.isNotEmpty;
+
+  /// Photos documenting one declared package ([itemId]) or the shipment.
+  List<ParcelImageMeta> photosFor(String? itemId) =>
+      images.where((image) => image.itemId == itemId).toList();
+
   const Parcel({
     required this.id,
     required this.trackingId,
@@ -461,6 +515,7 @@ class Parcel {
     required this.status,
     this.deliveryMode = DeliveryMode.DROP_OFF,
     this.pickupScheduledAt,
+    this.restrictionsAcknowledgedAt,
     this.items = const [],
     this.images = const [],
     required this.createdAt,
@@ -503,6 +558,9 @@ class Parcel {
     pickupScheduledAt: j['pickupScheduledAt'] == null
         ? null
         : DateTime.tryParse(j['pickupScheduledAt'] as String),
+    restrictionsAcknowledgedAt: j['restrictionsAcknowledgedAt'] == null
+        ? null
+        : DateTime.tryParse(j['restrictionsAcknowledgedAt'] as String),
     items: (j['items'] as List<dynamic>? ?? [])
         .map((e) => ParcelItem.fromJson(e as Map<String, dynamic>))
         .toList(),
@@ -541,6 +599,7 @@ class Parcel {
 
   String get packageTypeLabel => switch (packageType) {
     'BOX' => 'Box',
+    'SUITCASE' => 'Suitcase',
     'BARREL' => 'Barrel',
     'TV' => 'TV / Electronics',
     'APPLIANCE' => 'Appliance',
@@ -552,6 +611,35 @@ class Parcel {
     _ => packageType,
   };
 }
+
+/// Declared package types for goods lines. Each goods line is one physical
+/// package the warehouse staff handle, count and label individually.
+const List<String> kParcelItemTypes = [
+  'BOX',
+  'SUITCASE',
+  'BARREL',
+  'TV',
+  'APPLIANCE',
+  'FURNITURE',
+  'PALLET',
+  'VEHICLE',
+  'DOCUMENTS',
+  'OTHER',
+];
+
+String parcelItemTypeLabel(String type) => switch (type) {
+  'BOX' => 'Box',
+  'SUITCASE' => 'Suitcase',
+  'BARREL' => 'Barrel',
+  'TV' => 'TV / Electronics',
+  'APPLIANCE' => 'Appliance',
+  'FURNITURE' => 'Furniture',
+  'PALLET' => 'Pallet',
+  'VEHICLE' => 'Vehicle',
+  'DOCUMENTS' => 'Documents',
+  'OTHER' => 'Other',
+  _ => type,
+};
 
 // ── Reference data (dropdowns) ──────────────────────────────────────────────
 
@@ -638,8 +726,9 @@ String? validateRouteSelection({
   String? pickupAddress,
   String? recipientAddress,
 }) {
-  if (origin == null || destination == null)
+  if (origin == null || destination == null) {
     return 'Select an origin and destination.';
+  }
   if (!sameRouteCity(origin, destination)) return null;
   if (method == ShippingMethod.ROAD) {
     final pickup = pickupAddress?.trim() ?? '';

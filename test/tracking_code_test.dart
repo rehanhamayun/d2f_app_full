@@ -9,14 +9,8 @@ void main() {
     });
 
     test('normalizes lower case, spaces, separators and scanner noise', () {
-      expect(
-        normalizeTrackingCode('  d2f-000000000005 \n'),
-        'D2F000000000005',
-      );
-      expect(
-        normalizeTrackingCode('D2F 0000 0000 0005'),
-        'D2F000000000005',
-      );
+      expect(normalizeTrackingCode('  d2f-000000000005 \n'), 'D2F000000000005');
+      expect(normalizeTrackingCode('D2F 0000 0000 0005'), 'D2F000000000005');
     });
 
     test('extracts the identity from QR URLs and JSON payloads', () {
@@ -42,6 +36,23 @@ void main() {
       expect(normalizeTrackingCode('D2F-2026-000101'), 'D2F-2026-000101');
       expect(normalizeTrackingCode('000000000005'), 'D2F000000000005');
       expect(normalizeTrackingCode('000000000000005'), 'D2F000000000000005');
+    });
+
+    test('retains package identity in current and legacy label payloads', () {
+      expect(
+        normalizeTrackingCode('D2F000000000000005-P02'),
+        'D2F000000000000005-P02',
+      );
+      expect(
+        normalizeTrackingCode('D2F000000000005-P03'),
+        'D2F000000000005-P03',
+      );
+      expect(
+        normalizeTrackingCode(
+          'https://d2fshipping.com/track/d2f-2026-000101-p02',
+        ),
+        'D2F-2026-000101-P02',
+      );
     });
 
     test('rejects empty and non-D2F payloads', () {

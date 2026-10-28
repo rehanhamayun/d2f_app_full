@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../core/api.dart';
 import '../core/theme.dart';
 import '../models/models.dart';
@@ -27,6 +28,8 @@ typedef CustomerShipmentCreator = Future<Parcel> Function({
   required String destination,
   required String method,
   required String deliveryMode,
+  // Truthful-declaration acknowledgment (compulsory on the request form).
+  bool restrictionsAcknowledged,
   String? pickupAddress,
   DateTime? pickupScheduledAt,
   List<ParcelItem> items,
@@ -44,6 +47,7 @@ const _defaultCustomerRoute = ShipmentRoute(
 
 const _customerPackageTypes = <(String, String)>[
   ('BOX', 'Box'),
+  ('SUITCASE', 'Suitcase'),
   ('BARREL', 'Barrel'),
   ('TV', 'TV / electronics'),
   ('APPLIANCE', 'Appliance'),
@@ -62,6 +66,9 @@ class GoodsDraft {
   final TextEditingController name = TextEditingController();
   final TextEditingController quantity = TextEditingController();
   final TextEditingController details = TextEditingController();
+  final TextEditingController size = TextEditingController();
+  String type = 'BOX';
+  final List<PhotoDraft> photos = <PhotoDraft>[];
 
   int get quantityValue {
     final parsed = int.tryParse(quantity.text.trim());
@@ -72,17 +79,44 @@ class GoodsDraft {
 
   String get detailsValue => details.text.trim();
 
+  String get sizeText => size.text.trim();
+
+  /// Parsed L×W×H centimeters; an empty field means "no dimensions".
+  /// Returns null when the text exists but is not a readable measurement.
+  List<double>? get dimensions {
+    final text = sizeText.toLowerCase().replaceAll('×', 'x');
+    if (text.isEmpty) return const <double>[];
+    final parts = text.split(RegExp(r'\s*x\s*'));
+    if (parts.length != 3) return null;
+    final numbers = <double>[];
+    for (final part in parts) {
+      final value = double.tryParse(part.trim());
+      if (value == null || !value.isFinite || value < 1 || value > 1000) {
+        return null;
+      }
+      numbers.add((value * 10).round() / 10);
+    }
+    return numbers;
+  }
+
+  bool get sizeMalformed => sizeText.isNotEmpty && dimensions == null;
+
   /// Null when the row is blank (empty rows are ignored by the form, so
   /// partially filled rows cannot silently disappear).
   ParcelItem? toParcelItem(int position) {
     final label = nameValue;
     if (label.isEmpty) return null;
+    final dims = dimensions ?? const <double>[];
     return ParcelItem(
       id: 'draft-$position',
       name: label,
       details: detailsValue.isEmpty ? null : detailsValue,
       quantity: quantityValue,
       position: position,
+      type: type,
+      lengthCm: dims.length == 3 ? dims[0] : null,
+      widthCm: dims.length == 3 ? dims[1] : null,
+      heightCm: dims.length == 3 ? dims[2] : null,
     );
   }
 
@@ -90,6 +124,7 @@ class GoodsDraft {
     name.dispose();
     quantity.dispose();
     details.dispose();
+    size.dispose();
   }
 }
 
@@ -120,6 +155,9 @@ class CustomerShipmentScreen extends ConsumerStatefulWidget {
 
   /// Optional override of the device gallery/camera so widget tests stay pure.
   final GoodsPhotoPicker? pickPhoto;
+  final Future<void> Function(String parcelId, String itemId, PhotoDraft photo)?
+  uploadPhoto;
+  final Future<Parcel> Function(String parcelId)? loadParcel;
 
   /// Optional override of the date/time pickers so widget tests can schedule
   /// a pickup without driving system dialogs.
@@ -132,6 +170,8 @@ class CustomerShipmentScreen extends ConsumerStatefulWidget {
     this.loadParcels,
     this.createParcel,
     this.pickPhoto,
+    this.uploadPhoto,
+    this.loadParcel,
     this.selectSchedule,
   });
 
@@ -153,7 +193,7 @@ class _CustomerShipmentScreenState
   final _weight = TextEditingController();
   final _notes = TextEditingController();
   final List<GoodsDraft> _goods = [GoodsDraft()];
-  final List<PhotoDraft> _photos = [];
+  bool _restrictionsAck = false;
 
   ShipmentRoute _route = _defaultCustomerRoute;
   String? _packageType;
@@ -239,6 +279,7 @@ class _CustomerShipmentScreenState
   }
 
   void _addGoods() {
+    if (_goods.length >= _maxItems) return;
     setState(() => _goods.add(GoodsDraft()));
     _invalidateRequest();
   }
@@ -338,8 +379,15 @@ class _CustomerShipmentScreenState
     });
   }
 
-  Future<void> _addPhoto() async {
-    if (_photos.length >= _maxPhotos) {
+  /// Total staged photos across all goods rows.
+  int get _stagedPhotoCount =>
+      _goods.fold(0, (total, draft) => total + draft.photos.length);
+
+  /// Opens the gallery/camera and stages the photo on one goods row. Photos
+  /// are optional per package (functional workflow §2) and upload after the
+  /// shipment exists so they can be linked to that row's package record.
+  Future<void> _addRowPhoto(int index) async {
+    if (_stagedPhotoCount >= _maxPhotos) {
       authMessage(
         context,
         'A shipment can hold at most $_maxPhotos photos of the goods.',
@@ -373,7 +421,7 @@ class _CustomerShipmentScreenState
           : await _pickFromDevice(source);
       if (picked == null || !mounted) return;
       setState(() {
-        _photos.add(picked);
+        _goods[index].photos.add(picked);
         _invalidateRequest();
       });
     } catch (_) {
@@ -403,10 +451,32 @@ class _CustomerShipmentScreenState
     return 'image/jpeg';
   }
 
-  void _removePhoto(int index) => setState(() => _photos.removeAt(index));
+  void _removeRowPhoto(int rowIndex, int photoIndex) => setState(() {
+    _goods[rowIndex].photos.removeAt(photoIndex);
+    _invalidateRequest();
+  });
 
   Future<void> _createShipment() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+    // Rows with photos must describe the package, and a size reading must be
+    // a full L×W×H measurement — individual photos can never be orphaned.
+    for (var index = 0; index < _goods.length; index += 1) {
+      final draft = _goods[index];
+      if (draft.nameValue.isEmpty && draft.photos.isNotEmpty) {
+        authMessage(
+          context,
+          'Item ${index + 1} has photos but no description — name it so our team knows which package they document.',
+        );
+        return;
+      }
+      if (draft.sizeMalformed) {
+        authMessage(
+          context,
+          'Item ${index + 1}: enter the size as L×W×H centimetres, e.g. 60×40×45, or leave it empty.',
+        );
+        return;
+      }
+    }
     final goods = _collectGoods();
     if (goods.isEmpty) {
       authMessage(
@@ -422,14 +492,27 @@ class _CustomerShipmentScreenState
       setState(() => _pickupMissingSchedule = true);
       return;
     }
+    if (!_restrictionsAck) {
+      authMessage(
+        context,
+        'Confirm that your goods list is accurate and complies with shipping restrictions.',
+      );
+      return;
+    }
 
     FocusScope.of(context).unfocus();
     setState(() => _saving = true);
     _requestId ??=
         'customer-${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 32)}';
     try {
-      final photoUploads = List<PhotoDraft>.of(_photos);
-      final parcel = await (widget.createParcel ?? Api.I.createCustomerParcel)(
+      // (rowIndex, photos) pairs survive create; the response items keep the
+      // declared order, so link each row's photos to its package record.
+      final photoUploads = <int, List<PhotoDraft>>{
+        for (var index = 0; index < _goods.length; index += 1)
+          if (_goods[index].photos.isNotEmpty)
+            index: List<PhotoDraft>.of(_goods[index].photos),
+      };
+      var parcel = await (widget.createParcel ?? Api.I.createCustomerParcel)(
         recipientName: _recipientName.text.trim(),
         recipientPhone: _recipientPhone.text.trim(),
         recipientAddress: _recipientAddress.text.trim(),
@@ -439,6 +522,7 @@ class _CustomerShipmentScreenState
         destination: _route.destination,
         method: _route.method.name,
         deliveryMode: _deliveryMode.apiName,
+        restrictionsAcknowledged: true,
         pickupAddress: _deliveryMode == DeliveryMode.PICKUP
             ? _pickupAddress.text.trim()
             : null,
@@ -450,27 +534,57 @@ class _CustomerShipmentScreenState
         clientRequestId: _requestId!,
       );
 
-      // Photos upload after the request exists; a failed upload never loses
-      // the shipment — the customer is told to re-attach it.
-      for (final photo in photoUploads) {
-        try {
-          await Api.I.addParcelImage(
-            parcel.id,
-            photo.bytes,
-            fileName: photo.fileName,
-            contentType: photo.contentType,
-          );
-        } catch (_) {
-          if (mounted) {
-            authMessage(
-              context,
-              'Shipment created, but a photo could not be uploaded. You can attach it again from this request.',
-            );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      var uploadFailures = 0;
+      // Attach only to the saved physical package. Keep the saved request
+      // visible even if a photo cannot be uploaded.
+      for (final entry in photoUploads.entries) {
+        final item = parcel.items
+            .where(
+              (item) =>
+                  item.position ==
+                  goods.indexWhere((item) => item.id == 'draft-${entry.key}'),
+            )
+            .firstOrNull;
+        for (final photo in entry.value) {
+          try {
+            if (item == null) {
+              throw StateError('Package missing from saved request');
+            }
+            if (widget.uploadPhoto != null) {
+              await widget.uploadPhoto!(parcel.id, item.id, photo);
+            } else {
+              await Api.I.addParcelImage(
+                parcel.id,
+                photo.bytes,
+                fileName: photo.fileName,
+                contentType: photo.contentType,
+                itemId: item.id,
+              );
+            }
+          } catch (_) {
+            uploadFailures += 1;
           }
         }
       }
 
+      if (photoUploads.isNotEmpty) {
+        try {
+          parcel = await (widget.loadParcel ?? Api.I.customerParcelDetail)(
+            parcel.id,
+          );
+        } catch (_) {
+          // A preview refresh must never turn a saved request into a failure.
+        }
+      }
       if (!mounted) return;
+      if (uploadFailures > 0) {
+        authMessage(
+          context,
+          'Request saved. $uploadFailures photo(s) did not upload. Keep the originals and contact D2F with your tracking ID.',
+        );
+      }
       await Navigator.push<bool>(
         context,
         MaterialPageRoute(
@@ -506,10 +620,13 @@ class _CustomerShipmentScreenState
       _packageType = null;
       _requestId = null;
       _pickupWhen = null;
+      _restrictionsAck = false;
+      for (final draft in _goods) {
+        draft.dispose();
+      }
       _goods
         ..clear()
         ..add(GoodsDraft());
-      _photos.clear();
     });
   }
 
@@ -570,7 +687,7 @@ class _CustomerShipmentScreenState
                   const SizedBox(height: 18),
                   _handoverSection(),
                   const SizedBox(height: 22),
-                  _photosSection(),
+                  _restrictionsSection(),
                   const SizedBox(height: 12),
                   SectionCard(
                     tint: AppColors.goldSoft,
@@ -812,8 +929,8 @@ class _CustomerShipmentScreenState
         ),
         const SizedBox(height: 4),
         const Text(
-          'List every item your shipment contains — boxes, clothing, '
-          'electronics. Our team sees exactly what to expect at collection.',
+          'Add one row for each physical package, such as a box, suitcase or '
+          'barrel. Use quantity for the contents inside that package.',
           style: AppTheme.caption,
         ),
         const SizedBox(height: 14),
@@ -828,6 +945,13 @@ class _CustomerShipmentScreenState
                   index: index,
                   draft: _goods[index],
                   onInvalidate: _invalidateRequest,
+                  onTypeChanged: (type) => setState(() {
+                    _goods[index].type = type;
+                    _invalidateRequest();
+                  }),
+                  onPickPhoto: () => _addRowPhoto(index),
+                  onRemovePhoto: (photoIndex) =>
+                      _removeRowPhoto(index, photoIndex),
                   onRemove: _goods.length > 1
                       ? () => _removeGoods(index)
                       : null,
@@ -856,7 +980,7 @@ class _CustomerShipmentScreenState
               borderRadius: BorderRadius.circular(14),
             ),
           ),
-          onPressed: _addGoods,
+          onPressed: _goods.length >= _maxItems ? null : _addGoods,
           icon: const Icon(Icons.add_circle_outline_rounded, size: 18),
           label: const Text("Add another item"),
         ),
@@ -1193,76 +1317,51 @@ class _CustomerShipmentScreenState
     ),
   );
 
-  Widget _photosSection() {
+  Widget _restrictionsSection() {
     return Column(
-      key: const ValueKey('customer-photos'),
+      key: const ValueKey('customer-restrictions'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
           padding: const EdgeInsets.only(left: 4, bottom: 10),
-          child: Text(
-            'Photos of the goods (optional)',
-            style: AppTheme.sectionTitle,
-          ),
+          child: Text('Before you submit', style: AppTheme.sectionTitle),
         ),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Help our team see what they are collecting. Up to $_maxPhotos '
-                'photos, compressed automatically.',
-                style: AppTheme.caption.copyWith(fontSize: 11),
-              ),
-            ),
-            OutlineButton2(label: 'Add photo', onPressed: () => _addPhoto()),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (_photos.isNotEmpty)
-          SizedBox(
-            height: 96,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: _photos.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 10),
-              itemBuilder: (context, index) {
-                final photo = _photos[index];
-                return Stack(
-                  children: [
-                    Container(
-                      width: 86,
-                      margin: const EdgeInsets.only(bottom: 8),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: AppColors.border),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: Image.memory(
-                          photo.bytes,
-                          fit: BoxFit.cover,
-                          width: 86,
-                          height: 86,
-                        ),
-                      ),
+        SectionCard(
+          padding: const EdgeInsets.all(14),
+          child: InkWell(
+            key: const ValueKey('customer-restrictions-check'),
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => setState(() => _restrictionsAck = !_restrictionsAck),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  height: 22,
+                  width: 22,
+                  child: Checkbox(
+                    value: _restrictionsAck,
+                    onChanged: (value) =>
+                        setState(() => _restrictionsAck = value ?? false),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'I confirm my goods are truthfully described and comply '
+                    'with D2F shipping restrictions. Our team verifies the '
+                    'packages against this list at collection.',
+                    style: TextStyle(
+                      color: AppColors.navy,
+                      fontSize: 12,
+                      height: 1.5,
+                      fontWeight: FontWeight.w600,
                     ),
-                    Positioned(
-                      top: -6,
-                      right: -6,
-                      child: IconButton(
-                        tooltip: 'Remove photo',
-                        icon: Icon(
-                          Icons.cancel_rounded,
-                          color: AppColors.coral.withValues(alpha: .9),
-                        ),
-                        onPressed: () => _removePhoto(index),
-                      ),
-                    ),
-                  ],
-                );
-              },
+                  ),
+                ),
+              ],
             ),
           ),
+        ),
       ],
     );
   }
@@ -1418,6 +1517,9 @@ class _GoodsRow extends StatelessWidget {
   final int index;
   final GoodsDraft draft;
   final VoidCallback onInvalidate;
+  final ValueChanged<String> onTypeChanged;
+  final VoidCallback onPickPhoto;
+  final ValueChanged<int> onRemovePhoto;
   final VoidCallback? onRemove;
 
   const _GoodsRow({
@@ -1425,6 +1527,9 @@ class _GoodsRow extends StatelessWidget {
     required this.index,
     required this.draft,
     required this.onInvalidate,
+    required this.onTypeChanged,
+    required this.onPickPhoto,
+    required this.onRemovePhoto,
     this.onRemove,
   });
 
@@ -1453,7 +1558,7 @@ class _GoodsRow extends StatelessWidget {
                     isCollapsed: true,
                     contentPadding: EdgeInsets.zero,
                     border: InputBorder.none,
-                    hintText: 'Describe item (e.g. clothing box, TV)...',
+                    hintText: 'Describe package (e.g. clothing box, TV)...',
                     hintStyle: TextStyle(
                       fontSize: 12.5,
                       color: AppColors.textGrey,
@@ -1513,6 +1618,89 @@ class _GoodsRow extends StatelessWidget {
                 ),
             ],
           ),
+          const SizedBox(height: 10),
+          // What kind of physical package is this, and how large? Staff count
+          // and label each one, so the type and L×W×H reading travel with it.
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              DropdownButtonFormField<String>(
+                key: ValueKey('goods-type-$index'),
+                isExpanded: true,
+                initialValue: draft.type,
+                isDense: true,
+                decoration: InputDecoration(
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 7,
+                  ),
+                  filled: true,
+                  fillColor: AppColors.surface,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(9),
+                    borderSide: BorderSide(color: AppColors.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(9),
+                    borderSide: BorderSide(color: AppColors.border),
+                  ),
+                  hintText: 'Type',
+                  hintStyle: const TextStyle(
+                    fontSize: 11.5,
+                    color: AppColors.textGrey,
+                  ),
+                ),
+                style: Theme.of(context).textTheme.bodySmall!.copyWith(
+                  color: AppColors.navy,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                ),
+                items: [
+                  for (final (value, label) in _customerPackageTypes)
+                    DropdownMenuItem(value: value, child: Text(label)),
+                ],
+                onChanged: (value) {
+                  if (value != null && value != draft.type) {
+                    onTypeChanged(value);
+                  }
+                },
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                key: ValueKey('goods-size-$index'),
+                controller: draft.size,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[\d.×x ]')),
+                ],
+                onChanged: (_) => onInvalidate(),
+                decoration: InputDecoration(
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 7,
+                  ),
+                  filled: true,
+                  fillColor: AppColors.surface,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(9),
+                    borderSide: BorderSide(color: AppColors.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(9),
+                    borderSide: BorderSide(color: AppColors.border),
+                  ),
+                  hintText: 'Size L×W×H cm — e.g. 60×40×45',
+                  hintStyle: const TextStyle(
+                    fontSize: 10.5,
+                    color: AppColors.textGrey,
+                  ),
+                ),
+                style: const TextStyle(color: AppColors.navy, fontSize: 12),
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
           TextField(
             key: ValueKey('goods-details-$index'),
@@ -1528,8 +1716,108 @@ class _GoodsRow extends StatelessWidget {
             ),
             style: const TextStyle(fontSize: 11.5, color: AppColors.textGrey),
           ),
+          const SizedBox(height: 10),
+          // Optional photos of this package, compressed automatically and
+          // linked to exactly this package at upload time.
+          _rowPhotoStrip(context, index: index, photos: draft.photos),
         ],
       ),
+    );
+  }
+
+  Widget _rowPhotoStrip(
+    BuildContext context, {
+    required int index,
+    required List<PhotoDraft> photos,
+  }) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (
+          var photoIndex = 0;
+          photoIndex < photos.length;
+          photoIndex += 1
+        ) ...[
+          Stack(
+            children: [
+              Container(
+                key: ValueKey('goods-photo-$index-$photoIndex'),
+                width: 62,
+                height: 62,
+                decoration: BoxDecoration(
+                  border: Border.all(color: AppColors.border),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.memory(
+                    photos[photoIndex].bytes,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ),
+              Positioned(
+                top: -6,
+                right: -6,
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: IconButton(
+                    tooltip: 'Remove photo',
+                    key: ValueKey('goods-photo-remove-$index-$photoIndex'),
+                    padding: EdgeInsets.zero,
+                    icon: Icon(
+                      Icons.cancel_rounded,
+                      color: AppColors.coral.withValues(alpha: .9),
+                      size: 20,
+                    ),
+                    onPressed: () => onRemovePhoto(photoIndex),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+        InkWell(
+          key: ValueKey('goods-photo-add-$index'),
+          borderRadius: BorderRadius.circular(12),
+          onTap: onPickPhoto,
+          child: Container(
+            height: 62,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: AppColors.border,
+                style: BorderStyle.solid,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              color: AppColors.surface,
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.add_a_photo_outlined,
+                  size: 17,
+                  color: AppColors.navy,
+                ),
+                SizedBox(width: 6),
+                Text(
+                  'Photo',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.navy,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1827,12 +2115,52 @@ class CustomerParcelDetailsScreen extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 10),
+        // A partial collection is always called out — the customer sees
+        // exactly which declared packages the crew did not take.
+        if (parcel.hasCollectionDiscrepancy)
+          Container(
+            key: const ValueKey('customer-collection-note'),
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.coralSoft,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.report_problem_rounded,
+                  color: AppColors.coral,
+                  size: 19,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Collected ${parcel.items.length - parcel.missedItems.length} '
+                    'of ${parcel.items.length} packages. The packages listed '
+                    'below are recorded as not collected.',
+                    style: const TextStyle(
+                      color: AppColors.coral,
+                      fontSize: 11.5,
+                      height: 1.35,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         SectionCard(
           padding: const EdgeInsets.all(14),
           child: Column(
             children: [
               for (final item in parcel.items) ...[
-                GoodsItemTile(item: item),
+                GoodsItemTile(
+                  key: ValueKey('customer-item-${item.position}'),
+                  item: item,
+                  itemCount: parcel.items.length,
+                ),
                 if (item != parcel.items.last) const Divider(height: 14),
               ],
             ],
@@ -1928,6 +2256,43 @@ class CustomerParcelDetailsScreen extends StatelessWidget {
 
   Widget _photosCard(BuildContext context) {
     if (parcel.images.isEmpty) return const SizedBox.shrink();
+    // Photos either document the whole shipment or one declared package;
+    // per-package shots are captioned with that package so the crew can
+    // match the photo to the item they counted.
+    final shipmentPhotos = parcel.photosFor(null);
+    final sections = <Widget>[];
+    for (final item in parcel.items) {
+      final photos = parcel.photosFor(item.id);
+      if (photos.isEmpty) continue;
+      sections.add(
+        Padding(
+          key: ValueKey('customer-item-photos-${item.position}'),
+          padding: const EdgeInsets.only(top: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${item.typeLabel} ${item.position + 1} of ${parcel.items.length} — photos',
+                style: const TextStyle(
+                  color: AppColors.navy,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              GoodsPhotoGallery(
+                images: photos,
+                compact: true,
+                loadBytes: (image) =>
+                    Api.I.customerParcelImageBytes(parcel.id, image.id),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    final hasShipmentOnly = shipmentPhotos.isNotEmpty && sections.isNotEmpty;
+    final hasPackagePhotos = sections.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1949,10 +2314,32 @@ class CustomerParcelDetailsScreen extends StatelessWidget {
         const SizedBox(height: 10),
         SectionCard(
           padding: const EdgeInsets.all(12),
-          child: GoodsPhotoGallery(
-            images: parcel.images,
-            loadBytes: (image) =>
-                Api.I.customerParcelImageBytes(parcel.id, image.id),
+          child: Column(
+            key: const ValueKey('customer-detail-photos'),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (shipmentPhotos.isNotEmpty) ...[
+                if (hasShipmentOnly)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      'Whole shipment',
+                      style: TextStyle(
+                        color: AppColors.navy,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                GoodsPhotoGallery(
+                  images: shipmentPhotos,
+                  compact: !hasShipmentOnly && hasPackagePhotos,
+                  loadBytes: (image) =>
+                      Api.I.customerParcelImageBytes(parcel.id, image.id),
+                ),
+              ],
+              ...sections,
+            ],
           ),
         ),
       ],

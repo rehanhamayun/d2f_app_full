@@ -62,10 +62,13 @@ app.use('/admin/commerce', commerceRouter);
 // details, internal notes, actor identity, or the staff parcel record.
 app.get('/tracking/:trackingId', authenticate, authRateLimit(60), async (req, res, next) => {
   try {
-    if (!/^(?:[A-Z0-9]{3,5}(?:\d{12}|\d{15})|D2F-\d{4}-\d{6})$/.test(req.params.trackingId)) {
+    if (!/^(?:[A-Z0-9]{3,5}(?:\d{12}|\d{15})|D2F-\d{4}-\d{6})(?:-P\d{2})?$/.test(req.params.trackingId)) {
       return res.status(400).json({ error: 'Enter a valid tracking number.' });
     }
-    const parcel = await prisma.parcel.findUnique({ where: { trackingId: req.params.trackingId },
+    const parcel = await prisma.parcel.findFirst({ where: { OR: [
+      { trackingId: req.params.trackingId },
+      { items: { some: { packageCode: req.params.trackingId } } },
+    ] },
       select: { trackingId: true, status: true, method: true,
         events: { select: { status: true, createdAt: true }, orderBy: { createdAt: 'asc' } } } });
     if (!parcel) return res.status(404).json({ error: 'No shipment found. Check your tracking number.' });

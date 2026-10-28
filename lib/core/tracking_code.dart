@@ -18,11 +18,12 @@ String? normalizeTrackingCode(String? input) {
 
   // Legacy D2F-2026-000101 identities.
   final dashed = RegExp(
-    r'(D2F)\s*-\s*(\d{4})\s*-\s*(\d{6})',
+    r'(D2F)\s*-\s*(\d{4})\s*-\s*(\d{6})(?:\s*-\s*P(\d{2}))?',
     caseSensitive: false,
   ).firstMatch(value);
   if (dashed != null) {
-    return 'D2F-${dashed.group(2)}-${dashed.group(3)}';
+    return 'D2F-${dashed.group(2)}-${dashed.group(3)}'
+        '${dashed.group(4) == null ? '' : '-P${dashed.group(4)}'}';
   }
 
   // Printed labels often group the digits ("D2F 0000 0000 0005") or separate
@@ -37,11 +38,12 @@ String? normalizeTrackingCode(String? input) {
   // Current organization-prefixed identities, e.g. D2F000000000005. The
   // prefix must start with a letter so numeric-only barcodes cannot match.
   final prefixed = RegExp(
-    r'([A-Z][A-Z0-9]{2,4})(\d{12}|\d{15})',
+    r'([A-Z][A-Z0-9]{2,4})(\d{15}|\d{12})(?:P(\d{2}))?(?=$|[^A-Z0-9])',
     caseSensitive: false,
   ).firstMatch(compact);
   if (prefixed != null) {
-    return '${prefixed.group(1)!.toUpperCase()}${prefixed.group(2)}';
+    return '${prefixed.group(1)!.toUpperCase()}${prefixed.group(2)}'
+        '${prefixed.group(3) == null ? '' : '-P${prefixed.group(3)}'}';
   }
 
   return null;

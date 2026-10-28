@@ -650,6 +650,7 @@ function ShipmentFormModal({ token, notify, onClose, onCreated, staffAccess = fa
   const [customerLoading, setCustomerLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [rescheduleReason, setRescheduleReason] = useState('');
   const [pickupWhenEdit, setPickupWhenEdit] = useState(parcel?.pickupScheduledAt ? localInputValue(new Date(parcel.pickupScheduledAt)) : '');
   const routeLocked = parcel?.container && parcel.container.status !== 'ARRIVED';
   const [form, setForm] = useState({
@@ -722,7 +723,7 @@ function ShipmentFormModal({ token, notify, onClose, onCreated, staffAccess = fa
           customerId,
           ...form,
           weightKg: Number(form.weightKg),
-          ...(parcel && form.deliveryMode === 'PICKUP' && pickupWhenEdit.trim() ? { pickupScheduledAt: new Date(pickupWhenEdit).toISOString() } : {}),
+          ...(parcel && form.deliveryMode === 'PICKUP' && pickupWhenEdit.trim() ? { pickupScheduledAt: new Date(pickupWhenEdit).toISOString(), rescheduleReason: rescheduleReason.trim() } : {}),
           ...(parcel ? { updatedAt: parcel.updatedAt } : {}),
         }),
       });
@@ -755,9 +756,10 @@ function ShipmentFormModal({ token, notify, onClose, onCreated, staffAccess = fa
           <label>Delivery address<textarea maxLength={1000} value={form.recipientAddress} onChange={(event) => setForm({ ...form, recipientAddress: event.target.value })} /></label>
           {((form.method === 'ROAD' || form.deliveryMode === 'PICKUP')) && <label>Pickup address<textarea maxLength={1000} value={form.pickupAddress} onChange={(event) => setForm({ ...form, pickupAddress: event.target.value })} placeholder="Street address where D2F collects the parcel" /><small className="field-help">{form.deliveryMode === 'PICKUP' ? 'The customer asked D2F to collect the goods from this address.' : 'Same-city road deliveries need a pickup address that differs from the delivery address.'}</small></label>}
           {parcel && <div className="form-row"><label>Collection<select value={form.deliveryMode} onChange={(event) => setForm({ ...form, deliveryMode: event.target.value })}><option value="DROP_OFF">Warehouse drop-off</option><option value="PICKUP">D2F collects the goods (pickup)</option></select></label>{form.deliveryMode === 'PICKUP' && <label>Pickup date and time<input type="datetime-local" min={localInputValue()} value={pickupWhenEdit} onChange={(event) => setPickupWhenEdit(event.target.value)} /><small className="field-help">Leave empty to keep the currently scheduled slot.</small></label>}</div>}
+          {parcel && form.deliveryMode === 'PICKUP' && <label>Pickup reschedule reason<input maxLength={300} value={rescheduleReason} onChange={(event) => setRescheduleReason(event.target.value)} placeholder="Why is the collection slot changing?" /></label>}
           <div className="form-row">
             <label>Recipient phone<input type="tel" maxLength={80} value={form.recipientPhone} onChange={(event) => setForm({ ...form, recipientPhone: event.target.value })} /></label>
-            <label>Package type<select value={form.packageType} onChange={(event) => setForm({ ...form, packageType: event.target.value })}>{['BOX', 'BARREL', 'TV', 'APPLIANCE', 'FURNITURE', 'PALLET', 'VEHICLE', 'DOCUMENTS', 'OTHER'].map((type) => <option key={type}>{type}</option>)}</select></label>
+            <label>Package type<select value={form.packageType} onChange={(event) => setForm({ ...form, packageType: event.target.value })}>{['BOX', 'SUITCASE', 'BARREL', 'TV', 'APPLIANCE', 'FURNITURE', 'PALLET', 'VEHICLE', 'DOCUMENTS', 'OTHER'].map((type) => <option key={type}>{type}</option>)}</select></label>
           </div>
           <div className="form-row">
             <label>Weight (kg)<input type="number" min="0.01" max="10000" step="0.01" required value={form.weightKg} onChange={(event) => setForm({ ...form, weightKg: event.target.value })} /></label>
@@ -782,7 +784,7 @@ function ShipmentFormModal({ token, notify, onClose, onCreated, staffAccess = fa
 // Goods photos arrive from the API as raw bytes behind an Authorization
 // header, so this component fetches each blob itself and turns it into an
 // object URL for the <img> tag. Object URLs are revoked when it unmounts.
-function GoodsPhotos({ parcelId, images, token }) {
+function GoodsPhotos({ parcelId, images, goods, token }) {
   const [urls, setUrls] = useState({});
   const [error, setError] = useState('');
 
@@ -824,13 +826,15 @@ function GoodsPhotos({ parcelId, images, token }) {
       {error && <div className="alert error-alert" role="alert">{error}</div>}
       <div className="photo-grid">
         {(images || []).map((image) => (
+          <figure key={image.id} style={{ margin: 0 }}>
           <img
-            key={image.id}
             className={urls[image.id] ? 'photo-thumb' : 'photo-thumb photo-loading'}
             src={urls[image.id]}
             alt={image.fileName || 'Goods photo'}
             title={image.fileName || ''}
           />
+          <figcaption>{image.itemId ? goods.find((item) => item.id === image.itemId)?.name || 'Declared package' : 'Whole shipment'}</figcaption>
+          </figure>
         ))}
       </div>
       <small className="field-help">Showing {images?.length || 0} of 8 optional goods photos attached to this shipment.</small>
@@ -854,6 +858,7 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
   const [proofType, setProofType] = useState('');
   const [proofReference, setProofReference] = useState('');
   const [pickupWhen, setPickupWhen] = useState('');
+  const [missedItems, setMissedItems] = useState({});
   const [formError, setFormError] = useState('');
   const [editingNote, setEditingNote] = useState(null);
   const [noteDraft, setNoteDraft] = useState('');
@@ -884,6 +889,7 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
     setProofType('');
     setProofReference('');
     setPickupWhen('');
+    setMissedItems({});
     setEditingNote(null);
   }, [parcel.id, parcel.status, parcel.releasedToName, parcel.releasedToIdNumber]);
 
@@ -916,6 +922,8 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
   const isDelivered = next === 'DELIVERED';
   const isPickup = parcel.deliveryMode === 'PICKUP';
   const schedulingPickup = next === 'PICKUP_SCHEDULED';
+  const collecting = next === 'PICKED_UP' && goods.length > 0;
+  const missingGoods = goods.filter((item) => item.notCollectedReason && !item.collectedAt);
 
   function submit(event) {
     event.preventDefault();
@@ -926,6 +934,10 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
     }
     if (needsConfirmation && !confirmed) {
       setFormError('Confirm that you have physically verified this shipment at the selected facility.');
+      return;
+    }
+    if (collecting && Object.values(missedItems).some((reason) => !reason.trim())) {
+      setFormError('Record why each missing package was not collected.');
       return;
     }
     if (isReleased) {
@@ -950,6 +962,7 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
     const payload = {
       status: next,
       note: note.trim(),
+      ...(collecting ? { missedItems: Object.entries(missedItems).map(([itemId, reason]) => ({ itemId, reason: reason.trim() })) } : {}),
       ...(locationId ? { locationId } : {}),
       ...(confirmed ? { confirmed: true } : {}),
       ...(schedulingPickup && pickupWhen.trim() ? { pickupScheduledAt: new Date(pickupWhen).toISOString() } : {}),
@@ -1005,9 +1018,16 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
             <div><small>Pickup scheduled</small><b>{parcel.pickupScheduledAt ? formatDate(parcel.pickupScheduledAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'To be confirmed'}</b></div>
             <div><small>Goods pieces</small><b>{goodsCount ? `${goodsCount} package${goodsCount === 1 ? '' : 's'}` : '—'}</b></div>
           </div>
-          {goods.length > 0 && <div className="goods-list">{goods.map((item, index) => <div className="goods-row" key={item.id || index}><b>{`Box ${index + 1}`} · {item.name}</b><span>{item.quantity} pc{item.quantity === 1 ? '' : 's'}{item.weightKg != null ? ` · ${item.weightKg} kg` : ''}{item.details ? ` · ${item.details}` : ''}</span></div>)}</div>}
+          {missingGoods.length > 0 && <div className="alert error-alert" role="status">Collected {goods.length - missingGoods.length} of {goods.length} packages. Missing packages remain recorded below.</div>}
+          {goods.length > 0 && <div className="goods-list">{goods.map((item, index) => <div className="goods-row" key={item.id || index}>
+            <b>{`${item.type || 'BOX'} ${index + 1} of ${goods.length}`} · {item.name}</b>
+            <span>{item.quantity} contents unit{item.quantity === 1 ? '' : 's'}{item.weightKg != null ? ` · ${item.weightKg} kg` : ''}{item.details ? ` · ${item.details}` : ''}</span>
+            {item.lengthCm != null && item.widthCm != null && item.heightCm != null && <span>{`${item.lengthCm} × ${item.widthCm} × ${item.heightCm} cm`}</span>}
+            {item.packageCode && <span>Package code: {item.packageCode}</span>}
+            {item.notCollectedReason && !item.collectedAt && <strong>Not collected: {item.notCollectedReason}</strong>}
+          </div>)}</div>}
           <div className="detail-grid"><div><small>Staff note</small><b>{parcel.notes || '—'}</b></div><div><small>Released to</small><b>{parcel.releasedToName ? `${parcel.releasedToName}${parcel.releasedAt ? ` · ${formatDate(parcel.releasedAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}` : '—'}</b></div><div><small>Delivered to</small><b>{parcel.deliveredToName || '—'}</b></div><div><small>Proof of delivery</small><b>{parcel.deliveryProofType ? `${DELIVERY_PROOF_TYPES[parcel.deliveryProofType] || parcel.deliveryProofType}${parcel.deliveryProofReference ? ` · ${parcel.deliveryProofReference}` : ''}` : '—'}</b></div></div>
-          {parcel.images?.length > 0 && <div className="goods-photos"><h3 className="modal-section-title">{`Goods photos (${parcel.images.length})`}</h3><GoodsPhotos parcelId={parcel.id} images={parcel.images} token={token} /></div>}
+          {parcel.images?.length > 0 && <div className="goods-photos"><h3 className="modal-section-title">{`Goods photos (${parcel.images.length})`}</h3><GoodsPhotos parcelId={parcel.id} images={parcel.images} goods={goods} token={token} /></div>}
           {onEdit && <button className="button secondary" disabled={busy} onClick={onEdit}><Pencil size={16} /> Edit shipment</button>}
           <h3 className="modal-section-title">Tracking history</h3>
           <div className="timeline">{parcel.events?.map((event) => <div className="timeline-item" key={event.id}><span className="timeline-dot" style={{ '--status-color': STATUS_COLORS[event.status] || '#788295' }} /><div><b>{statusLabel(event.status)}</b><span>{event.note || event.location || 'Status updated'}</span><small>{formatDate(event.createdAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{event.actor?.fullName ? ` · ${event.actor.fullName}` : ''}{event.location ? ` · ${event.location}` : ''}</small>{canEditNote(event) && <button type="button" className="text-button timeline-note-edit" onClick={() => { setEditingNote(event); setNoteDraft(event.note || ''); }}>Correct note</button>}{editingNote?.id === event.id && <form className="note-editor" onSubmit={(submitEvent) => { submitEvent.preventDefault(); saveNote(event); }}><label>Operational note<textarea autoFocus maxLength={1000} rows={3} value={noteDraft} onChange={(changeEvent) => setNoteDraft(changeEvent.target.value)} /></label><div className="heading-actions"><button type="button" className="button secondary" disabled={noteBusy} onClick={() => setEditingNote(null)}>Cancel</button><button className="button primary" disabled={noteBusy}>{noteBusy ? <span className="spinner" /> : <Check size={15} />} Save correction</button></div></form>}</div></div>)}</div>
@@ -1021,6 +1041,17 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
             {locationsError && <div className="alert error-alert" role="alert">{locationsError}</div>}
             {needsConfirmation && <label className="confirm-check"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> I physically verified this shipment at the selected facility.</label>}
             {schedulingPickup && <div className="handover-fields"><label>Pickup date and time<input type="datetime-local" min={localInputValue()} value={pickupWhen} onChange={(event) => setPickupWhen(event.target.value)} /></label><small className="field-help">Optional — confirm or adjust the customer&#39;s requested slot. Leave empty to keep {parcel.pickupScheduledAt ? 'the currently scheduled window' : "the customer's requested slot"}.</small></div>}
+            {collecting && <fieldset className="handover-fields"><legend>Collection checklist</legend>
+              <small className="field-help">Mark only the packages that were not collected. Record a reason for each missing package.</small>
+              {goods.map((item, index) => <div key={item.id}>
+                <label className="confirm-check"><input type="checkbox" checked={Object.hasOwn(missedItems, item.id)} onChange={(event) => setMissedItems((current) => {
+                  const changed = { ...current };
+                  if (event.target.checked) changed[item.id] = ''; else delete changed[item.id];
+                  return changed;
+                })} />{`Not collected: ${item.name} (${index + 1} of ${goods.length})`}</label>
+                {Object.hasOwn(missedItems, item.id) && <label>Reason for {item.name}<input maxLength={300} value={missedItems[item.id]} onChange={(event) => setMissedItems({ ...missedItems, [item.id]: event.target.value })} /></label>}
+              </div>)}
+            </fieldset>}
             {isReleased && <div className="handover-fields"><div className="form-row"><label>Received by<input required maxLength={120} value={releasedToName} onChange={(event) => setReleasedToName(event.target.value)} placeholder="Person collecting the parcel" /></label><label>Handover ID / reference<input required maxLength={80} value={releasedToId} onChange={(event) => setReleasedToId(event.target.value)} placeholder="ID number or collection code" /></label></div><label>Handover date and time<input type="datetime-local" required value={releasedAt} max={localInputValue()} onChange={(event) => setReleasedAt(event.target.value)} /></label></div>}
             {isDelivered && <div className="handover-fields"><div className="form-row"><label>Delivered to<input required maxLength={120} value={deliveredToName} onChange={(event) => setDeliveredToName(event.target.value)} /></label><label>Recipient ID / reference<input maxLength={80} value={deliveredToId} onChange={(event) => setDeliveredToId(event.target.value)} placeholder={proofType === 'ID_CONFIRMATION' ? 'Required for ID confirmation' : 'Optional reference'} /></label></div><div className="form-row"><label>Proof of delivery<select required value={proofType} onChange={(event) => setProofType(event.target.value)}><option value="">Select proof</option>{Object.entries(DELIVERY_PROOF_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>Proof reference<input required maxLength={300} value={proofReference} onChange={(event) => setProofReference(event.target.value)} placeholder="Signature, photo, or ID reference" /></label></div><label>Delivery date and time<input type="datetime-local" required value={deliveredAt} max={localInputValue()} onChange={(event) => setDeliveredAt(event.target.value)} /></label></div>}
             <label>Operational note<textarea maxLength={1000} rows={3} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Add an operational note (optional)" /></label>
