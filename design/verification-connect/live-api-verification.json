@@ -1,0 +1,44 @@
+{
+  "deploymentId": "2f421144-d099-4864-9f05-3c476990b031",
+  "checks": [
+    {
+      "path": "/health",
+      "status": 200
+    },
+    {
+      "path": "/connect/catalog",
+      "status": 401
+    },
+    {
+      "path": "/auth/login",
+      "status": 200
+    },
+    {
+      "path": "/connect/operations",
+      "status": 200
+    },
+    {
+      "path": "/connect/catalog",
+      "status": 200
+    },
+    {
+      "path": "/customer/parcels",
+      "status": 403
+    },
+    {
+      "path": "/admin/users",
+      "status": 403
+    },
+    {
+      "path": "/parcels?limit=1",
+      "status": 200
+    },
+    {
+      "path": "/tracking/:existingTrackingId",
+      "status": 200
+    }
+  ],
+  "database": "connected",
+  "connectTablesAvailable": true,
+  "productionWrites": "none; read-only checks plus staff login"
+}

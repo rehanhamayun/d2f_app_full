@@ -13,5 +13,12 @@
     "backend": 61,
     "adminPortal": 21
   },
-  "verificationScreens": "design/verification-connect/"
+  "verificationScreens": "design/verification-connect/",
+  "railwayStatus": "SUCCESS",
+  "productionMigrationsApplied": [
+    "20261028012907_customer_multi_item_pickup",
+    "20261028023513_item_packages_collect_photos",
+    "20261028160000_connect_air_traveller"
+  ],
+  "liveApiVerification": "design/verification-connect/live-api-verification.json"
 }
