@@ -22,17 +22,49 @@ ShippingMethod shippingMethodFrom(String? s) {
   return ShippingMethod.SEA;
 }
 
+/// How the customer's goods reach D2F. PICKUP = our staff collects them from
+/// the customer's address at the scheduled time; DROP_OFF = the customer
+/// brings them to the D2F warehouse.
+enum DeliveryMode { PICKUP, DROP_OFF }
+
+DeliveryMode deliveryModeFrom(String? s) =>
+    s == 'PICKUP' ? DeliveryMode.PICKUP : DeliveryMode.DROP_OFF;
+
+extension DeliveryModeX on DeliveryMode {
+  String get apiName => name; // PICKUP | DROP_OFF
+
+  String get label => switch (this) {
+    DeliveryMode.PICKUP => 'D2F pickup',
+    DeliveryMode.DROP_OFF => 'Drop off at warehouse',
+  };
+
+  String get shortLabel => switch (this) {
+    DeliveryMode.PICKUP => 'Pickup',
+    DeliveryMode.DROP_OFF => 'Drop-off',
+  };
+
+  String get tagline => switch (this) {
+    DeliveryMode.PICKUP => 'Our team comes to collect your items',
+    DeliveryMode.DROP_OFF => 'Bring your items to our warehouse',
+  };
+
+  IconData get icon => switch (this) {
+    DeliveryMode.PICKUP => Icons.local_shipping_outlined,
+    DeliveryMode.DROP_OFF => Icons.storefront_outlined,
+  };
+}
+
 extension ShippingMethodX on ShippingMethod {
   String get label => switch (this) {
     ShippingMethod.AIR => 'Air',
     ShippingMethod.SEA => 'Sea',
-    ShippingMethod.ROAD => 'Road',
+    ShippingMethod.ROAD => 'Traveler cargo',
   };
 
   String get tagline => switch (this) {
     ShippingMethod.AIR => 'Fast & reliable',
     ShippingMethod.SEA => 'Cost-effective',
-    ShippingMethod.ROAD => 'Wide coverage',
+    ShippingMethod.ROAD => 'Door-to-door coverage',
   };
 
   IconData get icon => switch (this) {
@@ -43,8 +75,11 @@ extension ShippingMethodX on ShippingMethod {
 }
 
 /// Canonical M1 statuses (forward-only lifecycle, enforced server-side).
+/// Pickup requests move through two extra stages before warehouse intake.
 const List<String> kParcelStatuses = [
   'REQUESTED',
+  'PICKUP_SCHEDULED',
+  'PICKED_UP',
   'RECEIVED',
   'PROCESSING',
   'IN_TRANSIT',
@@ -56,7 +91,9 @@ const List<String> kParcelStatuses = [
 ];
 
 const Map<String, List<String>> kAllowedTransitions = {
-  'REQUESTED': ['RECEIVED'],
+  'REQUESTED': ['RECEIVED', 'PICKUP_SCHEDULED', 'PICKED_UP'],
+  'PICKUP_SCHEDULED': ['PICKED_UP', 'RECEIVED'],
+  'PICKED_UP': ['RECEIVED'],
   'RECEIVED': ['PROCESSING'],
   'PROCESSING': ['IN_TRANSIT'],
   'IN_TRANSIT': ['ARRIVED_LOME', 'ARRIVED_DESTINATION'],
@@ -66,6 +103,17 @@ const Map<String, List<String>> kAllowedTransitions = {
   'RELEASED': ['DELIVERED'],
   'DELIVERED': [],
 };
+
+/// Stages that only exist when D2F collects the goods. A drop-off shipment
+/// goes straight from REQUESTED to RECEIVED at the warehouse.
+const Set<String> kPickupOnlyStatuses = {'PICKUP_SCHEDULED', 'PICKED_UP'};
+
+/// Mode-aware view of the transition map, mirroring the server rule.
+List<String> allowedStatusesFor(Parcel parcel) {
+  final base = kAllowedTransitions[parcel.status] ?? const [];
+  if (parcel.deliveryMode == DeliveryMode.PICKUP) return List.of(base);
+  return base.where((s) => !kPickupOnlyStatuses.contains(s)).toList();
+}
 
 /// Physical updates that require staff to confirm they handled the parcel at
 /// the selected facility.
@@ -104,6 +152,8 @@ String deliveryProofLabel(String type) => switch (type) {
 
 String statusLabel(String status) => switch (status) {
   'REQUESTED' => 'Request Submitted',
+  'PICKUP_SCHEDULED' => 'Pickup Scheduled',
+  'PICKED_UP' => 'Picked Up',
   'RECEIVED' => 'Received',
   'PROCESSING' => 'Processing',
   'IN_TRANSIT' => 'In Transit',
@@ -118,6 +168,8 @@ String statusLabel(String status) => switch (status) {
 /// Compact chip labels for tight list rows.
 String statusShortLabel(String status) => switch (status) {
   'REQUESTED' => 'Requested',
+  'PICKUP_SCHEDULED' => 'Scheduled',
+  'PICKED_UP' => 'Picked Up',
   'RECEIVED' => 'Received',
   'PROCESSING' => 'Processing',
   'IN_TRANSIT' => 'In Transit',
@@ -132,6 +184,8 @@ String statusShortLabel(String status) => switch (status) {
 /// Short operational sub-label shown under chips / list cards.
 String statusSubLabel(String status) => switch (status) {
   'REQUESTED' => 'Awaiting D2F intake confirmation',
+  'PICKUP_SCHEDULED' => 'Collection confirmed with the customer',
+  'PICKED_UP' => 'Collected, arriving at the warehouse',
   'RECEIVED' => 'At warehouse',
   'PROCESSING' => 'Being prepared for shipment',
   'IN_TRANSIT' => 'On the way to destination',
@@ -145,7 +199,10 @@ String statusSubLabel(String status) => switch (status) {
 
 /// Friendly customer-safe headline for the detail header.
 String statusHeadline(String status) => switch (status) {
-  'REQUESTED' => 'Your shipment request is awaiting D2F intake confirmation.',
+  'REQUESTED' => 'Your shipment request is awaiting D2F confirmation.',
+  'PICKUP_SCHEDULED' =>
+    'A D2F team member will collect your items at the agreed time.',
+  'PICKED_UP' => 'Your items are collected and on their way to our warehouse.',
   'RECEIVED' => 'Your parcel is registered at our warehouse.',
   'PROCESSING' => 'Your parcel is being prepared for shipment.',
   'IN_TRANSIT' => 'Your parcel is on the way to its destination.',
@@ -282,8 +339,71 @@ class ParcelTransfer {
         (j['toLocation'] as Map<String, dynamic>?)?['name'] as String?,
     actorName: (j['actor'] as Map<String, dynamic>?)?['fullName'] as String?,
     note: j['note'] as String?,
-    createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ??
-        DateTime.now(),
+    createdAt:
+        DateTime.tryParse(j['createdAt'] as String? ?? '') ?? DateTime.now(),
+  );
+}
+
+/// One thing the customer is sending, itemized under a shipment request.
+class ParcelItem {
+  final String id;
+  final String name;
+  final String? details;
+  final int quantity;
+  final double? weightKg;
+  final int position;
+
+  const ParcelItem({
+    required this.id,
+    required this.name,
+    this.details,
+    required this.quantity,
+    this.weightKg,
+    required this.position,
+  });
+
+  factory ParcelItem.fromJson(Map<String, dynamic> j) => ParcelItem(
+    id: j['id'] as String,
+    name: j['name'] as String? ?? '',
+    details: j['details'] as String?,
+    quantity: (j['quantity'] as num?)?.toInt() ?? 1,
+    weightKg: (j['weightKg'] as num?)?.toDouble(),
+    position: (j['position'] as num?)?.toInt() ?? 0,
+  );
+
+  Map<String, dynamic> toCreateJson() => {
+    'name': name,
+    if (details != null && details!.isNotEmpty) 'details': details,
+    'quantity': quantity,
+    if (weightKg != null) 'weightKg': weightKg,
+  };
+}
+
+/// Metadata of a photo of the goods attached to the shipment. Image bytes are
+/// served separately from the API so lists stay light.
+class ParcelImageMeta {
+  final String id;
+  final String fileName;
+  final String contentType;
+  final int sizeBytes;
+  final DateTime? createdAt;
+
+  const ParcelImageMeta({
+    required this.id,
+    required this.fileName,
+    required this.contentType,
+    required this.sizeBytes,
+    this.createdAt,
+  });
+
+  factory ParcelImageMeta.fromJson(Map<String, dynamic> j) => ParcelImageMeta(
+    id: j['id'] as String,
+    fileName: j['fileName'] as String? ?? 'photo',
+    contentType: j['contentType'] as String? ?? 'image/jpeg',
+    sizeBytes: (j['sizeBytes'] as num?)?.toInt() ?? 0,
+    createdAt: j['createdAt'] == null
+        ? null
+        : DateTime.tryParse(j['createdAt'] as String),
   );
 }
 
@@ -302,6 +422,10 @@ class Parcel {
   final ShippingMethod method;
   final String? notes;
   final String status;
+  final DeliveryMode deliveryMode;
+  final DateTime? pickupScheduledAt;
+  final List<ParcelItem> items;
+  final List<ParcelImageMeta> images;
   final DateTime createdAt;
   final DateTime updatedAt;
   final Customer? customer;
@@ -315,6 +439,10 @@ class Parcel {
   final String? containerId, containerCode, containerStatus;
   bool get containerManaged =>
       containerId != null && containerStatus != 'ARRIVED';
+
+  /// Total declared pieces across the itemized goods list.
+  int get totalPieces =>
+      items.isEmpty ? 0 : items.fold(0, (sum, item) => sum + item.quantity);
 
   const Parcel({
     required this.id,
@@ -331,6 +459,10 @@ class Parcel {
     required this.method,
     this.notes,
     required this.status,
+    this.deliveryMode = DeliveryMode.DROP_OFF,
+    this.pickupScheduledAt,
+    this.items = const [],
+    this.images = const [],
     required this.createdAt,
     required this.updatedAt,
     this.customer,
@@ -367,6 +499,16 @@ class Parcel {
     method: shippingMethodFrom(j['method'] as String?),
     notes: j['notes'] as String?,
     status: j['status'] as String? ?? 'RECEIVED',
+    deliveryMode: deliveryModeFrom(j['deliveryMode'] as String?),
+    pickupScheduledAt: j['pickupScheduledAt'] == null
+        ? null
+        : DateTime.tryParse(j['pickupScheduledAt'] as String),
+    items: (j['items'] as List<dynamic>? ?? [])
+        .map((e) => ParcelItem.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    images: (j['images'] as List<dynamic>? ?? [])
+        .map((e) => ParcelImageMeta.fromJson(e as Map<String, dynamic>))
+        .toList(),
     createdAt:
         DateTime.tryParse(j['createdAt'] as String? ?? '') ?? DateTime.now(),
     updatedAt:
@@ -478,8 +620,7 @@ String _foldRouteText(String value) => value
     .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
     .trim();
 
-String routeCity(String value) =>
-    _foldRouteText(value.split(',').first.trim());
+String routeCity(String value) => _foldRouteText(value.split(',').first.trim());
 
 bool sameRouteCity(String a, String b) {
   final left = routeCity(a);
@@ -497,7 +638,8 @@ String? validateRouteSelection({
   String? pickupAddress,
   String? recipientAddress,
 }) {
-  if (origin == null || destination == null) return 'Select an origin and destination.';
+  if (origin == null || destination == null)
+    return 'Select an origin and destination.';
   if (!sameRouteCity(origin, destination)) return null;
   if (method == ShippingMethod.ROAD) {
     final pickup = pickupAddress?.trim() ?? '';

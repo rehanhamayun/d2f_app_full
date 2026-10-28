@@ -457,12 +457,14 @@ class _MethodCard extends StatelessWidget {
               children: [
                 Icon(method.icon, color: fg, size: 22),
                 const SizedBox(width: 6),
-                Text(
-                  method.label,
-                  style: TextStyle(
-                    color: AppColors.navy,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 15,
+                Flexible(
+                  child: Text(
+                    method.label,
+                    style: TextStyle(
+                      color: AppColors.navy,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 15,
+                    ),
                   ),
                 ),
               ],

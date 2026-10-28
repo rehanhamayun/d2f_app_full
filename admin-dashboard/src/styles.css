@@ -504,6 +504,15 @@ td b { color: #263354; font-size: 9px; font-weight: 750; }
 .ops-quote-total b { font-size:16px; }
 @media (max-width:1150px) { .ops-product-grid, .ops-location-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width:650px) { .ops-product-grid, .ops-location-grid { grid-template-columns:1fr; } .ops-route-banner, .ops-service-banner { padding:18px; gap:12px; } .ops-banner-icon { flex-basis:44px; height:44px; border-radius:13px; } .ops-route-banner > svg { display:none; } .ops-route-banner b, .ops-service-banner b { font-size:15px; line-height:1.6; } .ops-summary-stats { grid-template-columns:1fr; } .ops-load-input { flex-direction:column; } .ops-load-input input { flex-basis:42px; } .ops-form .form-row { grid-template-columns:1fr; } .ops-section-heading { align-items:flex-start; flex-direction:column; } .ops-products { padding:16px; } }
+.goods-list { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid #e3e8f2; border-radius: 10px; background: #f7f9fd; }
+.goods-row { display: grid; gap: 3px; font-size: 9.5px; color: #5d6880; }
+.goods-row b { color: #243350; font-size: 9.5px; overflow-wrap: anywhere; }
+.goods-row span { overflow-wrap: anywhere; }
+.goods-photos { display: grid; gap: 8px; }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+.photo-thumb { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; border: 1px solid #e3e8f2; background: #eef1f7; }
+.photo-loading { animation: photo-pulse 1.2s ease-in-out infinite; }
+@keyframes photo-pulse { 0% { opacity: .55; } 50% { opacity: 1; } 100% { opacity: .55; } }
 .sidebar .side-nav { overflow-y:auto; min-height:100px; flex-shrink:1; }
 .sidebar .workspace-chip, .sidebar .side-brand, .sidebar .profile-card, .sidebar .side-help, .sidebar .nav-caption { flex-shrink:0; }
 .sidebar .side-grow { min-height:14px; }

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -343,15 +345,22 @@ class Api {
     }
   }
 
+  /// Creates a shipment request. Returns the created (or previously-created,
+  /// when the same [clientRequestId] is retried) shipment with its itemized
+  /// goods list.
   Future<Parcel> createCustomerParcel({
     required String recipientName,
-    String? recipientPhone,
-    String? recipientAddress,
+    required String recipientPhone,
+    required String recipientAddress,
     required String packageType,
     required double weightKg,
     required String origin,
     required String destination,
     required String method,
+    required String deliveryMode,
+    String? pickupAddress,
+    DateTime? pickupScheduledAt,
+    List<ParcelItem> items = const [],
     String? notes,
     required String clientRequestId,
   }) async {
@@ -360,20 +369,88 @@ class Api {
         '/customer/parcels',
         data: {
           'recipientName': recipientName,
-          if (recipientPhone != null && recipientPhone.isNotEmpty)
-            'recipientPhone': recipientPhone,
-          if (recipientAddress != null && recipientAddress.isNotEmpty)
-            'recipientAddress': recipientAddress,
+          'recipientPhone': recipientPhone,
+          'recipientAddress': recipientAddress,
           'packageType': packageType,
           'weightKg': weightKg,
           'origin': origin,
           'destination': destination,
           'method': method,
+          'deliveryMode': deliveryMode,
+          if (pickupAddress != null && pickupAddress.isNotEmpty)
+            'pickupAddress': pickupAddress,
+          if (pickupScheduledAt != null)
+            'pickupScheduledAt': pickupScheduledAt.toUtc().toIso8601String(),
+          if (items.isNotEmpty)
+            'items': [for (final item in items) item.toCreateJson()],
           if (notes != null && notes.isNotEmpty) 'notes': notes,
           'clientRequestId': clientRequestId,
         },
       );
       return Parcel.fromJson(res.data as Map<String, dynamic>);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  // ── Goods photos (optional, customer-attached) ────────────────────────────
+
+  /// Uploads one photo of the goods. The bytes travel in the request body;
+  /// metadata rides as query parameters.
+  Future<ParcelImageMeta> addParcelImage(
+    String parcelId,
+    Uint8List bytes, {
+    required String fileName,
+    required String contentType,
+    String? label,
+  }) async {
+    try {
+      final query = {
+        'name': fileName,
+        if (label != null && label.isNotEmpty) 'label': label,
+      };
+      final res = await _dio!.post(
+        '/customer/parcels/$parcelId/images',
+        queryParameters: query,
+        data: bytes,
+        options: Options(
+          contentType: contentType,
+          headers: {'Content-Length': bytes.length},
+        ),
+      );
+      return ParcelImageMeta.fromJson(res.data as Map<String, dynamic>);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  /// Removes a photo the customer attached (only before warehouse intake).
+  Future<void> deleteCustomerParcelImage(
+    String parcelId,
+    String imageId,
+  ) async {
+    try {
+      await _dio!.delete('/customer/parcels/$parcelId/images/$imageId');
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  /// Image bytes for the customer's own parcel.
+  Future<Uint8List> customerParcelImageBytes(String parcelId, String imageId) =>
+      _imageBytes('/customer/parcels/$parcelId/images/$imageId/raw');
+
+  /// Image bytes for staff and admin record views.
+  Future<Uint8List> parcelImageBytes(String parcelId, String imageId) =>
+      _imageBytes('/parcels/$parcelId/images/$imageId/raw');
+
+  Future<Uint8List> _imageBytes(String path) async {
+    try {
+      final res = await _dio!.get(
+        path,
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return res.data as Uint8List;
     } on DioException catch (e) {
       throw _map(e);
     }
@@ -561,10 +638,7 @@ class Api {
     try {
       final response = await _dio!.post(
         '/auth/password/change',
-        data: {
-          'currentPassword': currentPassword,
-          'newPassword': newPassword,
-        },
+        data: {'currentPassword': currentPassword, 'newPassword': newPassword},
       );
       _token = response.data['token'] as String;
       await _storage.write(key: _tokenKey, value: _token!);

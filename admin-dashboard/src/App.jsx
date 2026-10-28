@@ -69,6 +69,8 @@ const NAV = [
 ];
 const STATUS_COLORS = {
   REQUESTED: '#f2b544',
+  PICKUP_SCHEDULED: '#4a7cfa',
+  PICKED_UP: '#9b6cde',
   RECEIVED: '#3868ef',
   PROCESSING: '#7958cc',
   IN_TRANSIT: '#19a89a',
@@ -80,6 +82,8 @@ const STATUS_COLORS = {
 };
 const STATUS_LABELS = {
   REQUESTED: 'Requested',
+  PICKUP_SCHEDULED: 'Pickup scheduled',
+  PICKED_UP: 'Picked up',
   RECEIVED: 'Received',
   PROCESSING: 'Processing',
   IN_TRANSIT: 'In transit',
@@ -90,7 +94,9 @@ const STATUS_LABELS = {
   DELIVERED: 'Delivered',
 };
 const TRANSITIONS = {
-  REQUESTED: ['RECEIVED'],
+  REQUESTED: ['RECEIVED', 'PICKUP_SCHEDULED', 'PICKED_UP'],
+  PICKUP_SCHEDULED: ['PICKED_UP', 'RECEIVED'],
+  PICKED_UP: ['RECEIVED'],
   RECEIVED: ['PROCESSING'],
   PROCESSING: ['IN_TRANSIT'],
   IN_TRANSIT: ['ARRIVED_LOME', 'ARRIVED_DESTINATION'],
@@ -100,6 +106,9 @@ const TRANSITIONS = {
   RELEASED: ['DELIVERED'],
   DELIVERED: [],
 };
+// Stage names that only exist when D2F collects the goods; a drop-off
+// shipment goes straight from REQUESTED to RECEIVED at the warehouse.
+const PICKUP_ONLY_STATUSES = new Set(['PICKUP_SCHEDULED', 'PICKED_UP']);
 const CONFIRMATION_STATUSES = new Set(['RECEIVED', 'IN_TRANSIT', 'ARRIVED_LOME', 'ARRIVED_DESTINATION', 'READY_FOR_PICKUP', 'RELEASED', 'DELIVERED']);
 const FACILITY_REQUIRED_STATUSES = new Set([...CONFIRMATION_STATUSES, 'PROCESSING']);
 const DELIVERY_PROOF_TYPES = {
@@ -641,12 +650,14 @@ function ShipmentFormModal({ token, notify, onClose, onCreated, staffAccess = fa
   const [customerLoading, setCustomerLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [pickupWhenEdit, setPickupWhenEdit] = useState(parcel?.pickupScheduledAt ? localInputValue(new Date(parcel.pickupScheduledAt)) : '');
   const routeLocked = parcel?.container && parcel.container.status !== 'ARRIVED';
   const [form, setForm] = useState({
     recipientName: parcel?.recipientName || '',
     recipientPhone: parcel?.recipientPhone || '',
     recipientAddress: parcel?.recipientAddress || '',
     pickupAddress: parcel?.pickupAddress || '',
+    deliveryMode: parcel?.deliveryMode || 'DROP_OFF',
     packageType: parcel?.packageType || 'BOX',
     weightKg: parcel?.weightKg ?? '',
     origin: parcel?.origin || 'Omaha, NE, USA',
@@ -691,6 +702,16 @@ function ShipmentFormModal({ token, notify, onClose, onCreated, staffAccess = fa
       setError(routeProblem);
       return;
     }
+    if (form.deliveryMode === 'PICKUP') {
+      if (!form.pickupAddress.trim()) {
+        setError('A pickup needs a collection address before it can be scheduled.');
+        return;
+      }
+      if (pickupWhenEdit.trim() && (Number.isNaN(Date.parse(pickupWhenEdit)) || new Date(pickupWhenEdit).getTime() < Date.now())) {
+        setError('Enter a future pickup date and time, or clear the window to set it later.');
+        return;
+      }
+    }
     setSaving(true);
     setError('');
     try {
@@ -701,6 +722,7 @@ function ShipmentFormModal({ token, notify, onClose, onCreated, staffAccess = fa
           customerId,
           ...form,
           weightKg: Number(form.weightKg),
+          ...(parcel && form.deliveryMode === 'PICKUP' && pickupWhenEdit.trim() ? { pickupScheduledAt: new Date(pickupWhenEdit).toISOString() } : {}),
           ...(parcel ? { updatedAt: parcel.updatedAt } : {}),
         }),
       });
@@ -731,7 +753,8 @@ function ShipmentFormModal({ token, notify, onClose, onCreated, staffAccess = fa
           <p className="muted">A linked app account can see this shipment in its customer workspace. Staff-only profiles remain in operations records.</p>
           <label>Recipient name<input required pattern=".*\S.*" maxLength={120} value={form.recipientName} onChange={(event) => setForm({ ...form, recipientName: event.target.value })} /></label>
           <label>Delivery address<textarea maxLength={1000} value={form.recipientAddress} onChange={(event) => setForm({ ...form, recipientAddress: event.target.value })} /></label>
-          {form.method === 'ROAD' && <label>Pickup address<textarea maxLength={1000} value={form.pickupAddress} onChange={(event) => setForm({ ...form, pickupAddress: event.target.value })} placeholder="Street address where D2F collects the parcel" /><small className="field-help">Same-city road deliveries need a pickup address that differs from the delivery address.</small></label>}
+          {((form.method === 'ROAD' || form.deliveryMode === 'PICKUP')) && <label>Pickup address<textarea maxLength={1000} value={form.pickupAddress} onChange={(event) => setForm({ ...form, pickupAddress: event.target.value })} placeholder="Street address where D2F collects the parcel" /><small className="field-help">{form.deliveryMode === 'PICKUP' ? 'The customer asked D2F to collect the goods from this address.' : 'Same-city road deliveries need a pickup address that differs from the delivery address.'}</small></label>}
+          {parcel && <div className="form-row"><label>Collection<select value={form.deliveryMode} onChange={(event) => setForm({ ...form, deliveryMode: event.target.value })}><option value="DROP_OFF">Warehouse drop-off</option><option value="PICKUP">D2F collects the goods (pickup)</option></select></label>{form.deliveryMode === 'PICKUP' && <label>Pickup date and time<input type="datetime-local" min={localInputValue()} value={pickupWhenEdit} onChange={(event) => setPickupWhenEdit(event.target.value)} /><small className="field-help">Leave empty to keep the currently scheduled slot.</small></label>}</div>}
           <div className="form-row">
             <label>Recipient phone<input type="tel" maxLength={80} value={form.recipientPhone} onChange={(event) => setForm({ ...form, recipientPhone: event.target.value })} /></label>
             <label>Package type<select value={form.packageType} onChange={(event) => setForm({ ...form, packageType: event.target.value })}>{['BOX', 'BARREL', 'TV', 'APPLIANCE', 'FURNITURE', 'PALLET', 'VEHICLE', 'DOCUMENTS', 'OTHER'].map((type) => <option key={type}>{type}</option>)}</select></label>
@@ -756,6 +779,65 @@ function ShipmentFormModal({ token, notify, onClose, onCreated, staffAccess = fa
   );
 }
 
+// Goods photos arrive from the API as raw bytes behind an Authorization
+// header, so this component fetches each blob itself and turns it into an
+// object URL for the <img> tag. Object URLs are revoked when it unmounts.
+function GoodsPhotos({ parcelId, images, token }) {
+  const [urls, setUrls] = useState({});
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const created = [];
+    (async () => {
+      for (const image of images || []) {
+        try {
+          const response = await fetch(
+            `${getApiBaseUrl()}/parcels/${encodeURIComponent(parcelId)}/images/${encodeURIComponent(image.id)}/raw`,
+            {
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+              signal: controller.signal,
+            },
+          );
+          if (!response.ok) {
+            if (response.status === 401) {
+              window.dispatchEvent(new Event('d2f-session-expired'));
+            }
+            throw new Error(`A goods photo could not be loaded (${response.status}).`);
+          }
+          const url = URL.createObjectURL(await response.blob());
+          created.push(url);
+          setUrls((current) => ({ ...current, [image.id]: url }));
+        } catch (loadError) {
+          if (!controller.signal.aborted) setError(loadError.message);
+        }
+      }
+    })();
+    return () => {
+      controller.abort();
+      created.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [parcelId, token]);
+
+  return (
+    <>
+      {error && <div className="alert error-alert" role="alert">{error}</div>}
+      <div className="photo-grid">
+        {(images || []).map((image) => (
+          <img
+            key={image.id}
+            className={urls[image.id] ? 'photo-thumb' : 'photo-thumb photo-loading'}
+            src={urls[image.id]}
+            alt={image.fileName || 'Goods photo'}
+            title={image.fileName || ''}
+          />
+        ))}
+      </div>
+      <small className="field-help">Showing {images?.length || 0} of 8 optional goods photos attached to this shipment.</small>
+    </>
+  );
+}
+
 function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token, notify, currentUserId, canEditAllNotes, onRefreshDetail }) {
   const [next, setNext] = useState('');
   const [note, setNote] = useState('');
@@ -771,13 +853,26 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
   const [deliveredAt, setDeliveredAt] = useState(localInputValue());
   const [proofType, setProofType] = useState('');
   const [proofReference, setProofReference] = useState('');
+  const [pickupWhen, setPickupWhen] = useState('');
   const [formError, setFormError] = useState('');
   const [editingNote, setEditingNote] = useState(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [noteBusy, setNoteBusy] = useState(false);
+  const goods = Array.isArray(parcel.items) ? parcel.items : [];
+  const goodsCount = goods.length;
 
   useEffect(() => {
-    setNext(TRANSITIONS[parcel.status]?.[0] || '');
+    const options = (TRANSITIONS[parcel.status] || []).filter(
+      (state) =>
+        !PICKUP_ONLY_STATUSES.has(state) || parcel.deliveryMode === 'PICKUP',
+    );
+    // Pickup requests default to scheduling the collection; everything else
+    // defaults to the first available stage.
+    const preferred =
+      parcel.deliveryMode === 'PICKUP' && options.includes('PICKUP_SCHEDULED')
+        ? 'PICKUP_SCHEDULED'
+        : options[0];
+    setNext(preferred || '');
     setConfirmed(false);
     setFormError('');
     setReleasedToName('');
@@ -788,6 +883,7 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
     setDeliveredAt(localInputValue());
     setProofType('');
     setProofReference('');
+    setPickupWhen('');
     setEditingNote(null);
   }, [parcel.id, parcel.status, parcel.releasedToName, parcel.releasedToIdNumber]);
 
@@ -805,11 +901,21 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
   }, [token]);
 
   const containerManaged = parcel.container && parcel.container.status !== 'ARRIVED';
-  const available = containerManaged ? [] : TRANSITIONS[parcel.status] || [];
+  // Mode-aware transition options: drop-off shipments skip the pickup stages
+  // (REQUESTED → RECEIVED), pickup requests can be scheduled and collected.
+  const available = containerManaged
+    ? []
+    : (TRANSITIONS[parcel.status] || []).filter(
+      (state) =>
+        !PICKUP_ONLY_STATUSES.has(state) ||
+        parcel.deliveryMode === 'PICKUP',
+    );
   const needsFacility = FACILITY_REQUIRED_STATUSES.has(next);
   const needsConfirmation = CONFIRMATION_STATUSES.has(next);
   const isReleased = next === 'RELEASED';
   const isDelivered = next === 'DELIVERED';
+  const isPickup = parcel.deliveryMode === 'PICKUP';
+  const schedulingPickup = next === 'PICKUP_SCHEDULED';
 
   function submit(event) {
     event.preventDefault();
@@ -834,12 +940,19 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
       if (proofType === 'ID_CONFIRMATION' && !deliveredToId.trim()) { setFormError('Record the recipient ID number for an ID-confirmed delivery.'); return; }
       if (!deliveredAt || Number.isNaN(Date.parse(deliveredAt))) { setFormError('Enter a valid delivery date and time.'); return; }
     }
+    if (schedulingPickup && pickupWhen.trim()) {
+      if (Number.isNaN(Date.parse(pickupWhen)) || new Date(pickupWhen).getTime() < Date.now()) {
+        setFormError('Enter a future pickup date and time, or leave the window empty to keep the customer\u2019s requested slot.');
+        return;
+      }
+    }
     setFormError('');
     const payload = {
       status: next,
       note: note.trim(),
       ...(locationId ? { locationId } : {}),
       ...(confirmed ? { confirmed: true } : {}),
+      ...(schedulingPickup && pickupWhen.trim() ? { pickupScheduledAt: new Date(pickupWhen).toISOString() } : {}),
       ...(isReleased ? {
         releasedToName: releasedToName.trim(),
         releasedToIdNumber: releasedToId.trim(),
@@ -886,7 +999,15 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
           <div className="detail-status"><span><small>CURRENT STATUS</small><StatusPill status={parcel.status} /></span><span><small>CREATED</small><b>{formatDate(parcel.createdAt, { year: 'numeric', month: 'long', day: 'numeric' })}</b></span></div>
           <div className="detail-grid"><div><small>Customer</small><b>{parcel.customer?.displayName || '—'}</b></div><div><small>Recipient</small><b>{parcel.recipientName}</b></div><div><small>Route</small><b>{parcel.origin} → {parcel.destination}</b></div><div><small>Package</small><b>{parcel.packageType} · {parcel.weightKg} kg</b></div></div>
           <div className="detail-grid"><div><small>Recipient phone</small><b>{parcel.recipientPhone || '—'}</b></div><div><small>Delivery address</small><b>{parcel.recipientAddress || '—'}</b></div><div><small>Pickup address</small><b>{parcel.pickupAddress || '—'}</b></div><div><small>Shipping method</small><b>{parcel.method}</b></div></div>
+          <div className="detail-grid">
+            <div><small>Customer contact</small><b>{[parcel.customer?.phone, parcel.customer?.email].filter(Boolean).join(' · ') || '—'}</b></div>
+            <div><small>Collection</small><b>{parcel.deliveryMode === 'PICKUP' ? 'D2F collects the goods' : 'Warehouse drop-off'}</b></div>
+            <div><small>Pickup scheduled</small><b>{parcel.pickupScheduledAt ? formatDate(parcel.pickupScheduledAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'To be confirmed'}</b></div>
+            <div><small>Goods pieces</small><b>{goodsCount ? `${goodsCount} package${goodsCount === 1 ? '' : 's'}` : '—'}</b></div>
+          </div>
+          {goods.length > 0 && <div className="goods-list">{goods.map((item, index) => <div className="goods-row" key={item.id || index}><b>{`Box ${index + 1}`} · {item.name}</b><span>{item.quantity} pc{item.quantity === 1 ? '' : 's'}{item.weightKg != null ? ` · ${item.weightKg} kg` : ''}{item.details ? ` · ${item.details}` : ''}</span></div>)}</div>}
           <div className="detail-grid"><div><small>Staff note</small><b>{parcel.notes || '—'}</b></div><div><small>Released to</small><b>{parcel.releasedToName ? `${parcel.releasedToName}${parcel.releasedAt ? ` · ${formatDate(parcel.releasedAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}` : '—'}</b></div><div><small>Delivered to</small><b>{parcel.deliveredToName || '—'}</b></div><div><small>Proof of delivery</small><b>{parcel.deliveryProofType ? `${DELIVERY_PROOF_TYPES[parcel.deliveryProofType] || parcel.deliveryProofType}${parcel.deliveryProofReference ? ` · ${parcel.deliveryProofReference}` : ''}` : '—'}</b></div></div>
+          {parcel.images?.length > 0 && <div className="goods-photos"><h3 className="modal-section-title">{`Goods photos (${parcel.images.length})`}</h3><GoodsPhotos parcelId={parcel.id} images={parcel.images} token={token} /></div>}
           {onEdit && <button className="button secondary" disabled={busy} onClick={onEdit}><Pencil size={16} /> Edit shipment</button>}
           <h3 className="modal-section-title">Tracking history</h3>
           <div className="timeline">{parcel.events?.map((event) => <div className="timeline-item" key={event.id}><span className="timeline-dot" style={{ '--status-color': STATUS_COLORS[event.status] || '#788295' }} /><div><b>{statusLabel(event.status)}</b><span>{event.note || event.location || 'Status updated'}</span><small>{formatDate(event.createdAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{event.actor?.fullName ? ` · ${event.actor.fullName}` : ''}{event.location ? ` · ${event.location}` : ''}</small>{canEditNote(event) && <button type="button" className="text-button timeline-note-edit" onClick={() => { setEditingNote(event); setNoteDraft(event.note || ''); }}>Correct note</button>}{editingNote?.id === event.id && <form className="note-editor" onSubmit={(submitEvent) => { submitEvent.preventDefault(); saveNote(event); }}><label>Operational note<textarea autoFocus maxLength={1000} rows={3} value={noteDraft} onChange={(changeEvent) => setNoteDraft(changeEvent.target.value)} /></label><div className="heading-actions"><button type="button" className="button secondary" disabled={noteBusy} onClick={() => setEditingNote(null)}>Cancel</button><button className="button primary" disabled={noteBusy}>{noteBusy ? <span className="spinner" /> : <Check size={15} />} Save correction</button></div></form>}</div></div>)}</div>
@@ -899,6 +1020,7 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
             {needsFacility && !locationsError && <small className="field-help">The facility must match where the parcel physically is. Staff can only confirm at their assigned facility; administrators can operate anywhere.</small>}
             {locationsError && <div className="alert error-alert" role="alert">{locationsError}</div>}
             {needsConfirmation && <label className="confirm-check"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> I physically verified this shipment at the selected facility.</label>}
+            {schedulingPickup && <div className="handover-fields"><label>Pickup date and time<input type="datetime-local" min={localInputValue()} value={pickupWhen} onChange={(event) => setPickupWhen(event.target.value)} /></label><small className="field-help">Optional — confirm or adjust the customer&#39;s requested slot. Leave empty to keep {parcel.pickupScheduledAt ? 'the currently scheduled window' : "the customer's requested slot"}.</small></div>}
             {isReleased && <div className="handover-fields"><div className="form-row"><label>Received by<input required maxLength={120} value={releasedToName} onChange={(event) => setReleasedToName(event.target.value)} placeholder="Person collecting the parcel" /></label><label>Handover ID / reference<input required maxLength={80} value={releasedToId} onChange={(event) => setReleasedToId(event.target.value)} placeholder="ID number or collection code" /></label></div><label>Handover date and time<input type="datetime-local" required value={releasedAt} max={localInputValue()} onChange={(event) => setReleasedAt(event.target.value)} /></label></div>}
             {isDelivered && <div className="handover-fields"><div className="form-row"><label>Delivered to<input required maxLength={120} value={deliveredToName} onChange={(event) => setDeliveredToName(event.target.value)} /></label><label>Recipient ID / reference<input maxLength={80} value={deliveredToId} onChange={(event) => setDeliveredToId(event.target.value)} placeholder={proofType === 'ID_CONFIRMATION' ? 'Required for ID confirmation' : 'Optional reference'} /></label></div><div className="form-row"><label>Proof of delivery<select required value={proofType} onChange={(event) => setProofType(event.target.value)}><option value="">Select proof</option>{Object.entries(DELIVERY_PROOF_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>Proof reference<input required maxLength={300} value={proofReference} onChange={(event) => setProofReference(event.target.value)} placeholder="Signature, photo, or ID reference" /></label></div><label>Delivery date and time<input type="datetime-local" required value={deliveredAt} max={localInputValue()} onChange={(event) => setDeliveredAt(event.target.value)} /></label></div>}
             <label>Operational note<textarea maxLength={1000} rows={3} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Add an operational note (optional)" /></label>

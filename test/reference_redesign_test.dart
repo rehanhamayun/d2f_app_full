@@ -283,6 +283,15 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Sea · Cost-effective'), findsOneWidget);
       expect(find.byType(CustomerShipmentScreen), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('customer-create-shipment')),
+        250,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('customer-create-shipment')),
+      );
+      await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('customer-create-shipment')),
         findsOneWidget,
@@ -312,6 +321,15 @@ void main() {
 
     expect(find.text('Lomé, Togo'), findsOneWidget);
     expect(find.byType(CustomerShipmentScreen), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('customer-create-shipment')),
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('customer-create-shipment')),
+    );
+    await tester.pumpAndSettle();
     expect(
       find.byKey(const ValueKey('customer-create-shipment')),
       findsOneWidget,
@@ -638,9 +656,10 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('nav-ship')));
       await capture('01-customer-ship');
-      expect(find.text('Your next shipment'), findsOneWidget);
-      expect(find.byKey(const ValueKey('customer-route')), findsOneWidget);
-
+      expect(find.text('New shipment request'), findsOneWidget);
+      expect(find.text('Sea · Cost-effective'), findsNothing);
+      await tester.ensureVisible(find.byKey(const ValueKey('customer-route')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('customer-route')));
       await capture('02-customer-route-planner');
       expect(find.text('Choose your route'), findsOneWidget);

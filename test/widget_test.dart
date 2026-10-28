@@ -61,10 +61,90 @@ void main() {
     });
 
     test('status transitions map matches backend contract', () {
+      expect(
+        kAllowedTransitions['REQUESTED'],
+        ['RECEIVED', 'PICKUP_SCHEDULED', 'PICKED_UP'],
+      );
+      expect(kAllowedTransitions['PICKUP_SCHEDULED'], ['PICKED_UP', 'RECEIVED']);
+      expect(kAllowedTransitions['PICKED_UP'], ['RECEIVED']);
       expect(kAllowedTransitions['RECEIVED'], ['PROCESSING']);
       expect(kAllowedTransitions['PROCESSING'], ['IN_TRANSIT']);
       expect(kAllowedTransitions['READY_FOR_PICKUP'], ['RELEASED']);
       expect(kAllowedTransitions['DELIVERED'], isEmpty);
+    });
+
+    test('drop-off shipments can never enter the pickup-only stages', () {
+      final dropOff = Parcel.fromJson({
+        'id': 'drop-1',
+        'trackingId': 'D2F-2026-000106',
+        'customerId': 'cust-1',
+        'recipientName': 'X',
+        'packageType': 'BOX',
+        'weightKg': 4,
+        'origin': 'A',
+        'destination': 'Lomé, Togo',
+        'method': 'SEA',
+        'status': 'REQUESTED',
+        'deliveryMode': 'DROP_OFF',
+      });
+      expect(dropOff.deliveryMode, DeliveryMode.DROP_OFF);
+      expect(allowedStatusesFor(dropOff), ['RECEIVED']);
+
+      // Warehouse drop-off drops the goods at the facility, so intake is
+      // confirmed directly there and never carries a pickup stage.
+      expect(kPickupOnlyStatuses, {'PICKUP_SCHEDULED', 'PICKED_UP'});
+    });
+
+    test('pickup requests pass through the collection stages', () {
+      final pickup = Parcel.fromJson({
+        'id': 'pick-1',
+        'trackingId': 'D2F-2026-000107',
+        'customerId': 'cust-1',
+        'recipientName': 'X',
+        'packageType': 'BOX',
+        'weightKg': 4,
+        'origin': 'A',
+        'destination': 'Lomé, Togo',
+        'method': 'AIR',
+        'status': 'REQUESTED',
+        'deliveryMode': 'PICKUP',
+        'pickupAddress': '108 Dodge Street, Omaha',
+        'pickupScheduledAt': '2026-11-15T10:30:00.000Z',
+        'items': [
+          {
+            'id': 'item-1',
+            'name': 'Clothing box',
+            'quantity': 2,
+            'weightKg': 7,
+            'position': 0,
+          },
+        ],
+        'images': [
+          {
+            'id': 'img-1',
+            'fileName': 'front.jpg',
+            'contentType': 'image/jpeg',
+            'sizeBytes': 12345,
+            'createdAt': '2026-10-22T08:00:00.000Z',
+          },
+        ],
+      });
+
+      expect(pickup.deliveryMode, DeliveryMode.PICKUP);
+      expect(pickup.totalPieces, 2);
+      expect(pickup.pickupScheduledAt, DateTime.utc(2026, 11, 15, 10, 30));
+      expect(allowedStatusesFor(pickup), [
+        'RECEIVED',
+        'PICKUP_SCHEDULED',
+        'PICKED_UP',
+      ]);
+      expect(pickup.items.single.name, 'Clothing box');
+      expect(pickup.images.single.fileName, 'front.jpg');
+      // Item-to-create round trip carries the goods contract.
+      final draft = pickup.items.single.toCreateJson();
+      expect(draft['name'], 'Clothing box');
+      expect(draft['quantity'], 2);
+      expect(draft['weightKg'], 7);
     });
   });
 }

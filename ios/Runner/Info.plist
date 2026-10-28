@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>D2F uses the camera to photograph the goods you are shipping.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>D2F attaches optional photos of your goods to your shipment request.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

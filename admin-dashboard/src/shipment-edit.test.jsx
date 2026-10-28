@@ -81,6 +81,7 @@ it('Admin edits prefilled parcel inputs and sees saved details and refreshed row
   expect(within(updated).getByText('Registered at intake')).toBeInTheDocument();
   expect(writes).toEqual([{ path: '/parcels/parcel-edit-1', body: {
     customerId: 'customer-new', recipientName: 'Correct Recipient', recipientAddress: 'Correct address', pickupAddress: '', recipientPhone: '',
+    deliveryMode: 'DROP_OFF',
     packageType: 'BARREL', weightKg: 12.75, method: 'AIR', origin: original.origin, destination: 'Accra, Ghana', notes: original.notes, updatedAt: original.updatedAt,
   } }]);
   await waitFor(() => expect(reads.filter(path => path === '/admin/parcels').length).toBeGreaterThan(1));

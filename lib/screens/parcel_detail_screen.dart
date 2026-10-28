@@ -7,6 +7,7 @@ import '../core/theme.dart';
 import '../models/models.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/common.dart';
+import '../widgets/goods_gallery.dart';
 import '../widgets/reference_widgets.dart';
 import 'label_preview_screen.dart';
 import '../widgets/timeline.dart';
@@ -217,6 +218,8 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
           ),
         ),
         const SizedBox(height: 20),
+        _handoverCard(parcel),
+        const SizedBox(height: 20),
         _shipmentGrid(parcel),
         const SizedBox(height: 20),
         if (parcel.containerManaged)
@@ -290,6 +293,70 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
           ),
         const SizedBox(height: 20),
       ],
+    );
+  }
+
+  /// How the goods arrive at D2F — visible to staff at the top of the record.
+  Widget _handoverCard(Parcel parcel) {
+    final isPickup = parcel.deliveryMode == DeliveryMode.PICKUP;
+    final scheduled = parcel.pickupScheduledAt == null
+        ? ''
+        : ' · ${DateFormat('EEE, MMM d · h:mm a').format(parcel.pickupScheduledAt!.toLocal())}';
+    return SectionCard(
+      tint: isPickup ? AppColors.blueSoft : AppColors.greenSoft,
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 16,
+            backgroundColor: Colors.white,
+            child: Icon(
+              isPickup
+                  ? Icons.local_shipping_rounded
+                  : Icons.storefront_rounded,
+              color: isPickup ? AppColors.blue : AppColors.green,
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isPickup ? 'D2F pickup' : 'Warehouse drop-off',
+                  style: AppTheme.body.copyWith(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isPickup
+                      ? 'Scheduled collection from the customer$scheduled'
+                      : 'Customer brings the goods to the intake facility',
+                  style: AppTheme.caption.copyWith(
+                    fontSize: 11.5,
+                    height: 1.35,
+                  ),
+                ),
+                if (isPickup && (parcel.pickupAddress?.isNotEmpty ?? false))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Text(
+                      parcel.pickupAddress!,
+                      style: const TextStyle(
+                        color: AppColors.navy,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -550,14 +617,100 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
               if (parcel.recipientAddress != null)
                 _row('Recipient address', parcel.recipientAddress!),
               _row('Route', '${parcel.origin} → ${parcel.destination}'),
+              _row(
+                'Handover',
+                parcel.deliveryMode == DeliveryMode.PICKUP
+                    ? 'D2F pickup'
+                    : 'Warehouse drop-off',
+              ),
+              if (parcel.deliveryMode == DeliveryMode.PICKUP) ...[
+                if (parcel.pickupAddress != null && parcel.pickupAddress!.isNotEmpty)
+                  _row('Collection address', parcel.pickupAddress!),
+                if (parcel.pickupScheduledAt != null)
+                  _row(
+                    'Pickup scheduled',
+                    df.format(parcel.pickupScheduledAt!.toLocal()),
+                  ),
+              ],
               _row('Method', parcel.method.label),
               _row('Package', parcel.packageTypeLabel),
-              _row('Weight', '${parcel.weightKg} kg'),
+              _row(
+                'Weight',
+                parcel.totalPieces > 0
+                    ? '${parcel.weightKg} kg · ${parcel.totalPieces} pieces'
+                    : '${parcel.weightKg} kg',
+              ),
               if (parcel.notes != null && parcel.notes!.isNotEmpty)
                 _row('Notes', parcel.notes!),
               _row('Registered', df.format(parcel.createdAt)),
               _row('Last update', df.format(parcel.updatedAt)),
             ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        _goodsCard(parcel),
+        const SizedBox(height: 20),
+        _photosCard(parcel),
+        const SizedBox(height: 20),
+      ],
+    );
+  }
+
+  Widget _goodsCard(Parcel parcel) {
+    if (parcel.items.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text('Goods in this shipment', style: AppTheme.sectionTitle),
+            ),
+            Text(
+              '${parcel.items.length} lines · ${parcel.totalPieces} pieces',
+              style: AppTheme.caption.copyWith(fontSize: 10.5),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        SectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final item in parcel.items) ...[
+                GoodsItemTile(item: item),
+                if (item != parcel.items.last) const Divider(height: 18),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+      ],
+    );
+  }
+
+  Widget _photosCard(Parcel parcel) {
+    if (parcel.images.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text('Goods photos', style: AppTheme.sectionTitle),
+            ),
+            Text(
+              '${parcel.images.length}',
+              style: AppTheme.caption.copyWith(fontSize: 10.5),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        SectionCard(
+          padding: const EdgeInsets.all(12),
+          child: GoodsPhotoGallery(
+            images: parcel.images,
+            loadBytes: (image) => Api.I.parcelImageBytes(parcel.id, image.id),
           ),
         ),
         const SizedBox(height: 20),

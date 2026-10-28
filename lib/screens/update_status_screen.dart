@@ -48,8 +48,9 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
   bool _saving = false;
   String? _error;
 
-  late final List<String> _allowed =
-      kAllowedTransitions[widget.parcel.status] ?? [];
+  // Mode-aware forward statuses: drop-off shipments cannot enter the pickup
+  // stages; pickup requests can be scheduled and collected before intake.
+  late final List<String> _allowed = allowedStatusesFor(widget.parcel);
 
   @override
   void initState() {
@@ -753,6 +754,8 @@ class _StatusOption extends StatelessWidget {
   }
 
   IconData _iconFor(String status) => switch (status) {
+    'PICKUP_SCHEDULED' => Icons.event_available_rounded,
+    'PICKED_UP' => Icons.takeout_dining_rounded,
     'PROCESSING' => Icons.settings_rounded,
     'IN_TRANSIT' => Icons.local_shipping_rounded,
     'ARRIVED_LOME' => Icons.anchor_rounded,
@@ -764,6 +767,9 @@ class _StatusOption extends StatelessWidget {
   };
 
   String _descFor(String status) => switch (status) {
+    'PICKUP_SCHEDULED' =>
+      'Collection confirmed with the customer for the agreed slot.',
+    'PICKED_UP' => 'Goods collected from the customer, headed to intake.',
     'PROCESSING' => 'Parcel received and being prepared for shipment.',
     'IN_TRANSIT' => 'Parcel is on the way to its destination.',
     'ARRIVED_LOME' => 'Parcel has arrived at our Lomé facility.',

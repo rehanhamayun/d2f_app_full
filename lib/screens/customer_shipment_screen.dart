@@ -2,29 +2,40 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-
 import '../core/api.dart';
 import '../core/theme.dart';
 import '../models/models.dart';
+import '../providers/auth_provider.dart';
 import '../widgets/auth_widgets.dart';
 import '../widgets/common.dart';
+import '../widgets/goods_gallery.dart';
 import '../widgets/route_planner.dart';
 import '../widgets/timeline.dart';
 
 typedef CustomerShipmentCreator = Future<Parcel> Function({
   required String recipientName,
-  String? recipientPhone,
-  String? recipientAddress,
+  required String recipientPhone,
+  required String recipientAddress,
   required String packageType,
   required double weightKg,
   required String origin,
   required String destination,
   required String method,
+  required String deliveryMode,
+  String? pickupAddress,
+  DateTime? pickupScheduledAt,
+  List<ParcelItem> items,
   String? notes,
   required String clientRequestId,
 });
+
+/// Injectable photo source so tests never touch device galleries.
+typedef GoodsPhotoPicker = Future<PhotoDraft?> Function();
 
 const _defaultCustomerRoute = ShipmentRoute(
   origin: 'Omaha, NE, USA',
@@ -43,11 +54,76 @@ const _customerPackageTypes = <(String, String)>[
   ('OTHER', 'Other'),
 ];
 
-class CustomerShipmentScreen extends StatefulWidget {
+const String kGoogleMapsCheckKey = 'customer-address-map-check';
+
+/// One goods entry in the "what are you sending" repeater. A shipment may
+/// include many things — each row carries a name, quantity and optional note.
+class GoodsDraft {
+  final TextEditingController name = TextEditingController();
+  final TextEditingController quantity = TextEditingController();
+  final TextEditingController details = TextEditingController();
+
+  int get quantityValue {
+    final parsed = int.tryParse(quantity.text.trim());
+    return (parsed == null || parsed < 1) ? 1 : parsed.clamp(1, 999);
+  }
+
+  String get nameValue => name.text.trim();
+
+  String get detailsValue => details.text.trim();
+
+  /// Null when the row is blank (empty rows are ignored by the form, so
+  /// partially filled rows cannot silently disappear).
+  ParcelItem? toParcelItem(int position) {
+    final label = nameValue;
+    if (label.isEmpty) return null;
+    return ParcelItem(
+      id: 'draft-$position',
+      name: label,
+      details: detailsValue.isEmpty ? null : detailsValue,
+      quantity: quantityValue,
+      position: position,
+    );
+  }
+
+  void dispose() {
+    name.dispose();
+    quantity.dispose();
+    details.dispose();
+  }
+}
+
+/// A photo staged for upload (not attached to the shipment yet).
+class PhotoDraft {
+  final String fileName;
+  final String contentType;
+  final Uint8List bytes;
+
+  const PhotoDraft(this.fileName, this.contentType, this.bytes);
+
+  String get sizeLabel {
+    final kb = bytes.length / 1024;
+    return kb >= 1024
+        ? '${(kb / 1024).toStringAsFixed(1)} MB'
+        : '${kb.round()} KB';
+  }
+}
+
+/// The customer's shipment workspace: list the things to send, choose how the
+/// goods reach D2F (pickup at an agreed time, or a warehouse drop-off), and
+/// optionally attach photos so the team sees what is being shipped.
+class CustomerShipmentScreen extends ConsumerStatefulWidget {
   final ShipmentRoute? initialRoute;
   final ValueChanged<ShipmentRoute>? onRouteSelected;
   final Future<List<Parcel>> Function()? loadParcels;
   final CustomerShipmentCreator? createParcel;
+
+  /// Optional override of the device gallery/camera so widget tests stay pure.
+  final GoodsPhotoPicker? pickPhoto;
+
+  /// Optional override of the date/time pickers so widget tests can schedule
+  /// a pickup without driving system dialogs.
+  final Future<DateTime?> Function()? selectSchedule;
 
   const CustomerShipmentScreen({
     super.key,
@@ -55,22 +131,35 @@ class CustomerShipmentScreen extends StatefulWidget {
     this.onRouteSelected,
     this.loadParcels,
     this.createParcel,
+    this.pickPhoto,
+    this.selectSchedule,
   });
 
   @override
-  State<CustomerShipmentScreen> createState() => _CustomerShipmentScreenState();
+  ConsumerState<CustomerShipmentScreen> createState() =>
+      _CustomerShipmentScreenState();
 }
 
-class _CustomerShipmentScreenState extends State<CustomerShipmentScreen> {
+class _CustomerShipmentScreenState
+    extends ConsumerState<CustomerShipmentScreen> {
+  static const _maxPhotos = 8;
+  static const _maxItems = 20;
+
   final _formKey = GlobalKey<FormState>();
   final _recipientName = TextEditingController();
   final _recipientPhone = TextEditingController();
   final _recipientAddress = TextEditingController();
+  final _pickupAddress = TextEditingController();
   final _weight = TextEditingController();
   final _notes = TextEditingController();
+  final List<GoodsDraft> _goods = [GoodsDraft()];
+  final List<PhotoDraft> _photos = [];
 
   ShipmentRoute _route = _defaultCustomerRoute;
   String? _packageType;
+  DeliveryMode _deliveryMode = DeliveryMode.DROP_OFF;
+  DateTime? _pickupWhen;
+  bool _pickupMissingSchedule = false;
   String? _requestId;
   List<Parcel> _parcels = const [];
   String? _parcelsError;
@@ -98,8 +187,12 @@ class _CustomerShipmentScreenState extends State<CustomerShipmentScreen> {
     _recipientName.dispose();
     _recipientPhone.dispose();
     _recipientAddress.dispose();
+    _pickupAddress.dispose();
     _weight.dispose();
     _notes.dispose();
+    for (final draft in _goods.toList()) {
+      draft.dispose();
+    }
     super.dispose();
   }
 
@@ -142,6 +235,27 @@ class _CustomerShipmentScreenState extends State<CustomerShipmentScreen> {
     }
   }
 
+  void _addGoods() {
+    setState(() => _goods.add(GoodsDraft()));
+    _invalidateRequest();
+  }
+
+  void _removeGoods(int index) {
+    setState(() => _goods.removeAt(index).dispose());
+    _invalidateRequest();
+  }
+
+  /// Non-blank rows. Blank rows are ignored; a shipment must name at least
+  /// one thing being sent.
+  List<ParcelItem> _collectGoods() {
+    final items = <ParcelItem>[];
+    for (var index = 0; index < _goods.length; index += 1) {
+      final item = _goods[index].toParcelItem(index);
+      if (item != null) items.add(item);
+    }
+    return items;
+  }
+
   Future<void> _contactSupport() async {
     try {
       if (await launchUrl(
@@ -161,10 +275,148 @@ class _CustomerShipmentScreenState extends State<CustomerShipmentScreen> {
     }
   }
 
+  /// Opens Google Maps on the typed address so the customer can verify the
+  /// pin before our team relies on it.
+  Future<void> _checkAddress(String address) async {
+    final encoded = Uri.encodeQueryComponent(address);
+    final uri = Uri.parse(
+      'https://www.google.com/maps/search/?api=1&query=$encoded',
+    );
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        copyToClipboard(
+          context,
+          'https://www.google.com/maps/search/?api=1&query=$encoded',
+          message: 'Map link copied — open it in your browser.',
+        );
+      }
+    }
+  }
+
+  Future<void> _pickDateTime() async {
+    if (widget.selectSchedule != null) {
+      final when = await widget.selectSchedule!();
+      if (when == null || !mounted) return;
+      setState(() {
+        _pickupWhen = when;
+        _pickupMissingSchedule = false;
+        _invalidateRequest();
+      });
+      return;
+    }
+    final now = DateTime.now();
+    final base = _pickupWhen ?? now.add(const Duration(days: 1));
+    final date = await showDatePicker(
+      context: context,
+      initialDate: now.isAfter(base) ? now.add(const Duration(days: 1)) : base,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 90)),
+      helpText: 'Pickup date',
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(base),
+      helpText: 'Pickup time',
+    );
+    if (time == null) return;
+    setState(() {
+      _pickupWhen = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        time.hour,
+        time.minute,
+      );
+      _pickupMissingSchedule = false;
+      _invalidateRequest();
+    });
+  }
+
+  Future<void> _addPhoto() async {
+    if (_photos.length >= _maxPhotos) {
+      authMessage(
+        context,
+        'A shipment can hold at most $_maxPhotos photos of the goods.',
+      );
+      return;
+    }
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Take a photo'),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+    try {
+      final picked = widget.pickPhoto != null
+          ? await widget.pickPhoto!()
+          : await _pickFromDevice(source);
+      if (picked == null || !mounted) return;
+      setState(() {
+        _photos.add(picked);
+        _invalidateRequest();
+      });
+    } catch (_) {
+      if (mounted) {
+        authMessage(context, 'Could not add that photo. Please try again.');
+      }
+    }
+  }
+
+  Future<PhotoDraft?> _pickFromDevice(ImageSource source) async {
+    final picker = ImagePicker();
+    final xfile = await picker.pickImage(
+      source: source,
+      imageQuality: 72,
+      maxWidth: 1600,
+    );
+    if (xfile == null) return null;
+    final bytes = await xfile.readAsBytes();
+    final contentType = _contentTypeFor(xfile.name);
+    return PhotoDraft(xfile.name, contentType, bytes);
+  }
+
+  String _contentTypeFor(String fileName) {
+    final lower = fileName.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    return 'image/jpeg';
+  }
+
+  void _removePhoto(int index) => setState(() => _photos.removeAt(index));
+
   Future<void> _createShipment() async {
-    if (_saving || !(_formKey.currentState?.validate() ?? false)) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    final goods = _collectGoods();
+    if (goods.isEmpty) {
+      authMessage(
+        context,
+        'List at least one thing you are sending. Describe each item in your own words.',
+      );
+      return;
+    }
     final weight = double.tryParse(_weight.text.trim());
-    if (weight == null || !weight.isFinite || weight <= 0) {
+    if (weight == null || !weight.isFinite || weight <= 0) return;
+    if (_deliveryMode == DeliveryMode.PICKUP && _pickupWhen == null) {
+      // The schedule is compulsory for pickups; point at the field and stop.
+      setState(() => _pickupMissingSchedule = true);
       return;
     }
 
@@ -173,6 +425,7 @@ class _CustomerShipmentScreenState extends State<CustomerShipmentScreen> {
     _requestId ??=
         'customer-${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 32)}';
     try {
+      final photoUploads = List<PhotoDraft>.of(_photos);
       final parcel = await (widget.createParcel ?? Api.I.createCustomerParcel)(
         recipientName: _recipientName.text.trim(),
         recipientPhone: _recipientPhone.text.trim(),
@@ -182,9 +435,38 @@ class _CustomerShipmentScreenState extends State<CustomerShipmentScreen> {
         origin: _route.origin,
         destination: _route.destination,
         method: _route.method.name,
+        deliveryMode: _deliveryMode.apiName,
+        pickupAddress: _deliveryMode == DeliveryMode.PICKUP
+            ? _pickupAddress.text.trim()
+            : null,
+        pickupScheduledAt: _deliveryMode == DeliveryMode.PICKUP
+            ? _pickupWhen
+            : null,
+        items: goods,
         notes: _notes.text.trim(),
         clientRequestId: _requestId!,
       );
+
+      // Photos upload after the request exists; a failed upload never loses
+      // the shipment — the customer is told to re-attach it.
+      for (final photo in photoUploads) {
+        try {
+          await Api.I.addParcelImage(
+            parcel.id,
+            photo.bytes,
+            fileName: photo.fileName,
+            contentType: photo.contentType,
+          );
+        } catch (_) {
+          if (mounted) {
+            authMessage(
+              context,
+              'Shipment created, but a photo could not be uploaded. You can attach it again from this request.',
+            );
+          }
+        }
+      }
+
       if (!mounted) return;
       await Navigator.push<bool>(
         context,
@@ -214,96 +496,184 @@ class _CustomerShipmentScreenState extends State<CustomerShipmentScreen> {
     _recipientName.clear();
     _recipientPhone.clear();
     _recipientAddress.clear();
+    _pickupAddress.clear();
     _weight.clear();
     _notes.clear();
     setState(() {
       _packageType = null;
       _requestId = null;
+      _pickupWhen = null;
+      _goods
+        ..clear()
+        ..add(GoodsDraft());
+      _photos.clear();
     });
   }
 
   @override
-  Widget build(BuildContext context) => SafeArea(
-    child: Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-          child: Row(
-            children: [
-              const Expanded(
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: BrandLogo(fontSize: 24),
+  Widget build(BuildContext context) {
+    final user = ref.watch(authControllerProvider).valueOrNull;
+    final hasPhone = user?.phone?.trim().isNotEmpty ?? false;
+
+    return SafeArea(
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: BrandLogo(fontSize: 24),
+                  ),
                 ),
-              ),
-              IconButton(
-                tooltip: 'Contact D2F',
-                onPressed: _contactSupport,
-                icon: const Icon(
-                  Icons.support_agent_rounded,
-                  color: AppColors.navy,
+                IconButton(
+                  tooltip: 'Contact D2F',
+                  onPressed: _contactSupport,
+                  icon: const Icon(
+                    Icons.support_agent_rounded,
+                    color: AppColors.navy,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-        Expanded(
-          child: ListView(
-            padding: AppSpacing.pageInsets,
-            children: [
-              Text('Your next shipment', style: AppTheme.display),
-              const SizedBox(height: 6),
-              const Text(
-                'Create a shipment request and get a trackable ID straight away.',
-                style: AppTheme.caption,
-              ),
-              const SizedBox(height: 18),
-              _routeCard(),
-              const SizedBox(height: 18),
-              _shipmentForm(),
-              const SizedBox(height: 12),
-              SectionCard(
-                tint: AppColors.goldSoft,
-                padding: const EdgeInsets.all(13),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(
-                      Icons.info_outline_rounded,
-                      color: AppColors.navy,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Your tracking ID is created now. D2F will confirm physical intake before the parcel moves to Received.',
-                        style: AppTheme.caption.copyWith(fontSize: 11),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 26),
-              Row(
+          Expanded(
+            // One Form spans goods, recipient, handover and photos, so the
+            // create action validates the entire request in a single pass.
+            child: Form(
+              key: _formKey,
+              child: ListView(
+                padding: AppSpacing.pageInsets,
                 children: [
-                  const Expanded(
-                    child: Text('Your shipments', style: AppTheme.sectionTitle),
+                  Text('New shipment request', style: AppTheme.display),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'List everything you are sending. Pick a route, tell us '
+                    'where your goods should be collected from, and the D2F '
+                    'team confirms the rest.',
+                    style: AppTheme.caption,
                   ),
-                  IconButton(
-                    tooltip: 'Refresh shipments',
-                    onPressed: _loadingParcels ? null : _loadParcels,
-                    icon: const Icon(Icons.refresh_rounded),
+                  const SizedBox(height: 18),
+                  _contactCard(user, hasPhone),
+                  const SizedBox(height: 18),
+                  _routeCard(),
+                  const SizedBox(height: 18),
+                  _goodsSection(),
+                  const SizedBox(height: 18),
+                  _shipmentForm(),
+                  const SizedBox(height: 18),
+                  _handoverSection(),
+                  const SizedBox(height: 22),
+                  _photosSection(),
+                  const SizedBox(height: 12),
+                  SectionCard(
+                    tint: AppColors.goldSoft,
+                    padding: const EdgeInsets.all(13),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.info_outline_rounded,
+                          color: AppColors.navy,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Your tracking ID is created right away. Our team '
+                            'confirms your goods before the shipment moves to '
+                            'Received.',
+                            style: AppTheme.caption.copyWith(fontSize: 11),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
+                  const SizedBox(height: 26),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Your shipments',
+                          style: AppTheme.sectionTitle,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Refresh shipments',
+                        onPressed: _loadingParcels ? null : _loadParcels,
+                        icon: const Icon(Icons.refresh_rounded),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  _shipmentList(),
                 ],
               ),
-              const SizedBox(height: 8),
-              _shipmentList(),
-            ],
+            ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
+
+  Widget _contactCard(User? user, bool hasPhone) {
+    return SectionCard(
+      tint: AppColors.blueSoft,
+      padding: const EdgeInsets.all(14),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.account_circle_outlined,
+              color: AppColors.blue,
+            ),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  user?.fullName ?? 'Your details',
+                  style: const TextStyle(
+                    color: AppColors.navy,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13.5,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  hasPhone ? user?.phone ?? '' : 'Add your phone number in Account — our team needs it to reach you.',
+                  style: TextStyle(
+                    color: hasPhone ? AppColors.navy : AppColors.coral,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    height: 1.3,
+                  ),
+                ),
+                Text(
+                  user?.email ?? '',
+                  style: const TextStyle(
+                    color: AppColors.textGrey,
+                    fontSize: 11,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _routeCard() => Material(
     color: AppColors.blueSoft,
@@ -364,12 +734,14 @@ class _CustomerShipmentScreenState extends State<CustomerShipmentScreen> {
               children: [
                 Icon(_route.method.icon, size: 18, color: AppColors.navy),
                 const SizedBox(width: 8),
-                Text(
-                  '${_route.method.label} · ${_route.method.tagline}',
-                  style: const TextStyle(
-                    color: AppColors.navy,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                Flexible(
+                  child: Text(
+                    '${_route.method.label} · ${_route.method.tagline}',
+                    style: const TextStyle(
+                      color: AppColors.navy,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ],
@@ -411,125 +783,477 @@ class _CustomerShipmentScreenState extends State<CustomerShipmentScreen> {
         ],
       );
 
-  Widget _shipmentForm() => SectionCard(
+  Widget _goodsSection() => SectionCard(
     padding: const EdgeInsets.all(16),
-    child: Form(
-      key: _formKey,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Text('Recipient details', style: AppTheme.sectionTitle),
-          const SizedBox(height: 5),
-          const Text(
-            'Who should receive this shipment?',
-            style: AppTheme.caption,
-          ),
-          const SizedBox(height: 14),
-          TextFormField(
-            key: const ValueKey('customer-recipient-name'),
-            controller: _recipientName,
-            textCapitalization: TextCapitalization.words,
-            textInputAction: TextInputAction.next,
-            onChanged: (_) => _invalidateRequest(),
-            decoration: const InputDecoration(
-              labelText: 'Recipient name',
-              prefixIcon: Icon(Icons.person_outline_rounded),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'What are you sending?',
+                style: AppTheme.sectionTitle,
+              ),
             ),
-            validator: (value) =>
-                value == null || value.trim().isEmpty ? 'Required' : null,
-          ),
-          const SizedBox(height: 11),
-          TextFormField(
-            key: const ValueKey('customer-recipient-phone'),
-            controller: _recipientPhone,
-            keyboardType: TextInputType.phone,
-            textInputAction: TextInputAction.next,
-            onChanged: (_) => _invalidateRequest(),
-            decoration: const InputDecoration(
-              labelText: 'Recipient phone (optional)',
-              prefixIcon: Icon(Icons.phone_outlined),
+            Text(
+              '${_goods.length} / $_maxItems items',
+              style: const TextStyle(
+                color: AppColors.textGrey,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-          ),
-          const SizedBox(height: 11),
-          TextFormField(
-            key: const ValueKey('customer-recipient-address'),
-            controller: _recipientAddress,
-            textCapitalization: TextCapitalization.sentences,
-            textInputAction: TextInputAction.next,
-            onChanged: (_) => _invalidateRequest(),
-            decoration: const InputDecoration(
-              labelText: 'Delivery address (optional)',
-              prefixIcon: Icon(Icons.location_on_outlined),
-            ),
-            maxLines: 2,
-            minLines: 1,
-          ),
-          const SizedBox(height: 11),
-          DropdownButtonFormField<String>(
-            key: const ValueKey('customer-package-type'),
-            initialValue: _packageType,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Package type',
-              prefixIcon: Icon(Icons.inventory_2_outlined),
-            ),
-            items: [
-              for (final type in _customerPackageTypes)
-                DropdownMenuItem(value: type.$1, child: Text(type.$2)),
+          ],
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'List every item your shipment contains — boxes, clothing, '
+          'electronics. Our team sees exactly what to expect at collection.',
+          style: AppTheme.caption,
+        ),
+        const SizedBox(height: 14),
+        FormField<bool>(
+          key: const ValueKey('customer-goods'),
+          builder: (state) => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var index = 0; index < _goods.length; index += 1) ...[
+                _GoodsRow(
+                  key: ValueKey('goods-row-$index'),
+                  index: index,
+                  draft: _goods[index],
+                  onInvalidate: _invalidateRequest,
+                  onRemove: _goods.length > 1
+                      ? () => _removeGoods(index)
+                      : null,
+                ),
+                const SizedBox(height: 10),
+              ],
+              if (state.hasError)
+                Text(
+                  state.errorText ?? '',
+                  style: const TextStyle(
+                    color: AppColors.coral,
+                    fontSize: 11.5,
+                  ),
+                ),
             ],
-            onChanged: (value) => setState(() {
-              _packageType = value;
-              _invalidateRequest();
-            }),
-            validator: (value) =>
-                value == null ? 'Choose a package type' : null,
           ),
-          const SizedBox(height: 11),
-          TextFormField(
-            key: const ValueKey('customer-package-weight'),
-            controller: _weight,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
-            ],
-            textInputAction: TextInputAction.next,
-            onChanged: (_) => _invalidateRequest(),
-            decoration: const InputDecoration(
-              labelText: 'Weight (kg)',
-              prefixIcon: Icon(Icons.scale_outlined),
+          validator: (_) => _collectGoods().isEmpty
+              ? 'List the goods you are sending — at least one item.'
+              : null,
+        ),
+        const SizedBox(height: 4),
+        OutlinedButton.icon(
+          key: const ValueKey('customer-add-item'),
+          style: OutlinedButton.styleFrom(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
             ),
-            validator: (value) {
-              final weight = double.tryParse(value?.trim() ?? '');
-              if (weight == null || !weight.isFinite || weight <= 0) {
-                return 'Enter a weight greater than 0 kg';
-              }
-              return null;
-            },
           ),
-          const SizedBox(height: 11),
-          TextFormField(
-            key: const ValueKey('customer-shipment-notes'),
-            controller: _notes,
-            textCapitalization: TextCapitalization.sentences,
-            onChanged: (_) => _invalidateRequest(),
-            decoration: const InputDecoration(
-              labelText: 'Notes for D2F (optional)',
-              prefixIcon: Icon(Icons.notes_rounded),
-            ),
-            maxLines: 3,
-            minLines: 1,
-          ),
-          const SizedBox(height: 18),
-          PrimaryButton(
-            key: const ValueKey('customer-create-shipment'),
-            label: 'Create shipment request',
-            loading: _saving,
-            onPressed: _saving ? null : _createShipment,
-          ),
-        ],
-      ),
+          onPressed: _addGoods,
+          icon: const Icon(Icons.add_circle_outline_rounded, size: 18),
+          label: const Text("Add another item"),
+        ),
+      ],
     ),
   );
+
+  Widget _shipmentForm() => SectionCard(
+    padding: const EdgeInsets.all(16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text('Recipient & delivery', style: AppTheme.sectionTitle),
+        const SizedBox(height: 5),
+        const Text(
+          'Who receives this shipment at the destination?',
+          style: AppTheme.caption,
+        ),
+        const SizedBox(height: 14),
+        TextFormField(
+          key: const ValueKey('customer-recipient-name'),
+          controller: _recipientName,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.next,
+          onChanged: (_) => _invalidateRequest(),
+          decoration: const InputDecoration(
+            labelText: 'Recipient name',
+            prefixIcon: Icon(Icons.person_outline_rounded),
+          ),
+          validator: (value) =>
+              value == null || value.trim().isEmpty ? 'Required' : null,
+        ),
+        const SizedBox(height: 11),
+        TextFormField(
+          key: const ValueKey('customer-recipient-phone'),
+          controller: _recipientPhone,
+          keyboardType: TextInputType.phone,
+          textInputAction: TextInputAction.next,
+          onChanged: (_) => _invalidateRequest(),
+          decoration: const InputDecoration(
+            labelText: 'Recipient phone',
+            prefixIcon: Icon(Icons.phone_outlined),
+          ),
+          validator: (value) {
+            final trimmed = value?.trim() ?? '';
+            if (trimmed.isEmpty) {
+              return 'Required — we contact them at delivery.';
+            }
+            if (trimmed.length < 6 || trimmed.length > 40) {
+              return 'Enter a phone number (6 – 40 characters).';
+            }
+            return null;
+          },
+        ),
+        const SizedBox(height: 11),
+        TextFormField(
+          key: const ValueKey('customer-recipient-address'),
+          controller: _recipientAddress,
+          textCapitalization: TextCapitalization.sentences,
+          textInputAction: TextInputAction.next,
+          onChanged: (_) => _invalidateRequest(),
+          decoration: const InputDecoration(
+            labelText: 'Delivery address',
+            prefixIcon: Icon(Icons.location_on_outlined),
+          ),
+          maxLines: 2,
+          minLines: 1,
+          validator: (value) => value == null || value.trim().isEmpty
+              ? 'Required — tell us where the shipment goes.'
+              : null,
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            key: const ValueKey(kGoogleMapsCheckKey),
+            onPressed: _recipientAddress.text.trim().isEmpty
+                ? null
+                : () => _checkAddress(_recipientAddress.text.trim()),
+            icon: const Icon(Icons.map_outlined, size: 16),
+            label: const Text('Verify on Google Maps'),
+          ),
+        ),
+        const SizedBox(height: 4),
+        DropdownButtonFormField<String>(
+          key: const ValueKey('customer-package-type'),
+          initialValue: _packageType,
+          isExpanded: true,
+          decoration: const InputDecoration(
+            labelText: 'Overall packing',
+            prefixIcon: Icon(Icons.inventory_2_outlined),
+            helperText: 'How the goods travel — e.g. one barrel plus boxes.',
+          ),
+          items: [
+            for (final type in _customerPackageTypes)
+              DropdownMenuItem(value: type.$1, child: Text(type.$2)),
+          ],
+          onChanged: (value) => setState(() {
+            _packageType = value;
+            _invalidateRequest();
+          }),
+          validator: (value) =>
+              value == null ? 'Choose the packing type' : null,
+        ),
+        const SizedBox(height: 11),
+        TextFormField(
+          key: const ValueKey('customer-package-weight'),
+          controller: _weight,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+          ],
+          textInputAction: TextInputAction.next,
+          onChanged: (_) => _invalidateRequest(),
+          decoration: const InputDecoration(
+            labelText: 'Total weight (kg)',
+            prefixIcon: Icon(Icons.scale_outlined),
+            helperText: 'Best estimate across all items.',
+          ),
+          validator: (value) {
+            final weight = double.tryParse(value?.trim() ?? '');
+            if (weight == null || !weight.isFinite || weight <= 0) {
+              return 'Enter a weight greater than 0 kg';
+            }
+            return null;
+          },
+        ),
+        const SizedBox(height: 11),
+        TextFormField(
+          key: const ValueKey('customer-shipment-notes'),
+          controller: _notes,
+          textCapitalization: TextCapitalization.sentences,
+          onChanged: (_) => _invalidateRequest(),
+          decoration: const InputDecoration(
+            labelText: 'Notes for D2F (optional)',
+            prefixIcon: Icon(Icons.notes_rounded),
+          ),
+          maxLines: 3,
+          minLines: 1,
+        ),
+      ],
+    ),
+  );
+
+  Widget _handoverSection() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Padding(
+        padding: EdgeInsets.only(left: 4, bottom: 10),
+        child: Text(
+          'How do your goods reach D2F?',
+          style: AppTheme.sectionTitle,
+        ),
+      ),
+      _HandoverChoice(
+        key: const ValueKey('handover-pickup'),
+        title: 'Request pickup',
+        tagline: 'Our team collects the goods from your address.',
+        icon: Icons.local_shipping_outlined,
+        selected: _deliveryMode == DeliveryMode.PICKUP,
+        onSelect: () => setState(() {
+          _deliveryMode = DeliveryMode.PICKUP;
+          _pickupMissingSchedule = false;
+          _invalidateRequest();
+        }),
+      ),
+      const SizedBox(height: 10),
+      _HandoverChoice(
+        key: const ValueKey('handover-dropoff'),
+        title: 'Drop off at warehouse',
+        tagline: 'Bring the goods to our warehouse — no appointment.',
+        icon: Icons.storefront_outlined,
+        selected: _deliveryMode == DeliveryMode.DROP_OFF,
+        onSelect: () => setState(() {
+          _deliveryMode = DeliveryMode.DROP_OFF;
+          _invalidateRequest();
+        }),
+      ),
+      AnimatedSwitcher(
+        duration: const Duration(milliseconds: 220),
+        child: _deliveryMode == DeliveryMode.PICKUP
+            ? _pickupDetails()
+            : _dropOffDetails(),
+      ),
+      const SizedBox(height: 18),
+      PrimaryButton(
+        key: const ValueKey('customer-create-shipment'),
+        label: 'Create shipment request',
+        loading: _saving,
+        onPressed: _saving ? null : _createShipment,
+      ),
+    ],
+  );
+
+  Widget _pickupDetails() => SectionCard(
+    key: const ValueKey('pickup-details'),
+    tint: AppColors.coralSoft.withValues(alpha: .45),
+    padding: const EdgeInsets.all(16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Icon(
+              Icons.schedule_rounded,
+              color: AppColors.coral,
+              size: 20,
+            ),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text(
+                'Pickup by our team',
+                style: TextStyle(
+                  color: AppColors.navy,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13.5,
+                ),
+              ),
+            ),
+            Text(
+              'Pickup notice goes to D2F staff',
+              style: AppTheme.caption.copyWith(fontSize: 10),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        TextFormField(
+          key: const ValueKey('customer-pickup-address'),
+          controller: _pickupAddress,
+          textCapitalization: TextCapitalization.sentences,
+          textInputAction: TextInputAction.next,
+          onChanged: (_) => _invalidateRequest(),
+          decoration: const InputDecoration(
+            labelText: 'Collection address',
+            prefixIcon: Icon(Icons.home_outlined),
+            helperText:
+                'Street address where our team should collect the goods.',
+          ),
+          maxLines: 2,
+          minLines: 1,
+          validator: (value) => value == null || value.trim().isEmpty
+              ? 'Required for a pickup request.'
+              : null,
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: _pickupAddress.text.trim().isEmpty
+                ? null
+                : () => _checkAddress(_pickupAddress.text.trim()),
+            icon: const Icon(Icons.map_outlined, size: 16),
+            label: const Text('Verify on Google Maps'),
+          ),
+        ),
+        const SizedBox(height: 4),
+        InkWell(
+          key: const ValueKey('customer-pickup-schedule'),
+          onTap: _pickDateTime,
+          borderRadius: BorderRadius.circular(16),
+          child: InputDecorator(
+            decoration: InputDecoration(
+              labelText: 'Preferred pickup date & time',
+              prefixIcon: const Icon(Icons.event_available_rounded),
+              suffixIcon: const Icon(Icons.edit_calendar_rounded, size: 19),
+              errorText: _pickupMissingSchedule
+                  ? 'Choose the collection date and time.'
+                  : null,
+            ),
+            child: Text(
+              _pickupWhen == null
+                  ? 'Choose date & time'
+                  : DateFormat('EEE, MMM d · h:mm a').format(_pickupWhen!),
+              style: TextStyle(
+                color: _pickupWhen == null
+                    ? AppColors.textGrey
+                    : AppColors.navy,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'Our staff see your request right away, confirm the collection, and '
+          'update the status once your items are picked up.',
+          style: AppTheme.caption.copyWith(fontSize: 10.5),
+        ),
+      ],
+    ),
+  );
+
+  Widget _dropOffDetails() => SectionCard(
+    key: const ValueKey('dropoff-details'),
+    tint: AppColors.greenSoft.withValues(alpha: .45),
+    padding: const EdgeInsets.all(16),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(Icons.storefront_rounded, color: AppColors.green, size: 20),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Warehouse drop-off',
+                style: TextStyle(
+                  color: AppColors.navy,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13.5,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Bring your items to our D2F warehouse in '
+                '${_route.origin.split(',').first}. Bring this tracking ID; our '
+                'team verifies the goods and updates the status to Received.',
+                style: AppTheme.caption.copyWith(fontSize: 11, height: 1.4),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _photosSection() {
+    return Column(
+      key: const ValueKey('customer-photos'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 10),
+          child: Text(
+            'Photos of the goods (optional)',
+            style: AppTheme.sectionTitle,
+          ),
+        ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Help our team see what they are collecting. Up to $_maxPhotos '
+                'photos, compressed automatically.',
+                style: AppTheme.caption.copyWith(fontSize: 11),
+              ),
+            ),
+            OutlineButton2(label: 'Add photo', onPressed: () => _addPhoto()),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (_photos.isNotEmpty)
+          SizedBox(
+            height: 96,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _photos.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 10),
+              itemBuilder: (context, index) {
+                final photo = _photos[index];
+                return Stack(
+                  children: [
+                    Container(
+                      width: 86,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: AppColors.border),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: Image.memory(
+                          photo.bytes,
+                          fit: BoxFit.cover,
+                          width: 86,
+                          height: 86,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: -6,
+                      right: -6,
+                      child: IconButton(
+                        tooltip: 'Remove photo',
+                        icon: Icon(
+                          Icons.cancel_rounded,
+                          color: AppColors.coral.withValues(alpha: .9),
+                        ),
+                        onPressed: () => _removePhoto(index),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+      ],
+    );
+  }
 
   Widget _shipmentList() {
     if (_loadingParcels) {
@@ -591,6 +1315,213 @@ class _CustomerShipmentScreenState extends State<CustomerShipmentScreen> {
   }
 }
 
+class _HandoverChoice extends StatelessWidget {
+  final String title;
+  final String tagline;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onSelect;
+
+  const _HandoverChoice({
+    super.key,
+    required this.title,
+    required this.tagline,
+    required this.icon,
+    required this.selected,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? AppColors.blueSoft : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color: selected ? AppColors.blue : AppColors.border,
+          width: selected ? 1.4 : 1,
+        ),
+      ),
+      child: InkWell(
+        onTap: onSelect,
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: selected ? Colors.white : AppColors.subtle,
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Icon(
+                  icon,
+                  color: selected ? AppColors.blue : AppColors.textGrey,
+                  size: 21,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: AppColors.navy,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14.5,
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      tagline,
+                      style: const TextStyle(
+                        color: AppColors.textGrey,
+                        fontSize: 11.5,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                selected
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_unchecked,
+                color: selected ? AppColors.blue : AppColors.textGrey,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GoodsRow extends StatelessWidget {
+  final int index;
+  final GoodsDraft draft;
+  final VoidCallback onInvalidate;
+  final VoidCallback? onRemove;
+
+  const _GoodsRow({
+    super.key,
+    required this.index,
+    required this.draft,
+    required this.onInvalidate,
+    this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.subtle,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border.withValues(alpha: .8)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                flex: 5,
+                child: TextField(
+                  key: ValueKey('goods-name-$index'),
+                  controller: draft.name,
+                  textCapitalization: TextCapitalization.sentences,
+                  onChanged: (_) => onInvalidate(),
+                  decoration: const InputDecoration(
+                    isCollapsed: true,
+                    contentPadding: EdgeInsets.zero,
+                    border: InputBorder.none,
+                    hintText: 'Describe item (e.g. clothing box, TV)...',
+                    hintStyle: TextStyle(
+                      fontSize: 12.5,
+                      color: AppColors.textGrey,
+                    ),
+                  ),
+                  style: const TextStyle(
+                    color: AppColors.navy,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                flex: 2,
+                child: TextField(
+                  key: ValueKey('goods-qty-$index'),
+                  controller: draft.quantity,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d{0,3}')),
+                  ],
+                  textAlign: TextAlign.end,
+                  onChanged: (_) => onInvalidate(),
+                  decoration: const InputDecoration(
+                    isCollapsed: true,
+                    contentPadding: EdgeInsets.zero,
+                    border: InputBorder.none,
+                    hintText: 'Qty',
+                    hintStyle: TextStyle(
+                      fontSize: 12.5,
+                      color: AppColors.textGrey,
+                    ),
+                  ),
+                  style: const TextStyle(
+                    color: AppColors.navy,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              if (onRemove != null)
+                SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: IconButton(
+                    tooltip: 'Remove item',
+                    key: ValueKey('goods-remove-$index'),
+                    padding: EdgeInsets.zero,
+                    icon: const Icon(
+                      Icons.cancel_outlined,
+                      color: AppColors.coral,
+                      size: 20,
+                    ),
+                    onPressed: onRemove,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            key: ValueKey('goods-details-$index'),
+            controller: draft.details,
+            textCapitalization: TextCapitalization.sentences,
+            onChanged: (_) => onInvalidate(),
+            decoration: const InputDecoration(
+              isCollapsed: true,
+              contentPadding: EdgeInsets.zero,
+              border: InputBorder.none,
+              hintText: 'Optional short description for our team...',
+              hintStyle: TextStyle(fontSize: 11.5, color: AppColors.textGrey),
+            ),
+            style: const TextStyle(fontSize: 11.5, color: AppColors.textGrey),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CustomerParcelTile extends StatelessWidget {
   final Parcel parcel;
   final VoidCallback onTap;
@@ -615,10 +1546,15 @@ class _CustomerParcelTile extends StatelessWidget {
                 color: AppColors.goldSoft,
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: const Icon(
-                Icons.inventory_2_outlined,
-                color: AppColors.navy,
-              ),
+              child: parcel.deliveryMode == DeliveryMode.PICKUP
+                  ? const Icon(
+                      Icons.local_shipping_outlined,
+                      color: AppColors.navy,
+                    )
+                  : const Icon(
+                      Icons.inventory_2_outlined,
+                      color: AppColors.navy,
+                    ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -635,7 +1571,8 @@ class _CustomerParcelTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${parcel.origin} → ${parcel.destination}',
+                    '${parcel.origin} → ${parcel.destination}'
+                    ' · ${parcel.deliveryMode.shortLabel}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: AppTheme.caption.copyWith(fontSize: 10),
@@ -704,7 +1641,7 @@ class CustomerParcelDetailsScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 6),
                         const Text(
-                          'Your tracking ID is ready. We’ll update you when D2F confirms intake.',
+                          'Your tracking ID is ready. Our team reviews your goods and updates the status.',
                           style: TextStyle(
                             color: Colors.white,
                             fontSize: 12,
@@ -787,6 +1724,10 @@ class CustomerParcelDetailsScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 18),
+          _goodsCard(),
+          const SizedBox(height: 18),
+          _pickupCard(),
+          const SizedBox(height: 18),
           const Text('Shipment route', style: AppTheme.sectionTitle),
           const SizedBox(height: 10),
           SectionCard(
@@ -802,14 +1743,24 @@ class CustomerParcelDetailsScreen extends StatelessWidget {
                   '${parcel.method.label} · ${parcel.method.tagline}',
                 ),
                 const Divider(height: 22),
-                _detailRow('Package', parcel.packageTypeLabel),
+                _detailRow('Packing', parcel.packageTypeLabel),
                 const Divider(height: 22),
-                _detailRow('Weight', '${parcel.weightKg} kg'),
+                _detailRow('Total weight', '${parcel.weightKg} kg'),
                 const Divider(height: 22),
                 _detailRow('Recipient', parcel.recipientName),
+                if (parcel.recipientPhone?.isNotEmpty ?? false) ...[
+                  const Divider(height: 22),
+                  _detailRow('Recipient phone', parcel.recipientPhone!),
+                ],
+                if (parcel.recipientAddress?.isNotEmpty ?? false) ...[
+                  const Divider(height: 22),
+                  _detailRow('Delivery address', parcel.recipientAddress!),
+                ],
               ],
             ),
           ),
+          const SizedBox(height: 18),
+          _photosCard(context),
           const SizedBox(height: 18),
           const Text('Progress', style: AppTheme.sectionTitle),
           const SizedBox(height: 10),
@@ -833,6 +1784,166 @@ class CustomerParcelDetailsScreen extends StatelessWidget {
           const SizedBox(height: 20),
         ],
       ),
+    );
+  }
+
+  Widget _goodsCard() {
+    if (parcel.items.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Goods in this shipment',
+                style: AppTheme.sectionTitle,
+              ),
+            ),
+            Text(
+              parcel.totalPieces > 0
+                  ? '${parcel.items.length} lines · ${parcel.totalPieces} pieces'
+                  : '${parcel.items.length} lines',
+              style: const TextStyle(
+                color: AppColors.textGrey,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        SectionCard(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            children: [
+              for (final item in parcel.items) ...[
+                GoodsItemTile(item: item),
+                if (item != parcel.items.last) const Divider(height: 14),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _pickupCard() {
+    final isPickup = parcel.deliveryMode == DeliveryMode.PICKUP;
+    final style = TextStyle(
+      color: isPickup ? AppColors.blue : AppColors.green,
+      fontSize: 15,
+      height: 1.2,
+    );
+    return SectionCard(
+      padding: const EdgeInsets.all(14),
+      tint: isPickup ? AppColors.blueSoft : AppColors.greenSoft,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            isPickup ? Icons.local_shipping_rounded : Icons.storefront_rounded,
+            color: isPickup ? AppColors.blue : AppColors.green,
+            size: 22,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isPickup ? 'D2F pickup' : 'Warehouse drop-off',
+                  style: style.copyWith(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12.5,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                if (isPickup) ...[
+                  if (parcel.pickupAddress?.isNotEmpty ?? false)
+                    Text(
+                      'Collection · ${parcel.pickupAddress}',
+                      style: const TextStyle(
+                        color: AppColors.navy,
+                        fontSize: 11.5,
+                        height: 1.35,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  if (parcel.pickupScheduledAt != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        'Agreed for ${DateFormat('EEE, MMM d · h:mm a').format(parcel.pickupScheduledAt!)}',
+                        style: const TextStyle(
+                          color: AppColors.navy,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Text(
+                      'Our team will confirm the collection and keep the status '
+                      'updated here.',
+                      style: const TextStyle(
+                        color: AppColors.textGrey,
+                        fontSize: 10.5,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+                ] else
+                  const Text(
+                    'Bring your items to the D2F warehouse. Our team verifies '
+                    'them on arrival.',
+                    style: TextStyle(
+                      color: AppColors.textGrey,
+                      fontSize: 10.5,
+                      height: 1.3,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _photosCard(BuildContext context) {
+    if (parcel.images.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text('Your goods photos', style: AppTheme.sectionTitle),
+            ),
+            Text(
+              '${parcel.images.length}',
+              style: const TextStyle(
+                color: AppColors.textGrey,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        SectionCard(
+          padding: const EdgeInsets.all(12),
+          child: GoodsPhotoGallery(
+            images: parcel.images,
+            loadBytes: (image) =>
+                Api.I.customerParcelImageBytes(parcel.id, image.id),
+          ),
+        ),
+      ],
     );
   }
 

@@ -29,6 +29,8 @@ class ActivityScreenState extends State<ActivityScreen> {
   static const chips = <(String, String)>[
     ('ALL', 'All'),
     ('REQUESTED', 'Requested'),
+    ('PICKUP_SCHEDULED', 'Scheduled'),
+    ('PICKED_UP', 'Picked Up'),
     ('RECEIVED', 'Received'),
     ('PROCESSING', 'Processing'),
     ('IN_TRANSIT', 'In Transit'),

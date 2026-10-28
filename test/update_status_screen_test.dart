@@ -5,25 +5,27 @@ import 'package:d2f_application/screens/update_status_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-Parcel parcelWithStatus(String status) => Parcel.fromJson({
-  'id': 'parcel-1',
-  'trackingId': 'D2F000000000005',
-  'customerId': 'customer-1',
-  'recipientName': 'Kossi Mensah',
-  'recipientPhone': '+228 90000000',
-  'recipientAddress': 'Rue du Marché 10, Lomé',
-  'pickupAddress': 'Boulevard du 13 Janvier 4, Lomé',
-  'packageType': 'BOX',
-  'weightKg': 2.5,
-  'origin': 'Lomé, Togo',
-  'destination': 'Lomé, Togo',
-  'method': 'ROAD',
-  'status': status,
-  'createdAt': '2026-10-18T09:00:00Z',
-  'updatedAt': '2026-10-21T10:00:00Z',
-  'releasedToName': 'Ama Boateng',
-  'releasedToIdNumber': 'TG-12345',
-});
+Parcel parcelWithStatus(String status, {String? deliveryMode}) =>
+    Parcel.fromJson({
+      'id': 'parcel-1',
+      'trackingId': 'D2F000000000005',
+      'customerId': 'customer-1',
+      'recipientName': 'Kossi Mensah',
+      'recipientPhone': '+228 90000000',
+      'recipientAddress': 'Rue du Marché 10, Lomé',
+      'pickupAddress': 'Boulevard du 13 Janvier 4, Lomé',
+      'packageType': 'BOX',
+      'weightKg': 2.5,
+      'origin': 'Lomé, Togo',
+      'destination': 'Lomé, Togo',
+      'method': 'ROAD',
+      'status': status,
+      if (deliveryMode != null) 'deliveryMode': deliveryMode,
+      'createdAt': '2026-10-18T09:00:00Z',
+      'updatedAt': '2026-10-21T10:00:00Z',
+      'releasedToName': 'Ama Boateng',
+      'releasedToIdNumber': 'TG-12345',
+    });
 
 final location = WarehouseLocation.fromJson({
   'id': 'loc-1',
@@ -35,9 +37,12 @@ final location = WarehouseLocation.fromJson({
 
 Future<void> pumpScreen(WidgetTester tester, Parcel parcel) async {
   await tester.pumpWidget(
+    // UniqueKey so a second pumpScreen replaces the whole State instead of
+    // reusing the previous screen's precomputed allowed transitions.
     MaterialApp(
       theme: AppTheme.build(),
       home: UpdateStatusScreen(
+        key: UniqueKey(),
         parcel: parcel,
         loadLocations: () async => [location],
       ),
@@ -105,5 +110,22 @@ void main() {
     await pumpScreen(tester, parcelWithStatus('READY_FOR_PICKUP'));
     final note = tester.widget<TextField>(find.byType(TextField).last);
     expect(note.maxLength, 1000);
+  });
+
+  testWidgets('drop-off request offers only warehouse intake, pickup offers both',
+    (tester) async {
+    // Default (legacy) records are drop-offs: a REQUESTED shipment can only be
+    // received at the warehouse.
+    await pumpScreen(tester, parcelWithStatus('REQUESTED'));
+    expect(find.text('Received'), findsOneWidget);
+    expect(find.text('Pickup Scheduled'), findsNothing);
+    expect(find.text('Picked Up'), findsNothing);
+
+    // A customer-requested pickup adds the scheduling and collection steps.
+    final pickup = parcelWithStatus('REQUESTED', deliveryMode: 'PICKUP');
+    await pumpScreen(tester, pickup);
+    expect(find.text('Pickup Scheduled'), findsOneWidget);
+    expect(find.text('Picked Up'), findsOneWidget);
+    expect(find.text('Received'), findsOneWidget);
   });
 }

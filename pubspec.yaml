@@ -51,6 +51,9 @@ dependencies:
   # Camera QR/barcode scanning (M1 acceptance: real scan -> lookup)
   mobile_scanner: ^7.0.1
 
+  # Photos of the goods attached to a shipment request (optional)
+  image_picker: ^1.1.1
+
   # Date formatting
   intl: ^0.20.2
   google_fonts: ^9.0.0
