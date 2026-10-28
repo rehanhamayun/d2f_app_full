@@ -20,5 +20,9 @@
     "20261028023513_item_packages_collect_photos",
     "20261028160000_connect_air_traveller"
   ],
-  "liveApiVerification": "design/verification-connect/live-api-verification.json"
+  "liveApiVerification": "design/verification-connect/live-api-verification.json",
+  "adminPortal": "https://d2f-admin-dashboard.pages.dev/",
+  "adminDeployment": "https://c3d89984.d2f-admin-dashboard.pages.dev",
+  "portalVerification": "Production browser staff sign-in and authenticated Connect workspace loaded successfully.",
+  "livePortalScreenshot": "design/verification-connect/06-live-admin-connect.png"
 }

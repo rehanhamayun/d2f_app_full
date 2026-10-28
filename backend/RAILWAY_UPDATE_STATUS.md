@@ -1,3 +1,25 @@
+# D2F Connect production update — 29 October 2026
+
+Deployed to the existing Railway Pro `production_house` project, production
+`d2f-api` service, deployment `2f421144-d099-4864-9f05-3c476990b031`.
+The health check passed and the database is connected. The customer multi-item,
+package collection and D2F Connect migrations applied successfully.
+
+The existing Postgres volume was backed up as `Before D2F Connect 2026-10-28`
+(backup `35b3d954-c248-4197-b219-1932ce662644`) before deployment.
+The existing Cloudflare Admin portal was updated and verified in the browser
+with production Staff sign-in and the authenticated Connect workspace.
+No synthetic customer bookings, trips or rates were inserted into production.
+
+All 90 Flutter, 61 backend and 21 portal tests passed. The signed ARM64 Android
+release is `output/apk/D2F-Global-1.1.0+2014-arm64-v8a.apk` (version code 4014),
+with the existing production signer. Verification is recorded under
+`design/verification-connect/`. Admin should configure real directional rates
+and approved receiving addresses before confirming traveller assignments.
+See [operator guide](../CONNECT_WORKFLOW.md).
+
+---
+
 # Railway backend update — 22 October 2026
 
 The production API is deployed and healthy.
