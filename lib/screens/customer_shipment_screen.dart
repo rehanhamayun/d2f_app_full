@@ -165,6 +165,9 @@ class _CustomerShipmentScreenState
   String? _parcelsError;
   bool _loadingParcels = true;
   bool _saving = false;
+  // Mirrors build()'s profile-phone check so the create action, which lives
+  // inside _handoverSection(), can disable itself until the number exists.
+  bool _hasPhone = true;
 
   @override
   void initState() {
@@ -514,6 +517,7 @@ class _CustomerShipmentScreenState
   Widget build(BuildContext context) {
     final user = ref.watch(authControllerProvider).valueOrNull;
     final hasPhone = user?.phone?.trim().isNotEmpty ?? false;
+    _hasPhone = hasPhone;
 
     return SafeArea(
       child: Column(
@@ -1042,8 +1046,16 @@ class _CustomerShipmentScreenState
         key: const ValueKey('customer-create-shipment'),
         label: 'Create shipment request',
         loading: _saving,
-        onPressed: _saving ? null : _createShipment,
+        onPressed: _saving || !_hasPhone ? null : _createShipment,
       ),
+      if (!_hasPhone) ...[
+        const SizedBox(height: 10),
+        const Text(
+          'Add your phone number in Account — our team needs it to reach '
+          'you before submitting the request.',
+          style: TextStyle(color: AppColors.coral, fontSize: 11, height: 1.5),
+        ),
+      ],
     ],
   );
 
