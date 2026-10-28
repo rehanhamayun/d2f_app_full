@@ -9,7 +9,7 @@ for (const [kind, model, field] of [['parcels', 'parcel', 'createdAt'], ['custom
       const limit = Number(req.query.limit ?? 50), offset = Number(req.query.offset ?? 0);
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(offset) || offset < 0) fail(400, 'Invalid page.');
       const q = req.query.q?.toString().trim(), status = req.query.status?.toString();
-      if (status && !['ALL', 'REQUESTED', 'RECEIVED', 'PROCESSING', 'IN_TRANSIT', 'ARRIVED_LOME', 'ARRIVED_DESTINATION', 'READY_FOR_PICKUP', 'RELEASED', 'DELIVERED'].includes(status)) fail(400, 'Choose a valid shipment status.');
+      if (status && !['ALL', 'REQUESTED', 'PICKUP_SCHEDULED', 'PICKED_UP', 'RECEIVED', 'PROCESSING', 'IN_TRANSIT', 'ARRIVED_LOME', 'ARRIVED_DESTINATION', 'READY_FOR_PICKUP', 'RELEASED', 'DELIVERED'].includes(status)) fail(400, 'Choose a valid shipment status.');
       const where = { organizationId: req.organizationId };
       if (kind === 'parcels') {
         if (status && status !== 'ALL') where.status = status;

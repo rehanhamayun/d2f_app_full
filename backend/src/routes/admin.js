@@ -16,6 +16,8 @@ const userSelect = {
 };
 const shipmentStatuses = [
   'REQUESTED',
+  'PICKUP_SCHEDULED',
+  'PICKED_UP',
   'RECEIVED',
   'PROCESSING',
   'IN_TRANSIT',

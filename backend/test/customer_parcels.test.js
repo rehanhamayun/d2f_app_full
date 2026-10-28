@@ -45,6 +45,7 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
       data: {
         email: `other-${suffix}@example.com`,
         fullName: 'Other Customer',
+        phone: '+22890432109',
         passwordHash: 'unused',
         role: 'CUSTOMER',
         organizationId: organization.id,

@@ -81,8 +81,10 @@ app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
 // Error handler
 app.use((err, req, res, next) => {
-  console.error(err);
   const code = err.status || 500;
+  // Client errors (4xx) are expected traffic (bad input, body limits, 409s)
+  // and are already visible to the caller; only server faults are logged.
+  if (code >= 500) console.error(err);
   res.status(code).json({ error: code >= 500 && process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message || 'Internal server error' });
 });
 

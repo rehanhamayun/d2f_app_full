@@ -2,8 +2,13 @@ import { countryInLocation } from './service_area.js';
 
 // Forward-only operational lifecycle. Received → In transit now always passes
 // through Processing; physical departure/arrival is confirmed with a facility.
+// Customer pickup requests can additionally be scheduled and then collected:
+// REQUESTED → PICKUP_SCHEDULED → PICKED_UP → RECEIVED (warehouse intake).
+// Drop-off requests skip those pickup stages entirely.
 export const PARCEL_TRANSITIONS = {
-  REQUESTED: ['RECEIVED'],
+  REQUESTED: ['RECEIVED', 'PICKUP_SCHEDULED', 'PICKED_UP'],
+  PICKUP_SCHEDULED: ['PICKED_UP', 'RECEIVED'],
+  PICKED_UP: ['RECEIVED'],
   RECEIVED: ['PROCESSING'],
   PROCESSING: ['IN_TRANSIT'],
   IN_TRANSIT: ['ARRIVED_LOME', 'ARRIVED_DESTINATION'],
@@ -13,6 +18,29 @@ export const PARCEL_TRANSITIONS = {
   RELEASED: ['DELIVERED'],
   DELIVERED: [],
 };
+
+// Statuses that only make sense when D2F collects the goods from the customer.
+export const PICKUP_ONLY_STATUSES = new Set(['PICKUP_SCHEDULED', 'PICKED_UP']);
+
+/**
+ * Mode-aware allowed transitions. A drop-off shipment can never be scheduled
+ * for pickup or marked picked up; drop-off intake is confirmed directly with
+ * RECEIVED at the warehouse. Legacy records default to drop-off.
+ */
+export function allowedTransitionsFor(parcel) {
+  const base = PARCEL_TRANSITIONS[parcel?.status] || [];
+  if (parcel?.deliveryMode === 'PICKUP') return [...base];
+  return base.filter((status) => !PICKUP_ONLY_STATUSES.has(status));
+}
+
+// Pickup stages happen at the customer's door or in transit to the warehouse,
+// before the goods reach a facility, so they are neither facility-confirmed
+// nor part of the physical-verification acknowledgement below.
+export const EDITABLE_REQUEST_STATUSES = new Set([
+  'REQUESTED',
+  'PICKUP_SCHEDULED',
+  'PICKED_UP',
+]);
 
 export const PHYSICAL_STATUSES = new Set([
   'RECEIVED',
@@ -151,5 +179,21 @@ export function validDate(value, { futureToleranceMs = 5 * 60 * 1000 } = {}) {
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime())) return null;
   if (parsed.getTime() > Date.now() + futureToleranceMs) return null;
+  return parsed;
+}
+
+/**
+ * Customer pickup requests schedule a future collection. Accepts an ISO date
+ * string up to 90 days ahead; the returned date is either null (invalid) or
+ * the parsed value. No tolerance here: pickups must genuinely be in the
+ * future, never in the past.
+ */
+export function validFutureDate(value, { maxDaysAhead = 90, minMinutesAhead = 60 } = {}) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  const now = Date.now();
+  if (parsed.getTime() < now + minMinutesAhead * 60 * 1000) return null;
+  if (parsed.getTime() > now + maxDaysAhead * 24 * 60 * 60 * 1000) return null;
   return parsed;
 }

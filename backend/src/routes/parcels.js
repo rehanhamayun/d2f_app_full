@@ -8,6 +8,7 @@ import {
   DELIVERY_PROOF_TYPES,
   PARCEL_TRANSITIONS,
   PHYSICAL_STATUSES,
+  allowedTransitionsFor,
   destinationMatchesLocation,
   facilityDeniedMessage,
   isFacilityAuthorized,
@@ -15,6 +16,7 @@ import {
   resolveFacility,
   sameCity,
   validDate,
+  validFutureDate,
   validateRoute,
 } from '../parcel_rules.js';
 
@@ -23,9 +25,15 @@ const router = Router();
 // ── Domain rules ────────────────────────────────────────────────────────────
 const PACKAGE_TYPES = ['BOX', 'BARREL', 'TV', 'APPLIANCE', 'FURNITURE', 'PALLET', 'VEHICLE', 'DOCUMENTS', 'OTHER'];
 const METHODS = ['AIR', 'SEA', 'ROAD'];
+const DELIVERY_MODES = ['PICKUP', 'DROP_OFF'];
 const text = (value, max = 1000) => typeof value === 'string' && value.trim().length > 0 && value.trim().length <= max;
 
 const parcelInclude = {
+  items: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
+  images: {
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, fileName: true, contentType: true, sizeBytes: true, createdAt: true },
+  },
   container: { select: { id: true, code: true, status: true } },
   customer: { select: { id: true, displayName: true, email: true, phone: true } },
   events: { orderBy: { createdAt: 'asc' }, include: { actor: { select: { fullName: true } } } },
@@ -323,6 +331,7 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
       location,
       locationId,
       confirmed,
+      pickupScheduledAt,
       releasedToName,
       releasedToIdNumber,
       releasedAt,
@@ -333,8 +342,13 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
       deliveryProofReference,
     } = req.body || {};
 
-    if (!status || !PARCEL_TRANSITIONS[parcel.status]?.includes(status)) {
-      const allowed = PARCEL_TRANSITIONS[parcel.status] || [];
+    if (!status || !allowedTransitionsFor(parcel).includes(status)) {
+      const allowed = allowedTransitionsFor(parcel) || [];
+      if (PARCEL_TRANSITIONS[parcel.status]?.includes(status)) {
+        return res.status(400).json({
+          error: `This shipment was not requested for pickup. Allowed: ${allowed.join(', ') || 'none'}`,
+        });
+      }
       return res.status(400).json({
         error: `Invalid transition ${parcel.status} → ${status || '(none)'}. Allowed: ${allowed.join(', ') || 'none'}`,
       });
@@ -368,6 +382,14 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
     }
     if (deliveryProofReference != null && (typeof deliveryProofReference !== 'string' || deliveryProofReference.length > 300)) {
       return res.status(400).json({ error: 'Proof reference must be at most 300 characters.' });
+    }
+    // Staff confirm or adjust the arrival window when scheduling a pickup.
+    // The customer's requested slot is preserved unless the dispatcher names a new time here.
+    const pickupWhen = status === 'PICKUP_SCHEDULED' && pickupScheduledAt != null
+      ? validFutureDate(pickupScheduledAt)
+      : null;
+    if (status === 'PICKUP_SCHEDULED' && pickupScheduledAt != null && !pickupWhen) {
+      fail(400, 'Enter a valid pickup date and time at least one hour from now (within 90 days).');
     }
 
     const event = await prisma.$transaction(async (tx) => {
@@ -409,6 +431,9 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
       }
 
       const data = { status, locationId: facility?.id ?? current.locationId };
+      if (status === 'PICKUP_SCHEDULED' && pickupWhen) {
+        data.pickupScheduledAt = pickupWhen;
+      }
       if (status === 'RELEASED') {
         if (!text(releasedToName, 120)) fail(400, 'Enter the name of the person receiving the parcel.');
         if (!text(releasedToIdNumber, 80)) fail(400, 'Record the handover ID or reference before releasing the parcel.');
@@ -449,7 +474,10 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
         data: {
           parcelId: parcel.id,
           status,
-          note: note?.trim() || null,
+          note: note?.trim()
+            || (status === 'PICKUP_SCHEDULED' && current.pickupScheduledAt
+              ? `Pickup confirmed for ${current.pickupScheduledAt.toISOString()}.`
+              : null),
           location: facility ? locationLabel(facility) : location?.trim() || null,
           actorId: req.user.id,
         },
@@ -583,11 +611,39 @@ router.post('/:id/transfers', requireRole('STAFF', 'ADMIN'), async (req, res, ne
   }
 });
 
+// GET /parcels/:idOrTracking/images/:imageId/raw — staff/admin photo serving.
+// Metadata lists ride in the parcel detail; the bytes come straight from here.
+router.get('/:idOrTracking/images/:imageId/raw', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
+  try {
+    const organizationId = await resolveOrganizationId(prisma, req.user);
+    const parcel = await prisma.parcel.findFirst({
+      where: {
+        OR: [{ id: req.params.idOrTracking }, { trackingId: req.params.idOrTracking.toUpperCase() }],
+        organizationId,
+      },
+      select: { id: true },
+    });
+    if (!parcel) return res.status(404).json({ error: 'Parcel not found' });
+    const image = await prisma.parcelImage.findFirst({
+      where: { id: req.params.imageId, parcelId: parcel.id },
+    });
+    if (!image) return res.status(404).json({ error: 'Photo not found.' });
+    res.set({
+      'Content-Type': image.contentType,
+      'Content-Length': String(image.sizeBytes),
+      'Cache-Control': 'private, max-age=300',
+    });
+    res.send(Buffer.from(image.bytes));
+  } catch (e) {
+    next(e);
+  }
+});
+
 // PATCH /parcels/:id — correct intake details without rewriting tracking history.
 router.patch('/:id', requireRole('ADMIN'), async (req, res, next) => {
   try {
     const body = req.body;
-    const fields = ['customerId', 'recipientName', 'recipientPhone', 'recipientAddress', 'pickupAddress', 'packageType', 'weightKg', 'origin', 'destination', 'method', 'notes'];
+    const fields = ['customerId', 'recipientName', 'recipientPhone', 'recipientAddress', 'pickupAddress', 'packageType', 'weightKg', 'origin', 'destination', 'method', 'notes', 'deliveryMode', 'pickupScheduledAt'];
     if (!body || Array.isArray(body) || typeof body !== 'object' || Object.keys(body).some(key => ![...fields, 'updatedAt'].includes(key))) {
       return res.status(400).json({ error: 'Only parcel input details can be edited.' });
     }
@@ -612,9 +668,19 @@ router.patch('/:id', requireRole('ADMIN'), async (req, res, next) => {
         }
         data[field] = Number(value);
       } else {
-        const choices = field === 'method' ? METHODS : PACKAGE_TYPES;
+        const choices = field === 'method' ? METHODS : field === 'deliveryMode' ? DELIVERY_MODES : PACKAGE_TYPES;
         if (!choices.includes(value)) return res.status(400).json({ error: `${field} must be one of ${choices.join(', ')}` });
         data[field] = value;
+      }
+    }
+    if (Object.hasOwn(body, 'pickupScheduledAt')) {
+      const value = body.pickupScheduledAt;
+      if (value === null) {
+        data.pickupScheduledAt = null;
+      } else {
+        const when = validFutureDate(typeof value === 'string' ? value : '', { minMinutesAhead: 0 });
+        if (!when) return res.status(400).json({ error: 'Enter a valid pickup date and time between now and 90 days ahead.' });
+        data.pickupScheduledAt = when;
       }
     }
     if (!Object.keys(data).length) return res.status(400).json({ error: 'Provide at least one parcel detail to edit.' });
@@ -623,6 +689,9 @@ router.patch('/:id', requireRole('ADMIN'), async (req, res, next) => {
       await warehouseLock(tx, organizationId);
       const current = await tx.parcel.findFirst({ where: { id: req.params.id, organizationId }, include: { container: true } });
       if (!current) fail(404, 'Parcel not found');
+      if (data.deliveryMode && data.deliveryMode !== current.deliveryMode && data.deliveryMode === 'PICKUP' && !data.pickupAddress && !current.pickupAddress) {
+        fail(400, 'A pickup needs a collection address before it can be scheduled.');
+      }
       if (current.updatedAt.getTime() !== Date.parse(body.updatedAt)) fail(409, 'This parcel has changed. Close the form and refresh the parcel before editing again.');
       if (data.customerId && data.customerId !== current.customerId) {
         const customer = await tx.customer.findFirst({ where: { id: data.customerId, organizationId } });
