@@ -181,7 +181,7 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
       {
         token: staffToken,
         method: 'POST',
-        data: { status: 'RECEIVED', locationId: omaha.id, confirmed: true },
+        data: { status: 'RECEIVED', locationId: omaha.id, confirmed: true, scannedTrackingId: created.body.trackingId, note: 'Warehouse physical inspection', verifiedItemIds: [] },
       },
     );
     assert.equal(staffTransition.status, 201, JSON.stringify(staffTransition.body));

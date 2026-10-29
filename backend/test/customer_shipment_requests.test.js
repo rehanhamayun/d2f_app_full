@@ -65,7 +65,7 @@ test('customer shipment requests carry many items, a pickup schedule and goods p
   const users = [];
   const parcels = [];
   try {
-    const { customer, omaha, customerToken, staffToken, request } = await withFixture(
+    const { customer, omaha, customerToken, staffToken, request, driver, driverToken, } = await withFixture(
       server,
       suffix,
       users,
@@ -149,7 +149,8 @@ test('customer shipment requests carry many items, a pickup schedule and goods p
     assert.equal(parcel.status, 'REQUESTED');
     assert.equal(parcel.deliveryMode, 'PICKUP');
     assert.ok(parcel.pickupAddress, 'collection address saved');
-    assert.ok(parcel.pickupScheduledAt);
+    assert.ok(parcel.pickupPreferredAt);
+    assert.equal(parcel.pickupScheduledAt, null);
     assert.deepEqual(
       parcel.items.map((item) => item.name),
       ['Clothing box', 'Kitchen blender'],
@@ -193,24 +194,24 @@ test('customer shipment requests carry many items, a pickup schedule and goods p
       token: staffToken,
       method: 'POST',
       data: {
-        status: 'PICKUP_SCHEDULED',
+        status: 'PICKUP_SCHEDULED', locationId: omaha.id, pickupDriverId: driver.id, confirmed: true,
         pickupScheduledAt: new Date(Date.now() + 4 * 24 * 3600 * 1000).toISOString(),
         note: 'Driver assigned for the afternoon window.',
       },
     });
     assert.equal(schedule.status, 201, JSON.stringify(schedule.body));
 
-    const picked = await request(`/parcels/${parcel.id}/events`, {
-      token: staffToken,
+    const picked = await request(`/driver/tasks/${parcel.id}/confirm`, {
+      token: driverToken,
       method: 'POST',
-      data: { status: 'PICKED_UP', note: 'Collected from the customer address.' },
+      data: { confirmed: true, scannedTrackingId: parcel.trackingId, proofReference: 'Signed customer collection handover', status: 'PICKED_UP', note: 'Collected from the customer address.' },
     });
     assert.equal(picked.status, 201, JSON.stringify(picked.body));
 
     const received = await request(`/parcels/${parcel.id}/events`, {
       token: staffToken,
       method: 'POST',
-      data: { status: 'RECEIVED', locationId: omaha.id, confirmed: true },
+      data: { status: 'RECEIVED', locationId: omaha.id, confirmed: true, scannedTrackingId: parcel.trackingId, verifiedItemIds: (await prisma.parcelItem.findMany({ where: { parcelId: parcel.id, notCollectedReason: null }, select: { id: true } })).map(i => i.id), note: 'Warehouse inspection confirmed all collected packages' },
     });
     assert.equal(received.status, 201, JSON.stringify(received.body));
 
@@ -221,6 +222,8 @@ test('customer shipment requests carry many items, a pickup schedule and goods p
     assert.equal(detail.body.status, 'RECEIVED');
     assert.equal(detail.body.deliveryMode, 'PICKUP');
     assert.ok(detail.body.pickupScheduledAt);
+    assert.ok(detail.body.pickupConfirmedAt);
+    assert.ok(detail.body.warehouseReceivedAt);
   } finally {
     await cleanup({ users, parcels });
     await new Promise((resolve) => server.close(resolve));
@@ -234,7 +237,7 @@ test('declared packages carry type and dimensions, collection records misses and
   const users = [];
   const parcels = [];
   try {
-    const { omaha, customerToken, staffToken, adminToken, request } = await withFixture(server, suffix, users);
+    const { omaha, customerToken, staffToken, adminToken, request, driver, driverToken, } = await withFixture(server, suffix, users);
 
     const input = () => ({
       ...pickupInput(),
@@ -294,7 +297,7 @@ test('declared packages carry type and dimensions, collection records misses and
     const schedule = await request(`/parcels/${parcel.id}/events`, {
       token: staffToken,
       method: 'POST',
-      data: { status: 'PICKUP_SCHEDULED', pickupScheduledAt: parcel.pickupScheduledAt },
+      data: { status: 'PICKUP_SCHEDULED', locationId: omaha.id, pickupDriverId: driver.id, confirmed: true, pickupScheduledAt: parcel.pickupPreferredAt },
     });
     assert.equal(schedule.status, 201, JSON.stringify(schedule.body));
 
@@ -303,55 +306,45 @@ test('declared packages carry type and dimensions, collection records misses and
       select: { pickupScheduledAt: true, updatedAt: true },
     });
     const newSlot = new Date(slotBefore.pickupScheduledAt.getTime() + 12 * 3600 * 1000);
-    const rescheduled = await request(`/parcels/${parcel.id}`, {
-      token: adminToken,
-      method: 'PATCH',
-      data: {
-        pickupScheduledAt: newSlot.toISOString(),
-        rescheduleReason: 'Truck could not enter the street before noon.',
-        updatedAt: slotBefore.updatedAt.toISOString(),
-      },
+    const rescheduled = await request(`/parcels/${parcel.id}/pickup-schedule`, {
+      token: adminToken, method: 'POST',
+      data: { pickupScheduledAt: newSlot.toISOString(), pickupDriverId: driver.id, locationId: omaha.id, confirmed: true, note: 'Truck could not enter the street before noon.' },
     });
-    assert.equal(rescheduled.status, 200, JSON.stringify(rescheduled.body));
-    const sameSlot = await request(`/parcels/${parcel.id}`, {
-      token: adminToken, method: 'PATCH',
-      data: { pickupScheduledAt: newSlot.toISOString(), updatedAt: rescheduled.body.updatedAt },
+    assert.equal(rescheduled.status, 201, JSON.stringify(rescheduled.body));
+    const sameSlot = await request(`/parcels/${parcel.id}/pickup-schedule`, {
+      token: adminToken, method: 'POST',
+      data: { pickupScheduledAt: newSlot.toISOString(), pickupDriverId: driver.id, locationId: omaha.id, confirmed: true },
     });
-    assert.equal(sameSlot.status, 200);
+    assert.equal(sameSlot.status, 409);
     const detailAfterMove = await request(`/parcels/${parcel.id}`, { token: staffToken });
-    const rescheduleEvent = detailAfterMove.body.events.find((event) =>
-      /Pickup rescheduled/.test(event.note || ''),
-    );
-    assert.ok(rescheduleEvent, 'reschedule recorded in the timeline');
-    assert.equal(detailAfterMove.body.events.filter((event) => /Pickup rescheduled/.test(event.note || '')).length, 1);
-    assert.match(rescheduleEvent.note, /Truck could not enter the street/);
+    assert.equal(detailAfterMove.body.events.filter(e => /Pickup rescheduled/.test(e.note || '')).length, 1);
 
     // Invalid outcomes are refused before anything is written.
-    const strangerItem = await request(`/parcels/${parcel.id}/events`, {
-      token: staffToken,
+    const strangerItem = await request(`/driver/tasks/${parcel.id}/confirm`, {
+      token: driverToken,
       method: 'POST',
-      data: { status: 'PICKED_UP', missedItems: [{ itemId: 'no-such-package', reason: 'xyz' }] },
+      data: { confirmed: true, scannedTrackingId: parcel.trackingId, proofReference: 'Signed customer collection handover', status: 'PICKED_UP', missedItems: [{ itemId: 'no-such-package', reason: 'xyz' }] },
     });
     assert.equal(strangerItem.status, 400);
-    const noReason = await request(`/parcels/${parcel.id}/events`, {
-      token: staffToken,
+    const noReason = await request(`/driver/tasks/${parcel.id}/confirm`, {
+      token: driverToken,
       method: 'POST',
-      data: { status: 'PICKED_UP', missedItems: [{ itemId: itemIds[0], reason: '   ' }] },
+      data: { confirmed: true, scannedTrackingId: parcel.trackingId, proofReference: 'Signed customer collection handover', status: 'PICKED_UP', missedItems: [{ itemId: itemIds[0], reason: '   ' }] },
     });
     assert.equal(noReason.status, 400);
 
     // Collection records the discrepancy: five declared, three seen on hand.
-    const noneCollected = await request(`/parcels/${parcel.id}/events`, {
-      token: staffToken, method: 'POST',
-      data: { status: 'PICKED_UP', missedItems: itemIds.map((itemId) => ({ itemId, reason: 'Customer unavailable' })) },
+    const noneCollected = await request(`/driver/tasks/${parcel.id}/confirm`, {
+      token: driverToken, method: 'POST',
+      data: { confirmed: true, scannedTrackingId: parcel.trackingId, proofReference: 'Signed customer collection handover', status: 'PICKED_UP', missedItems: itemIds.map((itemId) => ({ itemId, reason: 'Customer unavailable' })) },
     });
     assert.equal(noneCollected.status, 400);
     assert.equal(await prisma.parcelItem.count({ where: { parcelId: parcel.id, collectedAt: { not: null } } }), 0);
 
-    const missed = await request(`/parcels/${parcel.id}/events`, {
-      token: staffToken,
+    const missed = await request(`/driver/tasks/${parcel.id}/confirm`, {
+      token: driverToken,
       method: 'POST',
-      data: {
+      data: { confirmed: true, scannedTrackingId: parcel.trackingId, proofReference: 'Signed customer collection handover',
         status: 'PICKED_UP',
         note: 'Collected at the customer address.',
         missedItems: [
@@ -384,7 +377,7 @@ test('declared packages carry type and dimensions, collection records misses and
     const received = await request(`/parcels/${parcel.id}/events`, {
       token: staffToken,
       method: 'POST',
-      data: { status: 'RECEIVED', locationId: omaha.id, confirmed: true, note: 'Intake; barrel still missing.' },
+      data: { status: 'RECEIVED', locationId: omaha.id, confirmed: true, scannedTrackingId: parcel.trackingId, verifiedItemIds: (await prisma.parcelItem.findMany({ where: { parcelId: parcel.id, notCollectedReason: null }, select: { id: true } })).map(i => i.id), note: 'Warehouse inspection confirmed all collected packages' },
     });
     assert.equal(received.status, 201, JSON.stringify(received.body));
     const detail = await request(`/parcels/${parcel.id}`, { token: staffToken });
@@ -398,12 +391,9 @@ test('declared packages carry type and dimensions, collection records misses and
     );
 
     const clearedSlot = await request(`/parcels/${parcel.id}`, {
-      token: adminToken, method: 'PATCH',
-      data: { pickupScheduledAt: null, updatedAt: detail.body.updatedAt },
+      token: adminToken, method: 'PATCH', data: { pickupScheduledAt: null, updatedAt: detail.body.updatedAt },
     });
-    assert.equal(clearedSlot.status, 200);
-    assert.equal(clearedSlot.body.pickupScheduledAt, null);
-    assert.ok(clearedSlot.body.events.some((event) => /Pickup slot cleared/.test(event.note || '')));
+    assert.equal(clearedSlot.status, 409, 'Confirmed appointment cannot be cleared after collection.');
 
     // The record stays frozen as evidence later; codes do not move either.
     const frozen = await request(`/customer/parcels/${parcel.id}/images?name=late.jpg`, {
@@ -426,7 +416,7 @@ test('drop-off requests cannot enter pickup stages and receive a straight intake
   const users = [];
   const parcels = [];
   try {
-    const { omaha, customerToken, staffToken, request } = await withFixture(server, suffix, users);
+    const { omaha, customerToken, staffToken, request, driver, driverToken, } = await withFixture(server, suffix, users);
 
     const created = await request('/customer/parcels', {
       token: customerToken,
@@ -463,7 +453,7 @@ test('drop-off requests cannot enter pickup stages and receive a straight intake
     const received = await request(`/parcels/${parcel.id}/events`, {
       token: staffToken,
       method: 'POST',
-      data: { status: 'RECEIVED', locationId: omaha.id, confirmed: true },
+      data: { status: 'RECEIVED', locationId: omaha.id, confirmed: true, scannedTrackingId: parcel.trackingId, verifiedItemIds: (await prisma.parcelItem.findMany({ where: { parcelId: parcel.id, notCollectedReason: null }, select: { id: true } })).map(i => i.id), note: 'Warehouse inspection confirmed all collected packages' },
     });
     assert.equal(received.status, 201, JSON.stringify(received.body));
 
@@ -488,7 +478,7 @@ test('goods photos upload, serve and freeze with the order lifecycle', async () 
   const users = [];
   const parcels = [];
   try {
-    const { omaha, customerToken, otherToken, staffToken, request } = await withFixture(
+    const { omaha, customerToken, otherToken, staffToken, request, driver, driverToken, } = await withFixture(
       server,
       suffix,
       users,
@@ -603,11 +593,14 @@ test('goods photos upload, serve and freeze with the order lifecycle', async () 
     });
     assert.equal(again.status, 404);
 
+    await request(`/parcels/${parcel.id}/pickup-schedule`, { token: staffToken, method: 'POST', data: { pickupScheduledAt: parcel.pickupPreferredAt, pickupDriverId: driver.id, locationId: omaha.id, confirmed: true } });
+    const collection = await request(`/driver/tasks/${parcel.id}/confirm`, { token: driverToken, method: 'POST', data: { confirmed: true, scannedTrackingId: parcel.trackingId, proofReference: 'Customer handover verified' } });
+    assert.equal(collection.status, 201, JSON.stringify(collection.body));
     // The frozen gallery stays visible to staff after intake.
     const received = await request(`/parcels/${parcel.id}/events`, {
       token: staffToken,
       method: 'POST',
-      data: { status: 'RECEIVED', locationId: omaha.id, confirmed: true },
+      data: { status: 'RECEIVED', locationId: omaha.id, confirmed: true, scannedTrackingId: parcel.trackingId, verifiedItemIds: (await prisma.parcelItem.findMany({ where: { parcelId: parcel.id, notCollectedReason: null }, select: { id: true } })).map(i => i.id), note: 'Warehouse inspection confirmed all collected packages' },
     });
     assert.equal(received.status, 201, JSON.stringify(received.body));
     const frozenUpload = await request(`/customer/parcels/${parcel.id}/images`, {
@@ -688,7 +681,9 @@ async function withFixture(server, suffix, users) {
       locationId: omaha.id,
     },
   });
-  users.push(customer.id, otherCustomer.id, staff.id, admin.id);
+  const driver = await prisma.user.create({ data: { email: `driver-${suffix}@example.com`, fullName: 'Assigned Pickup Driver', passwordHash: 'unused', role: 'DRIVER', organizationId: organization.id } });
+  users.push(customer.id, otherCustomer.id, staff.id, admin.id, driver.id);
+  const driverToken = tokenForUser(driver);
   const customerToken = tokenForUser(customer);
   const otherToken = tokenForUser(otherCustomer);
   const staffToken = tokenForUser(staff);
@@ -714,5 +709,5 @@ async function withFixture(server, suffix, users) {
     };
   }
 
-  return { organization, omaha, customer, otherCustomer, staff, admin, customerToken, otherToken, staffToken, adminToken, request };
+  return { driver, driverToken, organization, omaha, customer, otherCustomer, staff, admin, customerToken, otherToken, staffToken, adminToken, request };
 }

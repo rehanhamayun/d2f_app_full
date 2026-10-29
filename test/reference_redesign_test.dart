@@ -388,7 +388,7 @@ void main() {
         expect(tester.takeException(), isNull);
         await tester.tap(find.text('Tracking'));
         await tester.pumpAndSettle();
-        expect(find.text('Received'), findsOneWidget);
+        expect(find.text('Received at Warehouse'), findsOneWidget);
         expect(find.text('Processing'), findsNothing);
         await tester.scrollUntilVisible(
           find.text('Download parcel details'),
@@ -511,7 +511,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Received'), findsOneWidget);
+      expect(find.text('Received at Warehouse'), findsOneWidget);
       expect(find.text('Update Status'), findsNothing);
       expect(find.text('Shipping label'), findsNothing);
       expect(find.text('Test Sender'), findsNothing);

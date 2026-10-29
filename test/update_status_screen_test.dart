@@ -1,3 +1,4 @@
+import 'package:d2f_application/screens/shipment_custody_screen.dart';
 import 'package:d2f_application/core/theme.dart';
 import 'package:d2f_application/models/models.dart';
 import 'package:d2f_application/models/warehouse.dart';
@@ -23,6 +24,7 @@ Parcel parcelWithStatus(
   'destination': 'Lomé, Togo',
   'method': 'ROAD',
   'status': status,
+  'warehouseReceivedAt': '2026-10-21T10:00:00Z',
   'items': items,
   if (deliveryMode != null) 'deliveryMode': deliveryMode,
   'createdAt': '2026-10-18T09:00:00Z',
@@ -59,9 +61,9 @@ void main() {
   testWidgets('physical updates require a facility and confirmation', (
     tester,
   ) async {
-    await pumpScreen(tester, parcelWithStatus('REQUESTED'));
+    await pumpScreen(tester, parcelWithStatus('PROCESSING'));
 
-    await tester.tap(find.text('Received'));
+    await tester.tap(find.text('In Transit'));
     await tester.pumpAndSettle();
 
     expect(find.text('Facility'), findsOneWidget);
@@ -70,24 +72,14 @@ void main() {
     expect(find.textContaining('Only the facility'), findsOneWidget);
   });
 
-  testWidgets('released handover captures recipient, reference and time', (
-    tester,
-  ) async {
-    await pumpScreen(tester, parcelWithStatus('READY_FOR_PICKUP'));
-
-    await tester.tap(find.text('Released'));
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.text('Handover date and time'),
-      200,
-      scrollable: find.byType(Scrollable).first,
-    );
-
-    expect(find.text('Handover details'), findsOneWidget);
-    expect(find.text('Received by'), findsOneWidget);
-    expect(find.text('Handover ID / reference'), findsOneWidget);
-    expect(find.text('Handover date and time'), findsOneWidget);
-  });
+  testWidgets(
+    'recipient collection proceeds directly to delivery proof without a duplicate release step',
+    (tester) async {
+      await pumpScreen(tester, parcelWithStatus('READY_FOR_PICKUP'));
+      expect(find.text('Delivered'), findsOneWidget);
+      expect(find.text('Released'), findsNothing);
+    },
+  );
 
   testWidgets('delivery requires proof type, reference and recipient', (
     tester,
@@ -116,68 +108,58 @@ void main() {
     expect(note.maxLength, 1000);
   });
 
-  testWidgets(
-    'drop-off request offers only warehouse intake, pickup offers both',
-    (tester) async {
-      // Default (legacy) records are drop-offs: a REQUESTED shipment can only be
-      // received at the warehouse.
-      await pumpScreen(tester, parcelWithStatus('REQUESTED'));
-      expect(find.text('Received'), findsOneWidget);
-      expect(find.text('Pickup Scheduled'), findsNothing);
-      expect(find.text('Picked Up'), findsNothing);
-
-      // A customer-requested pickup adds the scheduling and collection steps.
-      final pickup = parcelWithStatus('REQUESTED', deliveryMode: 'PICKUP');
-      await pumpScreen(tester, pickup);
-      expect(find.text('Pickup Scheduled'), findsOneWidget);
-      expect(find.text('Picked Up'), findsOneWidget);
-      expect(find.text('Received'), findsOneWidget);
-    },
-  );
-  testWidgets(
-    'pickup checklist distinguishes missed packages and opens a reason field',
-    (tester) async {
+  testWidgets('staff cannot bypass custody in the generic status editor', (
+    tester,
+  ) async {
+    for (final mode in ['PICKUP', 'DROP_OFF']) {
       await pumpScreen(
         tester,
-        parcelWithStatus(
-          'PICKUP_SCHEDULED',
-          deliveryMode: 'PICKUP',
-          items: [
-            {
-              'id': 'p1',
-              'name': 'Books',
-              'type': 'BOX',
-              'quantity': 4,
-              'position': 0,
-            },
-            {
-              'id': 'p2',
-              'name': 'Personal goods',
-              'type': 'SUITCASE',
-              'quantity': 1,
-              'position': 1,
-            },
-          ],
+        parcelWithStatus('REQUESTED', deliveryMode: mode),
+      );
+      expect(find.text('Received at Warehouse'), findsNothing);
+      expect(find.text('Pickup Confirmed'), findsNothing);
+      expect(
+        find.textContaining('pickup and warehouse actions'),
+        findsOneWidget,
+      );
+    }
+  });
+
+  testWidgets(
+    'pickup requested and scheduled custody cards explain the next actor',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.build(),
+          home: Scaffold(
+            body: ShipmentCustodyCard(
+              parcel: parcelWithStatus('REQUESTED', deliveryMode: 'PICKUP'),
+              onSaved: () async {},
+            ),
+          ),
         ),
       );
-      await tester.tap(find.text('Picked Up'));
-      await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(
-        find.byKey(const ValueKey('collect-1')),
-        180,
-        scrollable: find.byType(Scrollable).first,
-      );
-      expect(find.text('Personal goods (Suitcase 2 of 2)'), findsOneWidget);
-      await tester.tap(
-        find.descendant(
-          of: find.byKey(const ValueKey('collect-1')),
-          matching: find.byType(CheckboxListTile),
+      expect(find.text('Schedule pickup & assign driver'), findsOneWidget);
+      expect(find.text('Scan & verify warehouse receipt'), findsNothing);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.build(),
+          home: Scaffold(
+            body: ShipmentCustodyCard(
+              parcel: parcelWithStatus(
+                'PICKUP_SCHEDULED',
+                deliveryMode: 'PICKUP',
+              ),
+              onSaved: () async {},
+            ),
+          ),
         ),
       );
-      await tester.pumpAndSettle();
-      expect(find.text('Not collected'), findsOneWidget);
-      expect(find.byKey(const ValueKey('missed-reason-1')), findsOneWidget);
-      expect(tester.takeException(), isNull);
+      expect(
+        find.textContaining('assigned driver must confirm'),
+        findsOneWidget,
+      );
+      expect(find.text('Scan & verify warehouse receipt'), findsNothing);
     },
   );
 }

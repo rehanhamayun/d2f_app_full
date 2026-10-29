@@ -86,20 +86,22 @@ const List<String> kParcelStatuses = [
   'ARRIVED_LOME',
   'ARRIVED_DESTINATION',
   'READY_FOR_PICKUP',
+  'OUT_FOR_DELIVERY',
   'RELEASED',
   'DELIVERED',
 ];
 
 const Map<String, List<String>> kAllowedTransitions = {
-  'REQUESTED': ['RECEIVED', 'PICKUP_SCHEDULED', 'PICKED_UP'],
-  'PICKUP_SCHEDULED': ['PICKED_UP', 'RECEIVED'],
+  'REQUESTED': ['RECEIVED', 'PICKUP_SCHEDULED'],
+  'PICKUP_SCHEDULED': ['PICKED_UP'],
   'PICKED_UP': ['RECEIVED'],
   'RECEIVED': ['PROCESSING'],
   'PROCESSING': ['IN_TRANSIT'],
   'IN_TRANSIT': ['ARRIVED_LOME', 'ARRIVED_DESTINATION'],
-  'ARRIVED_LOME': ['READY_FOR_PICKUP'],
-  'ARRIVED_DESTINATION': ['READY_FOR_PICKUP'],
-  'READY_FOR_PICKUP': ['RELEASED'],
+  'ARRIVED_LOME': ['READY_FOR_PICKUP', 'OUT_FOR_DELIVERY'],
+  'ARRIVED_DESTINATION': ['READY_FOR_PICKUP', 'OUT_FOR_DELIVERY'],
+  'READY_FOR_PICKUP': ['DELIVERED', 'OUT_FOR_DELIVERY', 'RELEASED'],
+  'OUT_FOR_DELIVERY': ['DELIVERED'],
   'RELEASED': ['DELIVERED'],
   'DELIVERED': [],
 };
@@ -111,9 +113,36 @@ const Set<String> kPickupOnlyStatuses = {'PICKUP_SCHEDULED', 'PICKED_UP'};
 /// Mode-aware view of the transition map, mirroring the server rule.
 List<String> allowedStatusesFor(Parcel parcel) {
   if (parcel.serviceType == 'AIR_TRAVELLER') return const [];
+  if (parcel.deliveryMode == DeliveryMode.PICKUP &&
+      parcel.status == 'REQUESTED')
+    return const ['PICKUP_SCHEDULED'];
   final base = kAllowedTransitions[parcel.status] ?? const [];
-  if (parcel.deliveryMode == DeliveryMode.PICKUP) return List.of(base);
-  return base.where((s) => !kPickupOnlyStatuses.contains(s)).toList();
+  return base
+      .where(
+        (s) =>
+            parcel.deliveryMode == DeliveryMode.PICKUP ||
+            !kPickupOnlyStatuses.contains(s),
+      )
+      .toList();
+}
+
+/// Intake, appointments and driver handovers use their dedicated custody screens.
+List<String> staffStatusOptionsFor(Parcel parcel) {
+  if (parcel.status == 'OUT_FOR_DELIVERY') return const [];
+  return allowedStatusesFor(parcel)
+      .where(
+        (s) =>
+            ![
+              'PICKUP_SCHEDULED',
+              'PICKED_UP',
+              'RECEIVED',
+              'OUT_FOR_DELIVERY',
+              'RELEASED',
+            ].contains(s) &&
+            (parcel.warehouseReceived ||
+                !['PROCESSING', 'IN_TRANSIT'].contains(s)),
+      )
+      .toList();
 }
 
 /// Physical updates that require staff to confirm they handled the parcel at
@@ -124,6 +153,7 @@ const Set<String> kConfirmationStatuses = {
   'ARRIVED_LOME',
   'ARRIVED_DESTINATION',
   'READY_FOR_PICKUP',
+  'OUT_FOR_DELIVERY',
   'RELEASED',
   'DELIVERED',
 };
@@ -165,14 +195,15 @@ String statusLabel(String status) => switch (status) {
   'REJECTED' => 'Contents Rejected',
   'REQUESTED' => 'Request Submitted',
   'PICKUP_SCHEDULED' => 'Pickup Scheduled',
-  'PICKED_UP' => 'Picked Up',
-  'RECEIVED' => 'Received',
+  'PICKED_UP' => 'Pickup Confirmed',
+  'RECEIVED' => 'Received at Warehouse',
   'PROCESSING' => 'Processing',
   'IN_TRANSIT' => 'In Transit',
   'ARRIVED_LOME' => 'Arrived in Lomé',
   'ARRIVED_DESTINATION' => 'Arrived at Destination',
   'RELEASED' => 'Released',
   'READY_FOR_PICKUP' => 'Ready for Pickup',
+  'OUT_FOR_DELIVERY' => 'Out for Delivery',
   'DELIVERED' => 'Delivered',
   _ => status,
 };
@@ -181,14 +212,15 @@ String statusLabel(String status) => switch (status) {
 String statusShortLabel(String status) => switch (status) {
   'REQUESTED' => 'Requested',
   'PICKUP_SCHEDULED' => 'Scheduled',
-  'PICKED_UP' => 'Picked Up',
-  'RECEIVED' => 'Received',
+  'PICKED_UP' => 'Pickup Confirmed',
+  'RECEIVED' => 'Received at Warehouse',
   'PROCESSING' => 'Processing',
   'IN_TRANSIT' => 'In Transit',
   'ARRIVED_LOME' => 'Arrived',
   'ARRIVED_DESTINATION' => 'Arrived',
   'RELEASED' => 'Released',
   'READY_FOR_PICKUP' => 'Ready',
+  'OUT_FOR_DELIVERY' => 'Out for Delivery',
   'DELIVERED' => 'Delivered',
   _ => status,
 };
@@ -211,6 +243,7 @@ String statusSubLabel(String status) => switch (status) {
 
 /// Friendly customer-safe headline for the detail header.
 String statusHeadline(String status) => switch (status) {
+  'OUT_FOR_DELIVERY' => 'Your parcel is with the assigned delivery driver. Delivery is confirmed after the actual recipient handover.',
   'REQUESTED' => 'Your shipment request is awaiting D2F confirmation.',
   'PICKUP_SCHEDULED' =>
     'A D2F team member will collect your items at the agreed time.',
@@ -480,6 +513,10 @@ class Parcel {
   final String status;
   final DeliveryMode deliveryMode;
   final DateTime? pickupScheduledAt;
+  final DateTime? pickupPreferredAt, pickupConfirmedAt, warehouseReceivedAt;
+  final String? pickupDriverId, pickupTargetLocationId, warehouseReceivedById;
+  final String? locationId;
+  bool get warehouseReceived => warehouseReceivedAt != null;
   final DateTime? restrictionsAcknowledgedAt;
   final List<ParcelItem> items;
   final List<ParcelImageMeta> images;
@@ -535,6 +572,13 @@ class Parcel {
     required this.status,
     this.deliveryMode = DeliveryMode.DROP_OFF,
     this.pickupScheduledAt,
+    this.pickupPreferredAt,
+    this.pickupConfirmedAt,
+    this.warehouseReceivedAt,
+    this.locationId,
+    this.pickupDriverId,
+    this.pickupTargetLocationId,
+    this.warehouseReceivedById,
     this.restrictionsAcknowledgedAt,
     this.items = const [],
     this.images = const [],
@@ -585,6 +629,19 @@ class Parcel {
     pickupScheduledAt: j['pickupScheduledAt'] == null
         ? null
         : DateTime.tryParse(j['pickupScheduledAt'] as String),
+    pickupPreferredAt: DateTime.tryParse(
+      j['pickupPreferredAt'] as String? ?? '',
+    ),
+    pickupConfirmedAt: DateTime.tryParse(
+      j['pickupConfirmedAt'] as String? ?? '',
+    ),
+    warehouseReceivedAt: DateTime.tryParse(
+      j['warehouseReceivedAt'] as String? ?? '',
+    ),
+    locationId: j['locationId'] as String?,
+    pickupDriverId: j['pickupDriverId'] as String?,
+    pickupTargetLocationId: j['pickupTargetLocationId'] as String?,
+    warehouseReceivedById: j['warehouseReceivedById'] as String?,
     restrictionsAcknowledgedAt: j['restrictionsAcknowledgedAt'] == null
         ? null
         : DateTime.tryParse(j['restrictionsAcknowledgedAt'] as String),

@@ -332,7 +332,7 @@ void main() {
     expect(find.text('Clothing box'), findsOneWidget);
     expect(find.text('×2'), findsOneWidget);
     expect(find.text('Warehouse drop-off'), findsOneWidget);
-    expect(find.text('Request Submitted'), findsOneWidget);
+    expect(find.text('Awaiting Drop-off'), findsOneWidget);
     await capture('07-customer-parcel-created');
 
     final viewShipments = find.text('View my shipments');

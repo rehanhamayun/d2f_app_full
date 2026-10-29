@@ -146,25 +146,13 @@ it('Staff can review the shipment without access to Edit shipment', async () => 
   expect(writes).toHaveLength(0);
 });
 
-it('collection checklist records missing package reasons and preserves package details', async () => {
-  const { writes } = setup({ parcelData: {
-    status: 'PICKUP_SCHEDULED', deliveryMode: 'PICKUP',
-    items: [
-      { id: 'box-1', name: 'Books', type: 'BOX', quantity: 4, lengthCm: 50, widthCm: 40, heightCm: 30 },
-      { id: 'barrel-1', name: 'Household goods', type: 'BARREL', quantity: 1 },
-    ],
-  } });
-  const user = userEvent.setup();
-  render(<App />);
+it('staff cannot confirm a driver collection or bypass a scheduled pickup with warehouse receipt', async () => {
+  const { writes } = setup({ parcelData: { status: 'PICKUP_SCHEDULED', deliveryMode: 'PICKUP', items: [{ id: 'box-1', name: 'Books', type: 'BOX', quantity: 4, lengthCm: 50, widthCm: 40, heightCm: 30 }] } });
+  const user = userEvent.setup(); render(<App />);
   const details = await openShipment(user);
   expect(within(details).getByText('50 × 40 × 30 cm')).toBeInTheDocument();
-  expect(within(details).getByText('4 contents units')).toBeInTheDocument();
-  await user.click(within(details).getByLabelText('Not collected: Household goods (2 of 2)'));
-  await user.click(within(details).getByRole('button', { name: 'Save status update' }));
-  expect(within(details).getByRole('alert')).toHaveTextContent('Record why each missing package');
+  expect(within(details).getByText(/assigned driver confirms physical collection/)).toBeInTheDocument();
+  expect(within(details).queryByRole('button', { name: 'Save status update' })).toBeNull();
+  expect(within(details).queryByRole('button', { name: 'Scan & verify warehouse receipt' })).toBeNull();
   expect(writes).toHaveLength(0);
-  await user.type(within(details).getByLabelText('Reason for Household goods'), 'Barrel was not ready');
-  await user.click(within(details).getByRole('button', { name: 'Save status update' }));
-  await waitFor(() => expect(writes).toHaveLength(1));
-  expect(writes[0].body).toMatchObject({ status: 'PICKED_UP', missedItems: [{ itemId: 'barrel-1', reason: 'Barrel was not ready' }] });
 });

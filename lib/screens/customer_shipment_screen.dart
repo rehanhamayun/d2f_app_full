@@ -2033,7 +2033,18 @@ class _CustomerParcelTile extends StatelessWidget {
                     style: AppTheme.caption.copyWith(fontSize: 10),
                   ),
                   const SizedBox(height: 7),
-                  StatusChip(status: parcel.status, short: true),
+                  parcel.status == 'REQUESTED'
+                      ? Text(
+                          parcel.deliveryMode == DeliveryMode.PICKUP
+                              ? 'Pickup Requested'
+                              : 'Awaiting Drop-off',
+                          style: const TextStyle(
+                            color: AppColors.blue,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 11,
+                          ),
+                        )
+                      : StatusChip(status: parcel.status, short: true),
                 ],
               ),
             ),
@@ -2168,7 +2179,18 @@ class CustomerParcelDetailsScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 8),
-                StatusChip(status: parcel.status),
+                if (parcel.status == 'REQUESTED')
+                  Text(
+                    parcel.deliveryMode == DeliveryMode.PICKUP
+                        ? 'Pickup Requested'
+                        : 'Awaiting Drop-off',
+                    style: const TextStyle(
+                      color: AppColors.blue,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  )
+                else
+                  StatusChip(status: parcel.status),
                 const SizedBox(height: 10),
                 Text(
                   statusHeadline(parcel.status),
@@ -2364,6 +2386,27 @@ class CustomerParcelDetailsScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 3),
+                if (parcel.pickupConfirmedAt != null)
+                  Text(
+                    'Driver pickup confirmed: ${DateFormat('MMM d · h:mm a').format(parcel.pickupConfirmedAt!)}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                    ),
+                  ),
+                if (parcel.warehouseReceivedAt != null)
+                  Text(
+                    'Warehouse receipt verified: ${DateFormat('MMM d · h:mm a').format(parcel.warehouseReceivedAt!)}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                    ),
+                  ),
+                if (parcel.status == 'PICKED_UP')
+                  const Text(
+                    'With the driver · awaiting warehouse scan and verification.',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 11),
+                  ),
                 if (isPickup) ...[
                   if (parcel.pickupAddress?.isNotEmpty ?? false)
                     Text(
@@ -2375,11 +2418,29 @@ class CustomerParcelDetailsScreen extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                  if (parcel.pickupPreferredAt != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        'Your preferred time: ${DateFormat('EEE, MMM d · h:mm a').format(parcel.pickupPreferredAt!)}',
+                        style: AppTheme.caption.copyWith(fontSize: 11),
+                      ),
+                    ),
+                  if (parcel.pickupScheduledAt == null &&
+                      parcel.status == 'REQUESTED')
+                    const Text(
+                      'Pickup requested · awaiting D2F appointment confirmation.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        height: 1.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   if (parcel.pickupScheduledAt != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
-                        'Preferred time: ${DateFormat('EEE, MMM d · h:mm a').format(parcel.pickupScheduledAt!)}',
+                        'D2F confirmed appointment: ${DateFormat('EEE, MMM d · h:mm a').format(parcel.pickupScheduledAt!)}',
                         style: const TextStyle(
                           color: AppColors.navy,
                           fontSize: 11.5,

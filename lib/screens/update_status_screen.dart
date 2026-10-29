@@ -56,7 +56,7 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
 
   // Mode-aware forward statuses: drop-off shipments cannot enter the pickup
   // stages; pickup requests can be scheduled and collected before intake.
-  late final List<String> _allowed = allowedStatusesFor(widget.parcel);
+  late final List<String> _allowed = staffStatusOptionsFor(widget.parcel);
 
   @override
   void initState() {
@@ -357,13 +357,15 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
                 color: AppColors.greenSoft,
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.verified_rounded, color: AppColors.green),
+                  const Icon(Icons.verified_rounded, color: AppColors.green),
                   SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'This parcel has completed its lifecycle. No further status changes are available.',
+                      widget.parcel.status == 'DELIVERED'
+                          ? 'Delivery is complete.'
+                          : 'Use the pickup and warehouse actions on the shipment overview. The assigned driver confirms physical collection separately.',
                       style: TextStyle(
                         color: AppColors.green,
                         fontWeight: FontWeight.w700,

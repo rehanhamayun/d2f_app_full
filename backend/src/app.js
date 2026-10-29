@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import './config.js';
 import { prisma } from './db.js';
+import driverRouter from './routes/driver.js';
 import connectRouter from './routes/connect.js';
 import authRouter from './routes/auth.js';
 import parcelsRouter from './routes/parcels.js';
@@ -76,6 +77,7 @@ app.get('/tracking/:trackingId', authenticate, authRateLimit(60), async (req, re
     res.json(parcel);
   } catch (error) { next(error); }
 });
+app.use('/driver', driverRouter);
 app.use('/connect', connectRouter);
 app.use('/parcels', parcelsRouter);
 app.use('/customer/parcels', customerParcelsRouter);

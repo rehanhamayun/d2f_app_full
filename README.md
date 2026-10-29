@@ -2,7 +2,7 @@
 
 Android staff shipping app for D2F Shipping LLC, with a shared Express/Prisma/PostgreSQL backend. The repository now includes the Milestone 1 staff parcel foundation and the local Milestone 2 warehouse/admin implementation. Hosted deployments still require the new backend migration and updated clients.
 
-Current Android release: **1.1.0+2014**. The signed ARM64 APK is in `output/apk/`. See [source and build guide](SOURCE_CODE.md) for the repository contents, local setup, and private configuration needed to reproduce a build.
+Current Android release: **1.1.1+2015**. The signed ARM64 APK is in `output/apk/`. See [source and build guide](SOURCE_CODE.md) for the repository contents, local setup, and private configuration needed to reproduce a build.
 
 The app defaults to the live HTTPS backend at https://d2f-api-production.up.railway.app, hosted in **production_house**, Managing Consultant’s Railway Pro workspace. It works independently of this development computer. Private account details are in `.local/ACCESS_DETAILS.md` and must not be committed or included in an APK.
 

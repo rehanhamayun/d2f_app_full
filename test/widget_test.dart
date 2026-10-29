@@ -61,15 +61,19 @@ void main() {
     });
 
     test('status transitions map matches backend contract', () {
-      expect(
-        kAllowedTransitions['REQUESTED'],
-        ['RECEIVED', 'PICKUP_SCHEDULED', 'PICKED_UP'],
-      );
-      expect(kAllowedTransitions['PICKUP_SCHEDULED'], ['PICKED_UP', 'RECEIVED']);
+      expect(kAllowedTransitions['REQUESTED'], [
+        'RECEIVED',
+        'PICKUP_SCHEDULED',
+      ]);
+      expect(kAllowedTransitions['PICKUP_SCHEDULED'], ['PICKED_UP']);
       expect(kAllowedTransitions['PICKED_UP'], ['RECEIVED']);
       expect(kAllowedTransitions['RECEIVED'], ['PROCESSING']);
       expect(kAllowedTransitions['PROCESSING'], ['IN_TRANSIT']);
-      expect(kAllowedTransitions['READY_FOR_PICKUP'], ['RELEASED']);
+      expect(kAllowedTransitions['READY_FOR_PICKUP'], [
+        'DELIVERED',
+        'OUT_FOR_DELIVERY',
+        'RELEASED',
+      ]);
       expect(kAllowedTransitions['DELIVERED'], isEmpty);
     });
 
@@ -133,11 +137,7 @@ void main() {
       expect(pickup.deliveryMode, DeliveryMode.PICKUP);
       expect(pickup.totalPieces, 2);
       expect(pickup.pickupScheduledAt, DateTime.utc(2026, 11, 15, 10, 30));
-      expect(allowedStatusesFor(pickup), [
-        'RECEIVED',
-        'PICKUP_SCHEDULED',
-        'PICKED_UP',
-      ]);
+      expect(allowedStatusesFor(pickup), ['PICKUP_SCHEDULED']);
       expect(pickup.items.single.name, 'Clothing box');
       expect(pickup.images.single.fileName, 'front.jpg');
       // Item-to-create round trip carries the goods contract.

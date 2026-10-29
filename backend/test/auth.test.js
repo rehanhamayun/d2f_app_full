@@ -26,7 +26,7 @@ test('registration, role invitations, password recovery and provider sign-in', a
   const input = { email, password, fullName: 'Auth QA Customer', phone: '+22890123456' };
   let customer, admin;
   try {
-    const organization = await prisma.organization.findFirstOrThrow();
+    const organization = await prisma.organization.findUniqueOrThrow({ where: { id: 'org-d2f' } });
     admin = await prisma.user.create({ data: { email: `admin-${suffix}@example.com`, fullName: 'Auth QA Admin',
       role: 'ADMIN', passwordHash: await bcrypt.hash(password, 10), organizationId: organization.id } }); users.push(admin.id);
     await t.test('public registration defaults to Customer and never requires email or phone verification', async () => {

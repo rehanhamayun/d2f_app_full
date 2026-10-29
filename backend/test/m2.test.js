@@ -81,17 +81,17 @@ test('M2: warehouse, two-way freight, permissions and selected revenue modules',
     });
     await t.test('concurrent repeated scans load once and reject incompatible or competing assignments', async () => {
       const path = `/warehouse/containers/${container.id}/parcels`;
-      const results = await Promise.all([req(path, staff, 'POST', { trackingId: outboundParcel.trackingId }), req(path, staff, 'POST', { trackingId: outboundParcel.trackingId.toLowerCase() })]);
+      const results = await Promise.all([req(path, staff, 'POST', { loadingConfirmed: true, trackingId: outboundParcel.trackingId }), req(path, staff, 'POST', { loadingConfirmed: true, trackingId: outboundParcel.trackingId.toLowerCase() })]);
       assert.deepEqual(results.map(r => r.status).sort(), [200, 201]);
-      expectStatus(await req(`/warehouse/containers/${competing.id}/parcels`, staff, 'POST', { trackingId: outboundParcel.trackingId }), 409);
-      expectStatus(await req(path, staff, 'POST', { trackingId: otherParcel.trackingId }), 409);
-      expectStatus(await req(path, staff, 'POST', { trackingId: returnParcel.trackingId }), 409);
-      expectStatus(await req(path, foreignAdmin, 'POST', { trackingId: outboundParcel.trackingId }), 404);
+      expectStatus(await req(`/warehouse/containers/${competing.id}/parcels`, staff, 'POST', { loadingConfirmed: true, trackingId: outboundParcel.trackingId }), 409);
+      expectStatus(await req(path, staff, 'POST', { loadingConfirmed: true, trackingId: otherParcel.trackingId }), 409);
+      expectStatus(await req(path, staff, 'POST', { loadingConfirmed: true, trackingId: returnParcel.trackingId }), 409);
+      expectStatus(await req(path, foreignAdmin, 'POST', { loadingConfirmed: true, trackingId: outboundParcel.trackingId }), 404);
       expectStatus(await req(`/parcels/${outboundParcel.id}/events`, staff, 'POST', { status: 'IN_TRANSIT', locationId: omaha.id, confirmed: true }), 409);
       let detail = expectStatus(await req(`/warehouse/containers/${container.id}`, staff), 200);
       assert.equal(detail.parcels.length, 1); assert.equal(detail.events.filter(e => e.action === 'PARCEL_LOADED').length, 1);
       expectStatus(await req(`${path}/${outboundParcel.id}`, staff, 'DELETE'), 200);
-      expectStatus(await req(path, staff, 'POST', { trackingId: outboundParcel.trackingId }), 201);
+      expectStatus(await req(path, staff, 'POST', { loadingConfirmed: true, trackingId: outboundParcel.trackingId }), 201);
       detail = expectStatus(await req(`/parcels/${outboundParcel.id}`, staff), 200);
       assert.equal(detail.container.code, container.code);
       assert.ok(detail.events.some(e => e.note.startsWith('Removed from container')));
@@ -131,7 +131,7 @@ test('M2: warehouse, two-way freight, permissions and selected revenue modules',
       assert.ok(p.events.at(-1).note.includes('Departed Omaha'));
       finalManifest = expectStatus(await req(`/warehouse/containers/${container.id}/manifest`, staff), 200);
       assert.equal(finalManifest.provisional, false);
-      expectStatus(await req(`/warehouse/containers/${container.id}/parcels`, staff, 'POST', { trackingId: returnParcel.trackingId }), 409);
+      expectStatus(await req(`/warehouse/containers/${container.id}/parcels`, staff, 'POST', { loadingConfirmed: true, trackingId: returnParcel.trackingId }), 409);
       expectStatus(await req(`/warehouse/containers/${container.id}/parcels/${outboundParcel.id}`, staff, 'DELETE'), 409);
     });
     await t.test('Lomé arrival, ready, released and delivered preserve actor/time history and frozen manifest', async () => {
@@ -203,7 +203,7 @@ test('M2: warehouse, two-way freight, permissions and selected revenue modules',
     await t.test('West Africa to EU freight arrives at its actual destination and can complete normally', async () => {
       expectStatus(await req('/warehouse/containers', staff, 'POST', { code: `RETURN-DENIED-${suffix.slice(0, 8)}`, originId: lome.id, destinationId: brussels.id, method: 'SEA' }), 403);
       const c = expectStatus(await req('/warehouse/containers', lomeStaff, 'POST', { code: `RETURN-${suffix.slice(0, 8)}`, originId: lome.id, destinationId: brussels.id, method: 'SEA' }), 201);
-      expectStatus(await req(`/warehouse/containers/${c.id}/parcels`, lomeStaff, 'POST', { trackingId: returnParcel.trackingId }), 201);
+      expectStatus(await req(`/warehouse/containers/${c.id}/parcels`, lomeStaff, 'POST', { loadingConfirmed: true, trackingId: returnParcel.trackingId }), 201);
       expectStatus(await req(`/warehouse/containers/${c.id}/events`, lomeStaff, 'POST', { action: 'DEPARTED' }), 201);
       expectStatus(await req(`/warehouse/containers/${c.id}/events`, lomeStaff, 'POST', { action: 'ARRIVED' }), 403);
       expectStatus(await req(`/warehouse/containers/${c.id}/events`, brusselsStaff, 'POST', { action: 'ARRIVED' }), 201);

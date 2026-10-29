@@ -195,7 +195,16 @@ model Parcel {
   // PICKUP = D2F collects from the customer's address (pickupScheduledAt).
   // DROP_OFF = the customer brings the goods to the D2F warehouse.
   deliveryMode               String          @default("DROP_OFF") // PICKUP | DROP_OFF
-  pickupScheduledAt          DateTime? // customer's preferred pickup date and time
+  pickupPreferredAt          DateTime?
+  pickupDriverId             String?
+  pickupTargetLocationId     String?
+  pickupConfirmedAt          DateTime?
+  pickupConfirmedById        String?
+  pickupProofReference       String?
+  warehouseReceivedAt        DateTime?
+  warehouseReceivedById      String?
+  deliveryDriverId           String?
+  pickupScheduledAt          DateTime? // D2F-confirmed pickup appointment
   restrictionsAcknowledgedAt DateTime? // customer acknowledged the content/shipping rules when requesting
   createdById                String
   locationId                 String? // current physical facility; separate from origin/destination
@@ -242,21 +251,22 @@ model TrackingIndex {
 // Goods the customer is sending, itemized under one shipment request.
 // A shipment can hold many things (5–6 boxes, clothing, appliances...).
 model ParcelItem {
-  id                 String    @id @default(uuid())
-  parcelId           String
-  name               String // "Clothing box", "60-inch TV", "Spices"...
-  details            String? // short free-form description for the intake team
-  quantity           Int       @default(1)
-  weightKg           Float? // optional per-item estimate
-  position           Int       @default(0)
-  type               String    @default("BOX") // BOX | SUITCASE | BARREL | TV | APPLIANCE | FURNITURE | PALLET | VEHICLE | DOCUMENTS | OTHER
-  lengthCm           Float? // optional package dimensions, recorded together
-  widthCm            Float?
-  heightCm           Float?
-  packageCode        String? // D2F…-P01-style sub-ID allocated when goods enter D2F custody
-  collectedAt        DateTime? // set for every observed package at a pickup collection
-  notCollectedReason String? // why a declared package was not on hand
-  createdAt          DateTime  @default(now())
+  id                  String    @id @default(uuid())
+  parcelId            String
+  name                String // "Clothing box", "60-inch TV", "Spices"...
+  details             String? // short free-form description for the intake team
+  quantity            Int       @default(1)
+  weightKg            Float? // optional per-item estimate
+  position            Int       @default(0)
+  type                String    @default("BOX") // BOX | SUITCASE | BARREL | TV | APPLIANCE | FURNITURE | PALLET | VEHICLE | DOCUMENTS | OTHER
+  lengthCm            Float? // optional package dimensions, recorded together
+  widthCm             Float?
+  heightCm            Float?
+  packageCode         String? // D2F…-P01-style sub-ID allocated when goods enter D2F custody
+  warehouseReceivedAt DateTime?
+  collectedAt         DateTime? // set for every observed package at a pickup collection
+  notCollectedReason  String? // why a declared package was not on hand
+  createdAt           DateTime  @default(now())
 
   parcel       Parcel        @relation(fields: [parcelId], references: [id], onDelete: Cascade)
   parcelImages ParcelImage[]

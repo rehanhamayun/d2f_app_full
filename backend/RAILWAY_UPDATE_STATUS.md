@@ -1,3 +1,30 @@
+# Pickup custody production update — 29 October 2026
+
+The existing Railway Pro production API is healthy on deployment
+`f89a523e-7145-4e8d-996a-c0ec333cefef` (`SUCCESS`). Migration
+`20261029020000_separate_pickup_custody` applied successfully. The database volume
+was backed up as `Before pickup custody fix 2026-10-29`, backup
+`7fa9952a-e0ab-41b4-8504-1e36ce970237`.
+
+Pickup requests now require dispatch scheduling, assigned-driver physical
+collection, and separate authorized warehouse scan/inspection. Drop-off intake
+remains separate. Container loading requires verified warehouse custody, exact
+origin and route, and explicit physical loading confirmation. Existing tracking
+history is preserved. See [workflow and legacy-record guide](../PICKUP_CUSTODY_WORKFLOW.md).
+
+All 92 Flutter, 69 backend and 23 portal tests passed. Final mobile handover
+validation adjustments also passed the focused custody widget checks. Live
+read-only verification confirmed connected health, the new custody fields and
+driver-list route, staff/driver role separation, and existing Connect operations.
+The sanitized report is `design/verification-custody/live-api-verification.json`.
+The updated signed ARM64 app is `output/apk/D2F-Global-1.1.1+2015-arm64-v8a.apk`.
+Its production signature and Android version code 4015 were verified. The
+existing Cloudflare portal was updated as deployment
+`e4f4dad5.d2f-admin-dashboard.pages.dev`; its production alias serves the new
+`index-yvW1hKq1.js` bundle.
+
+---
+
 # D2F Connect production update — 29 October 2026
 
 Deployed to the existing Railway Pro `production_house` project, production

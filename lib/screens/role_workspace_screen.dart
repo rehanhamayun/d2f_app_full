@@ -1,3 +1,4 @@
+import 'shipment_custody_screen.dart';
 import 'connect_screen.dart';
 
 import 'package:flutter/material.dart';
@@ -263,6 +264,8 @@ class _RoleWorkspaceScreenState extends ConsumerState<RoleWorkspaceScreen> {
       ),
       body: _section == 3
           ? AccountScreen(onTrack: () => _select(2), onShip: () => _select(1))
+          : driver && _section == 1
+          ? const DriverTasksScreen()
           : !driver && _section == 1
           ? CustomerShipmentScreen(
               initialRoute:

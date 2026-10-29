@@ -32,6 +32,7 @@ it('container scan errors preserve input; loading and departure require the real
   await user.click(await screen.findByRole('button', { name: 'QA-SEA-001' }));
   const dialog = await screen.findByRole('dialog', { name: 'QA-SEA-001' });
   await user.type(await within(dialog).findByLabelText('Tracking number to load'), parcel.trackingId);
+  await user.click(within(dialog).getByLabelText('I verified that every received package in this shipment is physically loaded.'));
   await user.click(within(dialog).getByRole('button', { name: 'Load parcel', exact: true }));
   expect(await within(dialog).findByRole('alert')).toHaveTextContent('shipping methods must match');
   expect(within(dialog).getByLabelText('Tracking number to load')).toHaveValue(parcel.trackingId);

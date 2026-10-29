@@ -5,7 +5,7 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { resolveOrganizationId } from '../tracking.js';
 import { warehouseLock, fail, locationLabel, containerInclude, manifestFor, containerAudit } from '../warehouse.js';
 import { SERVICE_COUNTRIES, COUNTRY_TIMEZONES, countryInLocation } from '../service_area.js';
-import { isFacilityAuthorized, facilityDeniedMessage } from '../parcel_rules.js';
+import { isFacilityAuthorized, facilityDeniedMessage, destinationMatchesLocation } from '../parcel_rules.js';
 const router = Router();
 router.use(authenticate, requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
   try { req.organizationId = await resolveOrganizationId(prisma, req.user); next(); } catch (e) { next(e); }
@@ -93,6 +93,7 @@ router.get('/containers/:id/manifest', async (req, res, next) => {
 router.post('/containers/:id/parcels', async (req, res, next) => {
   try {
     const trackingId = req.body?.trackingId;
+    if (req.body?.loadingConfirmed !== true) fail(400, 'Confirm that every warehouse-verified package in this shipment has physically been loaded.');
     if (!text(trackingId, 80)) fail(400, 'Scan or enter a tracking number.');
     const result = await prisma.$transaction(async tx => {
       await warehouseLock(tx, req.organizationId);
@@ -106,7 +107,11 @@ router.post('/containers/:id/parcels', async (req, res, next) => {
       if (parcel.containerId === container.id) return { parcel, alreadyLoaded: true };
       if (parcel.containerId) fail(409, 'This parcel is already assigned to another container.');
       if (!['RECEIVED', 'PROCESSING'].includes(parcel.status)) fail(409, 'Only received or processing parcels can be loaded.');
-      if (parcel.locationId && parcel.locationId !== container.originId) fail(409, 'The parcel must be received at the container origin before it can be loaded.');
+      const packages = await tx.parcelItem.findMany({ where: { parcelId: parcel.id, notCollectedReason: null } });
+      if (packages.some(p => !p.warehouseReceivedAt)) fail(409, 'All collected packages require warehouse verification before loading.');
+      if (!parcel.warehouseReceivedAt) fail(409, 'Warehouse staff must scan and verify receipt before container loading.');
+      if (!destinationMatchesLocation(parcel.destination, container.destination)) fail(409, 'Parcel destination does not match the container destination.');
+      if (parcel.locationId !== container.originId) fail(409, 'The parcel must be received at the container origin before it can be loaded.');
       const parcelOriginCountry = countryInLocation(parcel.origin);
       if (parcelOriginCountry && parcelOriginCountry !== container.origin.country) fail(409, 'Parcel origin does not match the container origin country.');
       if (parcel.method !== container.method) fail(409, 'Parcel and container shipping methods must match.');

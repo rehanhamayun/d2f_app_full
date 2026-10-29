@@ -24,6 +24,7 @@ const shipmentStatuses = [
   'ARRIVED_LOME',
   'ARRIVED_DESTINATION',
   'READY_FOR_PICKUP',
+  'OUT_FOR_DELIVERY',
   'RELEASED',
   'DELIVERED',
 ];

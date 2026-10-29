@@ -56,6 +56,9 @@ const parcelSelect = {
   notes: true,
   deliveryMode: true,
   pickupScheduledAt: true,
+  pickupPreferredAt: true,
+  pickupConfirmedAt: true,
+  warehouseReceivedAt: true,
   restrictionsAcknowledgedAt: true,
   status: true,
   createdAt: true,
@@ -416,7 +419,7 @@ router.post('/', async (req, res, next) => {
       const collectionNote =
         deliveryMode === 'PICKUP'
           ? 'Shipment request submitted by customer · goods collection requested.'
-          : 'Shipment request submitted by customer · goods brought to the warehouse.';
+          : 'Shipment request submitted by customer · awaiting customer drop-off at the warehouse.';
       const created = await tx.parcel.create({
         data: {
           ...tracking,
@@ -433,7 +436,7 @@ router.post('/', async (req, res, next) => {
           notes: notes?.trim() || null,
           deliveryMode,
           pickupAddress: deliveryMode === 'PICKUP' ? pickupAddress.trim() : pickupAddress?.trim() || null,
-          pickupScheduledAt: scheduledPickup,
+          pickupPreferredAt: scheduledPickup,
           restrictionsAcknowledgedAt: new Date(),
           status: 'REQUESTED',
           createdById: req.user.id,

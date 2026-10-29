@@ -6,15 +6,16 @@ import { countryInLocation } from './service_area.js';
 // REQUESTED → PICKUP_SCHEDULED → PICKED_UP → RECEIVED (warehouse intake).
 // Drop-off requests skip those pickup stages entirely.
 export const PARCEL_TRANSITIONS = {
-  REQUESTED: ['RECEIVED', 'PICKUP_SCHEDULED', 'PICKED_UP'],
-  PICKUP_SCHEDULED: ['PICKED_UP', 'RECEIVED'],
+  REQUESTED: ['RECEIVED', 'PICKUP_SCHEDULED'],
+  PICKUP_SCHEDULED: ['PICKED_UP'],
   PICKED_UP: ['RECEIVED'],
   RECEIVED: ['PROCESSING'],
   PROCESSING: ['IN_TRANSIT'],
   IN_TRANSIT: ['ARRIVED_LOME', 'ARRIVED_DESTINATION'],
-  ARRIVED_LOME: ['READY_FOR_PICKUP'],
-  ARRIVED_DESTINATION: ['READY_FOR_PICKUP'],
-  READY_FOR_PICKUP: ['RELEASED'],
+  ARRIVED_LOME: ['READY_FOR_PICKUP', 'OUT_FOR_DELIVERY'],
+  ARRIVED_DESTINATION: ['READY_FOR_PICKUP', 'OUT_FOR_DELIVERY'],
+  READY_FOR_PICKUP: ['DELIVERED', 'OUT_FOR_DELIVERY', 'RELEASED'],
+  OUT_FOR_DELIVERY: ['DELIVERED'],
   RELEASED: ['DELIVERED'],
   DELIVERED: [],
 };
@@ -29,6 +30,7 @@ export const PICKUP_ONLY_STATUSES = new Set(['PICKUP_SCHEDULED', 'PICKED_UP']);
  */
 export function allowedTransitionsFor(parcel) {
   const base = PARCEL_TRANSITIONS[parcel?.status] || [];
+  if (parcel?.deliveryMode === 'PICKUP' && parcel?.status === 'REQUESTED') return ['PICKUP_SCHEDULED'];
   if (parcel?.deliveryMode === 'PICKUP') return [...base];
   return base.filter((status) => !PICKUP_ONLY_STATUSES.has(status));
 }
@@ -39,7 +41,6 @@ export function allowedTransitionsFor(parcel) {
 export const EDITABLE_REQUEST_STATUSES = new Set([
   'REQUESTED',
   'PICKUP_SCHEDULED',
-  'PICKED_UP',
 ]);
 
 export const PHYSICAL_STATUSES = new Set([
@@ -49,6 +50,7 @@ export const PHYSICAL_STATUSES = new Set([
   'ARRIVED_LOME',
   'ARRIVED_DESTINATION',
   'READY_FOR_PICKUP',
+  'OUT_FOR_DELIVERY',
   'RELEASED',
   'DELIVERED',
 ]);
@@ -59,6 +61,7 @@ export const CONFIRMATION_STATUSES = new Set([
   'ARRIVED_LOME',
   'ARRIVED_DESTINATION',
   'READY_FOR_PICKUP',
+  'OUT_FOR_DELIVERY',
   'RELEASED',
   'DELIVERED',
 ]);

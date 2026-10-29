@@ -1,3 +1,4 @@
+import { CustodyActions } from './custody.jsx';
 import { ConnectOperations, AirCargoReference } from './connect.jsx';
 import { UserLocation } from './team-location.jsx';
 import { Containers, Locations } from './warehouse.jsx';
@@ -85,26 +86,28 @@ const STATUS_COLORS = {
 const STATUS_LABELS = {
   REQUESTED: 'Requested',
   PICKUP_SCHEDULED: 'Pickup scheduled',
-  PICKED_UP: 'Picked up',
-  RECEIVED: 'Received',
+  PICKED_UP: 'Pickup confirmed · driver custody',
+  RECEIVED: 'Received at Warehouse',
   PROCESSING: 'Processing',
   IN_TRANSIT: 'In transit',
   ARRIVED_LOME: 'Arrived in Lomé',
   ARRIVED_DESTINATION: 'Arrived at destination',
   RELEASED: 'Released',
   READY_FOR_PICKUP: 'Ready for pickup',
+  OUT_FOR_DELIVERY: 'Out for Delivery',
   DELIVERED: 'Delivered',
 };
 const TRANSITIONS = {
-  REQUESTED: ['RECEIVED', 'PICKUP_SCHEDULED', 'PICKED_UP'],
-  PICKUP_SCHEDULED: ['PICKED_UP', 'RECEIVED'],
+  REQUESTED: ['RECEIVED', 'PICKUP_SCHEDULED'],
+  PICKUP_SCHEDULED: ['PICKED_UP'],
   PICKED_UP: ['RECEIVED'],
   RECEIVED: ['PROCESSING'],
   PROCESSING: ['IN_TRANSIT'],
   IN_TRANSIT: ['ARRIVED_LOME', 'ARRIVED_DESTINATION'],
-  ARRIVED_LOME: ['READY_FOR_PICKUP'],
-  ARRIVED_DESTINATION: ['READY_FOR_PICKUP'],
-  READY_FOR_PICKUP: ['RELEASED'],
+  ARRIVED_LOME: ['READY_FOR_PICKUP', 'OUT_FOR_DELIVERY'],
+  ARRIVED_DESTINATION: ['READY_FOR_PICKUP', 'OUT_FOR_DELIVERY'],
+  READY_FOR_PICKUP: ['DELIVERED', 'OUT_FOR_DELIVERY', 'RELEASED'],
+  OUT_FOR_DELIVERY: ['DELIVERED'],
   RELEASED: ['DELIVERED'],
   DELIVERED: [],
 };
@@ -844,6 +847,11 @@ function GoodsPhotos({ parcelId, images, goods, token }) {
   );
 }
 
+function staffStatusOptions(parcel) {
+  if (parcel.serviceType === 'AIR_TRAVELLER' || parcel.status === 'OUT_FOR_DELIVERY') return [];
+  return (TRANSITIONS[parcel.status] || []).filter(s => !['PICKUP_SCHEDULED','PICKED_UP','RECEIVED','OUT_FOR_DELIVERY','RELEASED'].includes(s) && (parcel.warehouseReceivedAt || !['PROCESSING','IN_TRANSIT'].includes(s)) && (!PICKUP_ONLY_STATUSES.has(s) || parcel.deliveryMode === 'PICKUP'));
+}
+
 function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token, notify, currentUserId, canEditAllNotes, onRefreshDetail }) {
   const [next, setNext] = useState('');
   const [note, setNote] = useState('');
@@ -869,10 +877,7 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
   const goodsCount = goods.length;
 
   useEffect(() => {
-    const options = (TRANSITIONS[parcel.status] || []).filter(
-      (state) =>
-        !PICKUP_ONLY_STATUSES.has(state) || parcel.deliveryMode === 'PICKUP',
-    );
+    const options = staffStatusOptions(parcel);
     // Pickup requests default to scheduling the collection; everything else
     // defaults to the first available stage.
     const preferred =
@@ -911,13 +916,7 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
   const containerManaged = parcel.container && parcel.container.status !== 'ARRIVED';
   // Mode-aware transition options: drop-off shipments skip the pickup stages
   // (REQUESTED → RECEIVED), pickup requests can be scheduled and collected.
-  const available = containerManaged
-    ? []
-    : (TRANSITIONS[parcel.status] || []).filter(
-      (state) =>
-        !PICKUP_ONLY_STATUSES.has(state) ||
-        parcel.deliveryMode === 'PICKUP',
-    );
+  const available = containerManaged ? [] : staffStatusOptions(parcel);
   const needsFacility = FACILITY_REQUIRED_STATUSES.has(next);
   const needsConfirmation = CONFIRMATION_STATUSES.has(next);
   const isReleased = next === 'RELEASED';
@@ -1017,11 +1016,12 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
           <div className="detail-grid">
             <div><small>Customer contact</small><b>{[parcel.customer?.phone, parcel.customer?.email].filter(Boolean).join(' · ') || '—'}</b></div>
             <div><small>Collection</small><b>{parcel.deliveryMode === 'PICKUP' ? 'D2F collects the goods' : 'Warehouse drop-off'}</b></div>
-            <div><small>Pickup scheduled</small><b>{parcel.pickupScheduledAt ? formatDate(parcel.pickupScheduledAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'To be confirmed'}</b></div>
+            <div><small>D2F confirmed pickup</small><b>{parcel.pickupScheduledAt ? formatDate(parcel.pickupScheduledAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'To be confirmed'}</b></div>
             <div><small>Goods pieces</small><b>{goodsCount ? `${goodsCount} package${goodsCount === 1 ? '' : 's'}` : '—'}</b></div>
           </div>
           <div className="detail-grid"><div><small>Service</small><b>{parcel.serviceType === 'AIR_CARGO' ? 'D2F Air Cargo' : parcel.serviceType === 'AIR_TRAVELLER' ? 'D2F Connect · Air Traveller' : parcel.method}</b></div><div><small>Customer contents declaration</small><b>{parcel.restrictionsAcknowledgedAt ? formatDate(parcel.restrictionsAcknowledgedAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Not recorded on this legacy / staff registration'}</b></div></div>
           {missingGoods.length > 0 && <div className="alert error-alert" role="status">Collected {goods.length - missingGoods.length} of {goods.length} packages. Missing packages remain recorded below.</div>}
+          <CustodyActions parcel={parcel} token={token} onSaved={onRefreshDetail} isAdmin={canEditAllNotes} />
           <AirCargoReference parcel={parcel} token={token} notify={notify} onSaved={onRefreshDetail} />
       {goods.length > 0 && <div className="goods-list">{goods.map((item, index) => <div className="goods-row" key={item.id || index}>
             <b>{`${item.type || 'BOX'} ${index + 1} of ${goods.length}`} · {item.name}</b>
@@ -1061,7 +1061,7 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
             <label>Operational note<textarea maxLength={1000} rows={3} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Add an operational note (optional)" /></label>
             {formError && <div className="alert error-alert" role="alert">{formError}</div>}
             <button className="button primary" disabled={busy || !next}>{busy ? <span className="spinner" /> : <Check size={16} />} Save status update</button>
-          </form> : <div className="complete-note"><Check size={16} /> {containerManaged ? `Managed by container ${parcel.container.code}. Record freight departure and arrival in Containers.` : "This shipment is marked delivered. No further status changes are available."}</div>}
+          </form> : <div className="complete-note"><Check size={16} /> {containerManaged ? `Managed by container ${parcel.container.code}. Record freight departure and arrival in Containers.` : (parcel.status === 'DELIVERED' ? "Delivery is complete." : parcel.status === 'OUT_FOR_DELIVERY' ? "The assigned driver confirms actual delivery in Driver tasks." : "Use the pickup and warehouse custody actions above for the next physical step.")}</div>}
         </div>}
       </section>
     </div>

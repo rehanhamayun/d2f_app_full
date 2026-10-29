@@ -1,3 +1,4 @@
+import 'shipment_custody_screen.dart';
 import 'connect_screen.dart';
 
 import 'package:flutter/material.dart';
@@ -197,10 +198,11 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
 
   /// Each tab has a single scrolling surface with pull-to-refresh.
   Widget _overview(Parcel parcel) {
-    final canUpdate = parcel.status != 'DELIVERED';
+    final canUpdate = staffStatusOptionsFor(parcel).isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        ShipmentCustodyCard(parcel: parcel, onSaved: _fetch),
         SectionCard(
           tint: AppColors.blueSoft,
           child: Row(

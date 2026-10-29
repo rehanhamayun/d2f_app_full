@@ -1,8 +1,8 @@
 # D2F Global source and build guide
 
 This repository contains the implemented mobile app, backend API, and web Admin
-dashboard. The current Android source version is `1.1.0+2014`. The signed ARM64 release
-APK is `output/apk/D2F-Global-1.1.0+2014-arm64-v8a.apk`; the prior APK is retained.
+dashboard. The current Android source version is `1.1.1+2015`. The signed ARM64 release
+APK is `output/apk/D2F-Global-1.1.1+2015-arm64-v8a.apk`; the prior APK is retained.
 
 ## Source inventory
 
@@ -18,7 +18,7 @@ APK is `output/apk/D2F-Global-1.1.0+2014-arm64-v8a.apk`; the prior APK is retain
 | `backend/.env.example`, `backend/env.production.example` | Configuration templates with placeholders |
 | `admin-dashboard/` | React/Vite Admin source, tests, dependency lock and hosting configuration |
 | `test/`, `integration_test/`, `test_driver/`, `backend/test/` | Flutter, integration and API checks |
-| `tool/` | Android icon resource generator |
+| `tool/` | Android release builder and icon resource generator |
 | `design/` | Brand source artwork, design notes, verification screenshots and release verification records |
 | `output/pdf/` | Client milestone completion report |
 
@@ -42,9 +42,11 @@ flutter analyze --no-fatal-infos
 flutter build apk --release --split-per-abi --dart-define=API_BASE_URL=https://d2f-api-production.up.railway.app
 ```
 
+For the current Flutter SDK, use `python3 tool/build_android_release.py` with Flutter on PATH to build the signed ARM64 APK in a disposable workspace; this avoids the SDK integration-test plugin release registrant issue.
+
 The build outputs are under `build/app/outputs/flutter-apk/`. Flutter regenerates
 ignored platform/build files as needed. Android build codes include the ABI
-offset applied by Flutter; `2014` is the current source base build number.
+offset applied by Flutter; `2015` is the current source base build number.
 
 Existing production updates require the original release signing key and the
 private `android/key.properties` configuration. These must be transferred

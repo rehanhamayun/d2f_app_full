@@ -1,0 +1,40 @@
+{
+  "deploymentId": "f89a523e-7145-4e8d-996a-c0ec333cefef",
+  "checks": [
+    {
+      "path": "/health",
+      "status": 200
+    },
+    {
+      "path": "/driver/tasks",
+      "status": 401
+    },
+    {
+      "path": "/auth/login",
+      "status": 200
+    },
+    {
+      "path": "/driver/tasks",
+      "status": 403
+    },
+    {
+      "path": "/parcels/drivers/active",
+      "status": 200
+    },
+    {
+      "path": "/parcels?limit=1",
+      "status": 200
+    },
+    {
+      "path": "/connect/operations",
+      "status": 200
+    },
+    {
+      "path": "/admin/users",
+      "status": 403
+    }
+  ],
+  "database": "connected",
+  "custodyFieldsAvailable": true,
+  "productionWrites": "none; read-only checks plus staff login"
+}

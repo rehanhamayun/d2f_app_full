@@ -1,0 +1,16 @@
+{
+  "versionName": "1.1.1",
+  "sourceVersion": "1.1.1+2015",
+  "androidVersionCode": 4015,
+  "apk": "output/apk/D2F-Global-1.1.1+2015-arm64-v8a.apk",
+  "sha256": "b7a15aee4acd532296f8049045229f41601c1d9fabad0c61738f2a6d549a3e27",
+  "signerSha256": "303fbf3e4b24aa81454e33c915c99d330893042f0aa506e0710a5ac79a3e290e",
+  "backendDeployment": "f89a523e-7145-4e8d-996a-c0ec333cefef",
+  "tests": {
+    "flutter": 92,
+    "backend": 69,
+    "portal": 23,
+    "finalCustodyWidgetChecks": 2
+  },
+  "api": "https://d2f-api-production.up.railway.app"
+}

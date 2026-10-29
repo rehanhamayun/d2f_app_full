@@ -179,6 +179,17 @@ void main() {
         find.byType(TextField),
         fixtureParcel['trackingId'],
       );
+      await tester.ensureVisible(
+        find.text(
+          'I verified every received package in this shipment is physically loaded.',
+        ),
+      );
+      await tester.tap(
+        find.text(
+          'I verified every received package in this shipment is physically loaded.',
+        ),
+      );
+      await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Load parcel'));
       await tester.tap(find.text('Load parcel'));
       await tester.pumpAndSettle();

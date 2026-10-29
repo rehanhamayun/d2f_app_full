@@ -1,3 +1,5 @@
+import { recordCollection, allocatePackageCodes } from '../package_custody.js';
+import { confirmIntake, schedulePickup } from '../custody.js';
 import { warehouseLock, fail, locationLabel } from '../warehouse.js';
 import { Router } from 'express';
 import { prisma } from '../db.js';
@@ -147,6 +149,7 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
       const intake = req.user.locationId
         ? await tx.location.findFirst({ where: { id: req.user.locationId, organizationId } })
         : null;
+      if (!intake) fail(400, 'Assign your account to the receiving facility before registering warehouse stock.');
       const created = await tx.parcel.create({
         data: {
           ...tracking,
@@ -163,6 +166,8 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
           serviceType: method === 'AIR' ? 'AIR_CARGO' : method,
           notes: notes?.trim() || null,
           status: 'RECEIVED',
+          warehouseReceivedAt: new Date(),
+          warehouseReceivedById: req.user.id,
           createdById: req.user.id,
           locationId: intake?.id || req.user.locationId || null,
           clientRequestId: clientRequestId || null,
@@ -350,12 +355,17 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
       const allowed = allowedTransitionsFor(parcel) || [];
       if (PARCEL_TRANSITIONS[parcel.status]?.includes(status)) {
         return res.status(400).json({
-          error: `This shipment was not requested for pickup. Allowed: ${allowed.join(', ') || 'none'}`,
+          error: parcel.deliveryMode === 'PICKUP' ? 'The assigned driver must confirm pickup before warehouse receipt.' : `This shipment was not requested for pickup. Allowed: ${allowed.join(', ') || 'none'}`,
         });
       }
       return res.status(400).json({
         error: `Invalid transition ${parcel.status} → ${status || '(none)'}. Allowed: ${allowed.join(', ') || 'none'}`,
       });
+    }
+    if (status === 'PICKED_UP') fail(403, 'Only the assigned driver can confirm collection in Driver tasks.');
+    if (status === 'PICKUP_SCHEDULED') {
+      const event = await prisma.$transaction(async tx => { await warehouseLock(tx, organizationId); return schedulePickup(tx, req.user, parcel.id, req.body); });
+      return res.status(201).json(event);
     }
     if ((location != null && typeof location !== 'string') || (note != null && typeof note !== 'string')) {
       return res.status(400).json({ error: 'location and note must be strings' });
@@ -401,6 +411,8 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
       const current = await tx.parcel.findUnique({ where: { id: parcel.id }, include: { container: true } });
       if (!current) fail(404, 'Parcel not found');
       if (current.serviceType === 'AIR_TRAVELLER') fail(409, 'Use D2F Connect to manage traveller bookings.');
+      if (!allowedTransitionsFor(current).includes(status)) fail(409, 'This parcel changed. Refresh before updating it.');
+      if (status === 'RECEIVED') return confirmIntake(tx, req.user, current, req.body);
       if (current.container && current.container.status !== 'ARRIVED') {
         const conflict = new Error('This parcel is in a container. Record departure and arrival from the container workspace.');
         conflict.status = 409;
@@ -415,6 +427,8 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
         fail(403, facilityDeniedMessage(facility));
       }
 
+      if (['PROCESSING', 'IN_TRANSIT'].includes(status) && !current.warehouseReceivedAt) fail(409, 'Warehouse staff must scan and verify receipt before processing or departure.');
+      if (status === 'PROCESSING' && current.locationId !== facility.id) fail(409, 'Processing must be confirmed at the warehouse holding this parcel.');
       if (status === 'IN_TRANSIT') {
         if (current.locationId && current.locationId !== facility.id) {
           fail(409, 'Departure must be confirmed from the facility where the parcel is currently held.');
@@ -426,7 +440,7 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
       if (status === 'ARRIVED_DESTINATION' && !destinationMatchesLocation(current.destination, facility)) {
         fail(400, `Choose the receiving facility for ${current.destination}. If the parcel has not been transferred there, record the transfer first.`);
       }
-      if (status === 'READY_FOR_PICKUP') {
+      if (['READY_FOR_PICKUP', 'OUT_FOR_DELIVERY', 'RELEASED', 'DELIVERED'].includes(status)) {
         if (current.locationId && current.locationId !== facility.id) {
           fail(409, 'Record the physical transfer and receiving confirmation before marking this parcel ready for pickup at another facility.');
         }
@@ -436,6 +450,13 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
       }
 
       const data = { status, locationId: facility?.id ?? current.locationId };
+      if (status === 'DELIVERED' && current.status === 'OUT_FOR_DELIVERY') fail(403, 'The assigned delivery driver must confirm delivery in Driver tasks.');
+      if (status === 'OUT_FOR_DELIVERY') {
+        const driver = await tx.user.findFirst({ where: { id: typeof req.body.deliveryDriverId === 'string' ? req.body.deliveryDriverId : '', organizationId, role: 'DRIVER', isActive: true } });
+        if (!driver) fail(400, 'Assign an active delivery driver before dispatch.');
+        data.deliveryDriverId = driver.id;
+        data.locationId = null;
+      }
       if (status === 'PICKUP_SCHEDULED' && pickupWhen) {
         data.pickupScheduledAt = pickupWhen;
       }
@@ -459,6 +480,7 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
         if (deliveryProofType === 'ID_CONFIRMATION' && !text(deliveredToIdNumber, 80)) {
           fail(400, 'Record the recipient ID number for an ID-confirmed delivery.');
         }
+        if (current.releasedAt && when < current.releasedAt) fail(400, 'Delivery cannot precede the recorded recipient handover.');
         data.deliveredToName = recipient;
         data.deliveredToIdNumber = text(deliveredToIdNumber, 80) ? deliveredToIdNumber.trim() : current.releasedToIdNumber;
         data.deliveredAt = when;
@@ -526,65 +548,6 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
  * missedItems (optional array of { itemId, reason }) names the packages that
  * were not on hand; everything else is stamped collectedAt.
  */
-async function recordCollection(tx, parcel, missedItems) {
-  if (missedItems != null && !Array.isArray(missedItems)) {
-    fail(400, 'missedItems must be an array of { itemId, reason }.');
-  }
-  const items = await tx.parcelItem.findMany({
-    where: { parcelId: parcel.id },
-    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
-  });
-  if (!items.length) return null;
-  const missed = [];
-  if (Array.isArray(missedItems)) {
-    for (const entry of missedItems) {
-      const itemId = entry?.itemId;
-      const reason = typeof entry?.reason === 'string' ? entry.reason.trim() : '';
-      if (!items.some((item) => item.id === itemId)) {
-        fail(400, 'Every missed package must be one of the goods declared on this shipment.');
-      }
-      if (!reason || reason.length > 300) {
-        fail(400, 'Record why a package was not collected (up to 300 characters).');
-      }
-      if (missed.some((entry) => entry.itemId === itemId)) {
-        fail(400, 'A package was listed more than once in the collection outcome.');
-      }
-      missed.push({ itemId, reason });
-    }
-  }
-  if (missed.length === items.length) {
-    fail(400, 'No packages were collected. Keep the pickup open and record or reschedule the attempt.');
-  }
-  const collectedAt = new Date();
-  for (const item of items) {
-    const missedEntry = missed.find((entry) => entry.itemId === item.id);
-    await tx.parcelItem.update({
-      where: { id: item.id },
-      data: missedEntry
-        ? { notCollectedReason: missedEntry.reason, collectedAt: null }
-        : { notCollectedReason: null, collectedAt },
-    });
-  }
-  return { collected: items.length - missed.length, total: items.length };
-}
-
-/** Allocates {@link ParcelItem.packageCode} `TRK-P01…` codes by declared order. */
-async function allocatePackageCodes(tx, parcel) {
-  const items = await tx.parcelItem.findMany({
-    where: { parcelId: parcel.id },
-    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
-  });
-  for (const [index, item] of items.entries()) {
-    if (item.packageCode || item.notCollectedReason) continue;
-    await tx.parcelItem.update({
-      where: { id: item.id },
-      data: {
-        packageCode: `${parcel.trackingId}-P${String(index + 1).padStart(2, '0')}`,
-      },
-    });
-  }
-}
-
 // PATCH /parcels/:id/events/:eventId/note — correct an accidental note without
 // deleting the event, actor, timestamp or location. Staff may correct their own
 // note; administrators may correct any note in the organization.
@@ -782,6 +745,8 @@ router.patch('/:id', requireRole('ADMIN'), async (req, res, next) => {
       const current = await tx.parcel.findFirst({ where: { id: req.params.id, organizationId }, include: { container: true } });
       if (!current) fail(404, 'Parcel not found');
       if (current.serviceType === 'AIR_TRAVELLER') fail(409, 'Use D2F Connect to manage traveller bookings.');
+      if (current.deliveryMode === 'PICKUP' && Object.hasOwn(data, 'pickupScheduledAt')) fail(409, 'Use pickup scheduling to change a confirmed appointment; collection history must remain intact.');
+      if ((current.pickupConfirmedAt || current.status !== 'REQUESTED') && data.deliveryMode && data.deliveryMode !== current.deliveryMode) fail(409, 'The handover method is locked once operations begin.');
       if (data.deliveryMode && data.deliveryMode !== current.deliveryMode && data.deliveryMode === 'PICKUP' && !data.pickupAddress && !current.pickupAddress) {
         fail(400, 'A pickup needs a collection address before it can be scheduled.');
       }
@@ -870,6 +835,24 @@ router.patch('/:id/air-cargo', requireRole('STAFF', 'ADMIN'), async (req, res, n
     });
     res.json(result);
   } catch (error) { next(error); }
+});
+
+router.get('/drivers/active', async (req, res, next) => {
+  try { const organizationId = await resolveOrganizationId(prisma, req.user);
+    res.json(await prisma.user.findMany({ where: { organizationId, role: 'DRIVER', isActive: true }, select: { id: true, fullName: true }, orderBy: { fullName: 'asc' } }));
+  } catch (e) { next(e); }
+});
+router.post('/:id/pickup-schedule', async (req, res, next) => {
+  try { const event = await prisma.$transaction(async tx => { const organizationId = await resolveOrganizationId(tx, req.user); await warehouseLock(tx, organizationId); return schedulePickup(tx, req.user, req.params.id, req.body); }); res.status(201).json(event); }
+  catch (e) { next(e); }
+});
+router.post('/:id/pickup-verification', requireRole('ADMIN'), async (req, res, next) => {
+  try { const event = await prisma.$transaction(async tx => { const organizationId = await resolveOrganizationId(tx, req.user); await warehouseLock(tx, organizationId); return schedulePickup(tx, req.user, req.params.id, req.body, true); }); res.status(201).json(event); }
+  catch (e) { next(e); }
+});
+router.post('/:id/warehouse-intake', async (req, res, next) => {
+  try { const event = await prisma.$transaction(async tx => { const organizationId = await resolveOrganizationId(tx, req.user); await warehouseLock(tx, organizationId); const parcel = await tx.parcel.findFirst({ where: { id: req.params.id, organizationId } }); if (!parcel) fail(404, 'Parcel not found.'); return confirmIntake(tx, req.user, parcel, req.body); }); res.status(201).json(event); }
+  catch (e) { next(e); }
 });
 
 // GET /parcels/:idOrTracking — detail incl. event history

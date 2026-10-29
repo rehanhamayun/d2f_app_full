@@ -89,7 +89,7 @@ test('Admin parcel corrections preserve identity, tenancy, history and warehouse
       const container = ok(await req('/warehouse/containers', staff, 'POST', { code: `EDIT-${suffix.slice(0, 8)}`, originId: origin.id, destinationId: destination.id, method: 'SEA' }), 201);
       await prisma.parcel.update({ where: { id: parcel.id }, data: { locationId: origin.id } });
       parcel = ok(await req(path, admin));
-      ok(await req(`/warehouse/containers/${container.id}/parcels`, staff, 'POST', { trackingId: parcel.trackingId }), 201);
+      ok(await req(`/warehouse/containers/${container.id}/parcels`, staff, 'POST', { trackingId: parcel.trackingId, loadingConfirmed: true }), 201);
       parcel = ok(await req(path, admin));
       for (const body of [{ method: 'AIR' }, { origin: 'Paris, France' }, { destination: 'Accra, Ghana' }]) ok(await patch(body), 409);
       parcel = ok(await patch({ recipientName: 'Warehouse correction', weightKg: 15 }));

@@ -34,6 +34,7 @@ class _ContainerDetailScreenState extends State<ContainerDetailScreen> {
   final _tracking = TextEditingController();
   FreightContainer? _container;
   String? _error;
+  bool _loadingConfirmed = false;
   bool _busy = false;
   @override
   void initState() {
@@ -88,13 +89,27 @@ class _ContainerDetailScreenState extends State<ContainerDetailScreen> {
       Api.I.warehouseRequest(path, method: method, data: data);
   Future<void> _loadParcel(String tracking) async {
     if (tracking.trim().isEmpty) return;
+    if (!_loadingConfirmed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Verify that every received package in this shipment is physically loaded.',
+          ),
+        ),
+      );
+      return;
+    }
     await _perform(() async {
       final result = await _request(
         '/containers/${widget.containerId}/parcels',
         method: 'POST',
-        data: {'trackingId': tracking.trim()},
+        data: {
+          'trackingId': tracking.trim(),
+          'loadingConfirmed': _loadingConfirmed,
+        },
       );
       _tracking.clear();
+      _loadingConfirmed = false;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -339,6 +354,19 @@ class _ContainerDetailScreenState extends State<ContainerDetailScreen> {
                             ),
                           ),
                           const SizedBox(height: 12),
+                          CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            value: _loadingConfirmed,
+                            onChanged: _busy
+                                ? null
+                                : (v) => setState(
+                                    () => _loadingConfirmed = v ?? false,
+                                  ),
+                            title: const Text(
+                              'I verified every received package in this shipment is physically loaded.',
+                              style: TextStyle(fontSize: 12, height: 1.5),
+                            ),
+                          ),
                           FormFieldPair(
                             first: OutlinedButton.icon(
                               onPressed: _busy
