@@ -1,3 +1,5 @@
+import 'screens/direct_label_print_screen.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -149,6 +151,8 @@ class _RootSwitchState extends ConsumerState<_RootSwitch> {
       error: (error, stack) => signedOut(),
       data: (user) => user == null
           ? signedOut()
+          : Api.I.offlinePrintingOnly
+          ? const DirectLabelPrintScreen()
           : user.isStaff
           ? const StaffShell()
           : const RoleWorkspaceScreen(),

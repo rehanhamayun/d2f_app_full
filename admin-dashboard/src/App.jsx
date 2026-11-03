@@ -1,3 +1,8 @@
+import { LabelPrintPanel } from './label-print';
+import { StructuredAddress, isUsRoute } from './structured-address.jsx';
+import { OperationalNotes, OperationalNoteField } from './operational-notes.jsx';
+import { CustodyActions } from './custody.jsx';
+import { ConnectOperations, AirCargoReference } from './connect.jsx';
 import { UserLocation } from './team-location.jsx';
 import { Containers, Locations } from './warehouse.jsx';
 import { Commerce } from './commerce.jsx';
@@ -5,6 +10,7 @@ import { SERVICE_COUNTRIES, ROUTE_LOCATIONS } from './service-area.js';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
+  ClipboardList,
   ArrowDownRight,
   ArrowUpRight,
   Bell,
@@ -19,10 +25,12 @@ import {
   Copy,
   Download,
   Globe2,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   Menu,
   PackageCheck,
+  Pencil,
   Search,
   Settings2,
   ShieldCheck,
@@ -48,6 +56,7 @@ import {
   getApiBaseUrl,
   getSavedSession,
   request,
+  saveSession,
   setApiBaseUrl,
   signIn,
 } from './api.js';
@@ -55,8 +64,10 @@ import {
 const NAV = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'shipments', label: 'Shipments', icon: Box },
+  { id: 'connect', label: 'D2F Connect', icon: Globe2 },
   { id: 'containers', label: 'Containers', icon: PackageCheck },
   { id: 'bookings', label: 'Bookings', icon: Truck },
+  { id: 'operational-notes', label: 'Operational notes', icon: ClipboardList },
   { id: 'locations', label: 'Locations', icon: Globe2 },
   { id: 'marketplace', label: 'Marketplace', icon: Building2 },
   { id: 'buy-for-me', label: 'Buy For Me', icon: Download },
@@ -66,6 +77,8 @@ const NAV = [
 ];
 const STATUS_COLORS = {
   REQUESTED: '#f2b544',
+  PICKUP_SCHEDULED: '#4a7cfa',
+  PICKED_UP: '#9b6cde',
   RECEIVED: '#3868ef',
   PROCESSING: '#7958cc',
   IN_TRANSIT: '#19a89a',
@@ -77,27 +90,78 @@ const STATUS_COLORS = {
 };
 const STATUS_LABELS = {
   REQUESTED: 'Requested',
-  RECEIVED: 'Received',
+  PICKUP_SCHEDULED: 'Pickup scheduled',
+  PICKED_UP: 'Pickup confirmed · driver custody',
+  RECEIVED: 'Received at Warehouse',
   PROCESSING: 'Processing',
+  READY_FOR_LOADING: 'Ready for loading', LOADED_IN_CONTAINER: 'Loaded into container', ARRIVED_PORT: 'Arrived at destination port', CUSTOMS_CLEARANCE: 'Customs clearance', CUSTOMS_CLEARED: 'Customs released', RECEIVED_DESTINATION: 'Received at destination warehouse',
   IN_TRANSIT: 'In transit',
   ARRIVED_LOME: 'Arrived in Lomé',
   ARRIVED_DESTINATION: 'Arrived at destination',
   RELEASED: 'Released',
   READY_FOR_PICKUP: 'Ready for pickup',
+  OUT_FOR_DELIVERY: 'Out for Delivery',
   DELIVERED: 'Delivered',
 };
 const TRANSITIONS = {
-  REQUESTED: ['RECEIVED'],
-  RECEIVED: ['PROCESSING', 'IN_TRANSIT'],
-  PROCESSING: ['IN_TRANSIT', 'ARRIVED_LOME', 'ARRIVED_DESTINATION'],
+  REQUESTED: ['RECEIVED', 'PICKUP_SCHEDULED'],
+  PICKUP_SCHEDULED: ['PICKED_UP'],
+  PICKED_UP: ['RECEIVED'],
+  RECEIVED: ['PROCESSING'],
+  PROCESSING: ['IN_TRANSIT'],
+  RECEIVED_DESTINATION: ['READY_FOR_PICKUP', 'OUT_FOR_DELIVERY'],
   IN_TRANSIT: ['ARRIVED_LOME', 'ARRIVED_DESTINATION'],
-  ARRIVED_LOME: ['READY_FOR_PICKUP'],
-  ARRIVED_DESTINATION: ['READY_FOR_PICKUP'],
-  READY_FOR_PICKUP: ['RELEASED', 'DELIVERED'],
+  ARRIVED_LOME: ['READY_FOR_PICKUP', 'OUT_FOR_DELIVERY'],
+  ARRIVED_DESTINATION: ['READY_FOR_PICKUP', 'OUT_FOR_DELIVERY'],
+  READY_FOR_PICKUP: ['DELIVERED', 'OUT_FOR_DELIVERY', 'RELEASED'],
+  OUT_FOR_DELIVERY: ['DELIVERED'],
   RELEASED: ['DELIVERED'],
   DELIVERED: [],
 };
+// Stage names that only exist when D2F collects the goods; a drop-off
+// shipment goes straight from REQUESTED to RECEIVED at the warehouse.
+const PICKUP_ONLY_STATUSES = new Set(['PICKUP_SCHEDULED', 'PICKED_UP']);
+const CONFIRMATION_STATUSES = new Set(['RECEIVED', 'IN_TRANSIT', 'ARRIVED_LOME', 'ARRIVED_DESTINATION', 'READY_FOR_PICKUP', 'RELEASED', 'DELIVERED']);
+const FACILITY_REQUIRED_STATUSES = new Set([...CONFIRMATION_STATUSES, 'PROCESSING', 'READY_FOR_LOADING']);
+const DELIVERY_PROOF_TYPES = {
+  SIGNATURE: 'Signature',
+  PHOTO: 'Photo',
+  ID_CONFIRMATION: 'ID confirmation',
+  RECIPIENT_CONFIRMATION: 'Recipient confirmation',
+};
 const PAGE_SIZE = 50;
+
+function localInputValue(date = new Date()) {
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function routeCity(value = '') {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .split(',')[0]
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function sameCity(a, b) {
+  const left = routeCity(a);
+  const right = routeCity(b);
+  return Boolean(left && right && left === right);
+}
+
+function routeError({ origin, destination, method, pickupAddress, recipientAddress }) {
+  if (!sameCity(origin, destination)) return '';
+  if (method === 'ROAD') {
+    if (!pickupAddress?.trim() || !recipientAddress?.trim()) return 'Same-city road deliveries require both a pickup address and a delivery address.';
+    const fold = value => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    if (fold(pickupAddress) === fold(recipientAddress)) return 'Pickup and delivery addresses must be different for a same-city road delivery.';
+    return '';
+  }
+  return 'Air and sea shipments require different origin and destination cities.';
+}
 
 function formatNumber(value) {
   return new Intl.NumberFormat().format(value || 0);
@@ -146,10 +210,16 @@ function Login({ onSignedIn }) {
   const [showApi, setShowApi] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [mode, setMode] = useState('login');
+  const [ticket, setTicket] = useState('');
+  const [code, setCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
 
   async function submit(event) {
     event.preventDefault();
     setError('');
+    setNotice('');
     setBusy(true);
     try {
       setApiBaseUrl(apiUrl);
@@ -160,6 +230,58 @@ function Login({ onSignedIn }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function requestRecovery(event) {
+    event.preventDefault();
+    setError('');
+    setNotice('');
+    setBusy(true);
+    try {
+      setApiBaseUrl(apiUrl);
+      const result = await request('/auth/password/forgot', {
+        method: 'POST',
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      setTicket(result.ticket);
+      setMode('reset');
+      setNotice('If an active account matches this email, a 6-digit code has been sent. It expires in 10 minutes.');
+    } catch (problem) {
+      setError(problem.message || 'Unable to start password recovery.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function completeRecovery(event) {
+    event.preventDefault();
+    setError('');
+    setNotice('');
+    setBusy(true);
+    try {
+      setApiBaseUrl(apiUrl);
+      await request('/auth/password/reset', {
+        method: 'POST',
+        body: JSON.stringify({ ticket, code: code.trim(), password: newPassword }),
+      });
+      setMode('login');
+      setPassword('');
+      setCode('');
+      setNewPassword('');
+      setNotice('Password updated. Sign in with your new password.');
+    } catch (problem) {
+      setError(problem.message || 'Unable to reset the password.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function backToLogin() {
+    setMode('login');
+    setError('');
+    setNotice('');
+    setCode('');
+    setNewPassword('');
   }
 
   return (
@@ -188,19 +310,53 @@ function Login({ onSignedIn }) {
         <div className="login-top"><span className="eyebrow">D2F ADMIN PORTAL</span><span className="secure-note"><ShieldCheck size={15} /> Secure access</span></div>
         <div className="login-form-wrap">
           <div className="login-icon"><Building2 size={23} /></div>
-          <h2>Welcome back</h2>
-          <p className="muted">Sign in with your authorized D2F operations account.</p>
-          <form onSubmit={submit} className="login-form">
-            <label htmlFor="admin-email">Email address</label>
-            <input id="admin-email" autoComplete="username" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@d2fshipping.com" required />
-            <label htmlFor="admin-password">Password</label>
-            <input id="admin-password" autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" required />
-            {error && <div className="alert error-alert" role="alert">{error}</div>}
-            <button className="button primary full-button" disabled={busy}>
-              {busy ? <span className="spinner" /> : 'Sign in to dashboard'}
-              {!busy && <ChevronRight size={18} />}
-            </button>
-          </form>
+          <h2>{mode === 'login' ? 'Welcome back' : mode === 'recover' ? 'Reset your password' : 'Enter your code'}</h2>
+          <p className="muted">
+            {mode === 'login'
+              ? 'Sign in with your authorized D2F operations account.'
+              : mode === 'recover'
+                ? 'We will email a 6-digit code to your account address.'
+                : 'Enter the code from your email and choose a new password.'}
+          </p>
+          {notice && <div className="alert info-alert" role="status">{notice}</div>}
+          {mode === 'login' && (
+            <>
+              <form onSubmit={submit} className="login-form">
+                <label htmlFor="admin-email">Email address</label>
+                <input id="admin-email" autoComplete="username" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@d2fshipping.com" required />
+                <label htmlFor="admin-password">Password</label>
+                <input id="admin-password" autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" required />
+                {error && <div className="alert error-alert" role="alert">{error}</div>}
+                <button className="button primary full-button" disabled={busy}>
+                  {busy ? <span className="spinner" /> : 'Sign in to dashboard'}
+                  {!busy && <ChevronRight size={18} />}
+                </button>
+              </form>
+              <button className="text-button api-setting" type="button" onClick={() => { setMode('recover'); setError(''); setNotice(''); }}>
+                <ShieldCheck size={15} /> Forgot password?
+              </button>
+            </>
+          )}
+          {mode === 'recover' && (
+            <form onSubmit={requestRecovery} className="login-form">
+              <label htmlFor="recover-email">Email address</label>
+              <input id="recover-email" autoComplete="username" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@d2fshipping.com" required />
+              {error && <div className="alert error-alert" role="alert">{error}</div>}
+              <button className="button primary full-button" disabled={busy}>{busy ? <span className="spinner" /> : 'Send recovery code'}</button>
+              <button className="text-button" type="button" onClick={backToLogin}>Back to sign in</button>
+            </form>
+          )}
+          {mode === 'reset' && (
+            <form onSubmit={completeRecovery} className="login-form">
+              <label htmlFor="recover-code">6-digit code</label>
+              <input id="recover-code" inputMode="numeric" pattern="\d{6}" maxLength={6} autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="000000" required />
+              <label htmlFor="recover-password">New password</label>
+              <input id="recover-password" autoComplete="new-password" type="password" minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="At least 8 characters" required />
+              {error && <div className="alert error-alert" role="alert">{error}</div>}
+              <button className="button primary full-button" disabled={busy}>{busy ? <span className="spinner" /> : 'Set new password'}</button>
+              <button className="text-button" type="button" onClick={backToLogin}>Back to sign in</button>
+            </form>
+          )}
           <button className="text-button api-setting" type="button" onClick={() => setShowApi(!showApi)}>
             <Settings2 size={15} /> {showApi ? 'Hide connection settings' : 'Connection settings'}
           </button>
@@ -231,7 +387,7 @@ function Sidebar({ page, setPage, user, onLogout, open, setOpen }) {
         <div className="workspace-chip"><span className="workspace-dot" /><span><small>WORKSPACE</small><b>D2F Shipping</b></span><ChevronDown size={15} /></div>
         <div className="nav-caption">WORKSPACE</div>
         <nav className="side-nav" aria-label="Admin dashboard">
-          {NAV.filter(item => user.role === 'ADMIN' || ['shipments', 'containers', 'bookings', 'customers'].includes(item.id)).map(({ id, label, icon: Icon }) => (
+          {NAV.filter(item => user.role === 'ADMIN' || ['shipments', 'connect', 'containers', 'bookings', 'customers'].includes(item.id)).map(({ id, label, icon: Icon }) => (
             <button key={id} className={`nav-link ${page === id ? 'nav-active' : ''}`} onClick={() => { setPage(id); setOpen(false); }}>
               <Icon size={18} strokeWidth={1.9} /><span>{label}</span>
               {id === 'shipments' && page === id && <span className="nav-active-dot" />}
@@ -250,7 +406,7 @@ function Sidebar({ page, setPage, user, onLogout, open, setOpen }) {
   );
 }
 
-function Header({ page, onMenu, user, onRefresh, refreshing }) {
+function Header({ page, onMenu, user, onRefresh, refreshing, onChangePassword }) {
   const current = NAV.find((item) => item.id === page);
   return (
     <header className="topbar">
@@ -260,6 +416,7 @@ function Header({ page, onMenu, user, onRefresh, refreshing }) {
       </div>
       <div className="topbar-actions">
         <button className="icon-button refresh-button" onClick={onRefresh} disabled={refreshing} aria-label="Refresh dashboard" title="Refresh"><Activity size={18} className={refreshing ? 'spin' : ''} /></button>
+        <button className="icon-button" onClick={onChangePassword} aria-label="Change password" title="Change password"><KeyRound size={17} /></button>
         <div className="topbar-divider" />
         <div className="topbar-user"><div className="avatar small-avatar">{initials(user.fullName)}</div><span><b>{user.fullName}</b><small>{user.role === 'ADMIN' ? 'Admin' : 'Staff'}</small></span></div>
         <button className="icon-button logout-mobile" onClick={() => window.dispatchEvent(new Event('d2f-logout'))} aria-label="Sign out"><LogOut size={17} /></button>
@@ -389,7 +546,7 @@ function PageControls({ total, offset, limit, onPage }) {
   );
 }
 
-function Shipments({ token, notify, refreshOverview, refreshKey, bookings = false, staffAccess = false }) {
+function Shipments({ token, notify, refreshOverview, refreshKey, bookings = false, staffAccess = false, currentUserId }) {
   const [rows, setRows] = useState([]);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState(bookings ? 'REQUESTED' : 'ALL');
@@ -401,6 +558,7 @@ function Shipments({ token, notify, refreshOverview, refreshKey, bookings = fals
   const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -434,19 +592,24 @@ function Shipments({ token, notify, refreshOverview, refreshKey, bookings = fals
     }
   }
 
-  async function updateStatus(nextStatus, note, location) {
+  async function refreshDetail() {
+    if (!detail) return;
+    const updated = await request(`/parcels/${encodeURIComponent(detail.id)}`, { token });
+    setDetail(updated);
+    setSelected(updated);
+  }
+
+  async function updateStatus(payload) {
     if (!detail) return;
     setBusy(true);
     try {
       await request(`/parcels/${encodeURIComponent(detail.id)}/events`, {
         token,
         method: 'POST',
-        body: JSON.stringify({ status: nextStatus, note, location }),
+        body: JSON.stringify(payload),
       });
-      notify(`Shipment moved to ${statusLabel(nextStatus)}.`);
-      const updated = await request(`/parcels/${encodeURIComponent(detail.id)}`, { token });
-      setDetail(updated);
-      setSelected(updated);
+      notify(`Shipment moved to ${statusLabel(payload.status)}.`);
+      await refreshDetail();
       await load();
       refreshOverview();
     } catch (error) {
@@ -468,8 +631,16 @@ function Shipments({ token, notify, refreshOverview, refreshKey, bookings = fals
         </tbody></table></div>
         <div className="table-foot"><span>Live operational records shared with the D2F app</span><PageControls total={total} offset={offset} limit={PAGE_SIZE} onPage={setOffset} /></div>
       </section>
-      {selected && <ShipmentModal parcel={detail || selected} loading={!detail} busy={busy} onClose={() => { setSelected(null); setDetail(null); }} onUpdate={updateStatus} />}
-      {createOpen && <ShipmentCreateModal token={token} staffAccess={staffAccess} notify={notify} onClose={() => setCreateOpen(false)} onCreated={(parcel) => {
+      {selected && !editing && <ShipmentModal parcel={detail || selected} loading={!detail} busy={busy} token={token} notify={notify} currentUserId={currentUserId} canEditAllNotes={!staffAccess} onRefreshDetail={refreshDetail} onClose={() => { setSelected(null); setDetail(null); }} onUpdate={updateStatus} onEdit={staffAccess ? undefined : () => setEditing(true)} />}
+      {editing && detail && <ShipmentFormModal token={token} notify={notify} parcel={detail} onClose={() => setEditing(false)} onCreated={(updated) => {
+        setDetail(updated);
+        setSelected(updated);
+        setEditing(false);
+        notify(`Shipment ${updated.trackingId} updated.`);
+        load();
+        refreshOverview();
+      }} />}
+      {createOpen && <ShipmentFormModal token={token} staffAccess={staffAccess} notify={notify} onClose={() => setCreateOpen(false)} onCreated={(parcel) => {
         setCreateOpen(false);
         setSearch('');
         setStatus('ALL');
@@ -482,23 +653,30 @@ function Shipments({ token, notify, refreshOverview, refreshKey, bookings = fals
   );
 }
 
-function ShipmentCreateModal({ token, notify, onClose, onCreated, staffAccess = false }) {
+function ShipmentFormModal({ token, notify, onClose, onCreated, staffAccess = false, parcel = null }) {
   const [customers, setCustomers] = useState([]);
   const [customerTotal, setCustomerTotal] = useState(0);
   const [customerQuery, setCustomerQuery] = useState('');
-  const [customerId, setCustomerId] = useState('');
+  const [customerId, setCustomerId] = useState(parcel?.customerId || '');
+  const [selectedCustomer, setSelectedCustomer] = useState(parcel?.customer || null);
   const [customerLoading, setCustomerLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [rescheduleReason, setRescheduleReason] = useState('');
+  const [pickupWhenEdit, setPickupWhenEdit] = useState(parcel?.pickupScheduledAt ? localInputValue(new Date(parcel.pickupScheduledAt)) : '');
+  const routeLocked = parcel?.container && parcel.container.status !== 'ARRIVED';
   const [form, setForm] = useState({
-    recipientName: '',
-    recipientPhone: '',
-    recipientAddress: '',
-    packageType: 'BOX',
-    weightKg: '',
-    origin: 'Omaha, NE, USA',
-    destination: 'Lomé, Togo',
-    method: 'AIR',
-    notes: '',
+    recipientName: parcel?.recipientName || '',
+    recipientPhone: parcel?.recipientPhone || '',
+    recipientAddress: parcel?.recipientAddress || '',
+    pickupAddress: parcel?.pickupAddress || '',
+    deliveryMode: parcel?.deliveryMode || 'DROP_OFF',
+    packageType: parcel?.packageType || 'BOX',
+    weightKg: parcel?.weightKg ?? '',
+    origin: parcel?.origin || 'Omaha, NE, USA',
+    destination: parcel?.destination || 'Lomé, Togo',
+    method: parcel?.method || 'AIR',
+    notes: parcel?.notes || '',
   });
 
   useEffect(() => {
@@ -527,75 +705,315 @@ function ShipmentCreateModal({ token, notify, onClose, onCreated, staffAccess = 
 
   async function submit(event) {
     event.preventDefault();
+    if (saving) return;
     if (!customerId) {
-      notify('Choose a customer profile before creating a shipment.', 'error');
+      setError('Choose a customer profile before saving the shipment.');
       return;
     }
+    const routeProblem = routeError(form);
+    if (routeProblem) {
+      setError(routeProblem);
+      return;
+    }
+    if (form.deliveryMode === 'PICKUP') {
+      if (!form.pickupAddress.trim()) {
+        setError('A pickup needs a collection address before it can be scheduled.');
+        return;
+      }
+      if (pickupWhenEdit.trim() && (Number.isNaN(Date.parse(pickupWhenEdit)) || new Date(pickupWhenEdit).getTime() < Date.now())) {
+        setError('Enter a future pickup date and time, or clear the window to set it later.');
+        return;
+      }
+    }
     setSaving(true);
+    setError('');
     try {
-      const parcel = await request('/parcels', {
+      const saved = await request(parcel ? `/parcels/${encodeURIComponent(parcel.id)}` : '/parcels', {
         token,
-        method: 'POST',
+        method: parcel ? 'PATCH' : 'POST',
         body: JSON.stringify({
           customerId,
           ...form,
           weightKg: Number(form.weightKg),
+          ...(parcel && form.deliveryMode === 'PICKUP' && pickupWhenEdit.trim() ? { pickupScheduledAt: new Date(pickupWhenEdit).toISOString(), rescheduleReason: rescheduleReason.trim() } : {}),
+          ...(parcel ? { updatedAt: parcel.updatedAt } : {}),
         }),
       });
-      onCreated(parcel);
+      onCreated(saved);
     } catch (error) {
-      notify(error.message, 'error');
+      setError(error.message);
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="modal-backdrop" onMouseDown={(event) => { if (!saving && event.target === event.currentTarget) onClose(); }}>
       <datalist id="d2f-route-locations">{ROUTE_LOCATIONS.map(l => <option key={l} value={l} />)}</datalist><section className="modal invite-modal" role="dialog" aria-modal="true" aria-labelledby="create-shipment-title">
         <div className="modal-header">
-          <div><span className="eyebrow">NEW OPERATIONAL RECORD</span><h2 id="create-shipment-title">Create a shipment</h2></div>
-          <button className="icon-button" onClick={onClose} aria-label="Close shipment form"><X size={19} /></button>
+          <div><span className="eyebrow">{parcel ? parcel.trackingId : 'NEW OPERATIONAL RECORD'}</span><h2 id="create-shipment-title">{parcel ? 'Edit shipment' : 'Create a shipment'}</h2></div>
+          <button className="icon-button" disabled={saving} onClick={onClose} aria-label="Close shipment form"><X size={19} /></button>
         </div>
         <form className="modal-body invite-form" onSubmit={submit}>
-          <label>Find customer profile<input autoFocus value={customerQuery} onChange={(event) => { setCustomerQuery(event.target.value); setCustomerId(''); }} placeholder="Search name, email, or phone…" /></label>
-          <label>Customer<select required value={customerId} onChange={(event) => setCustomerId(event.target.value)} disabled={customerLoading || !customers.length}>
+          {error && <div className="alert error-alert" role="alert">{error}</div>}
+          <label>Find customer profile<input autoFocus value={customerQuery} onChange={(event) => { setCustomerQuery(event.target.value); if (!parcel) { setCustomerId(''); setSelectedCustomer(null); } }} placeholder="Search name, email, or phone…" /></label>
+          <label>Customer<select required value={customerId} onChange={(event) => { setCustomerId(event.target.value); setSelectedCustomer(customers.find(customer => customer.id === event.target.value) || selectedCustomer); }} disabled={customerLoading || (!customers.length && !selectedCustomer)}>
             <option value="">{customerLoading ? 'Loading customer profiles…' : customers.length ? 'Select a customer' : 'No matching customer profiles'}</option>
+            {selectedCustomer && !customers.some(customer => customer.id === selectedCustomer.id) && <option value={selectedCustomer.id}>{selectedCustomer.displayName}</option>}
             {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.displayName}{customer.email ? ` · ${customer.email}` : ''}{customer.userId ? ' · App account' : ' · Staff profile'}</option>)}
           </select></label>
           {customerTotal > customers.length && <p className="muted">Showing {formatNumber(customers.length)} of {formatNumber(customerTotal)} matching profiles. Search to find another customer.</p>}
           <p className="muted">A linked app account can see this shipment in its customer workspace. Staff-only profiles remain in operations records.</p>
-          <label>Recipient name<input required maxLength={120} value={form.recipientName} onChange={(event) => setForm({ ...form, recipientName: event.target.value })} /></label>
+          <label>Recipient name<input required pattern=".*\S.*" maxLength={120} value={form.recipientName} onChange={(event) => setForm({ ...form, recipientName: event.target.value })} /></label>
+          {isUsRoute(form.destination) ? <StructuredAddress key={`recipientAddress-${form.destination}`} label="Delivery address" value={form.recipientAddress} required onChange={value=>setForm({...form,recipientAddress:value})}/> : <label>Delivery address<textarea maxLength={1000} value={form.recipientAddress} onChange={(event) => setForm({ ...form, recipientAddress: event.target.value })} /></label>}
+          {((form.method === 'ROAD' || form.deliveryMode === 'PICKUP')) && (isUsRoute(form.origin) ? <StructuredAddress key={`pickupAddress-${form.origin}`} label="Pickup address" value={form.pickupAddress} required onChange={value=>setForm({...form,pickupAddress:value})}/> : <label>Pickup address<textarea maxLength={1000} value={form.pickupAddress} onChange={(event) => setForm({ ...form, pickupAddress: event.target.value })} placeholder="Street address where D2F collects the parcel" /><small className="field-help">{form.deliveryMode === 'PICKUP' ? 'The customer asked D2F to collect the goods from this address.' : 'Same-city road deliveries need a pickup address that differs from the delivery address.'}</small></label>)}
+          {parcel && <div className="form-row"><label>Collection<select value={form.deliveryMode} onChange={(event) => setForm({ ...form, deliveryMode: event.target.value })}><option value="DROP_OFF">Warehouse drop-off</option><option value="PICKUP">D2F collects the goods (pickup)</option></select></label>{form.deliveryMode === 'PICKUP' && <label>Pickup date and time<input type="datetime-local" min={localInputValue()} value={pickupWhenEdit} onChange={(event) => setPickupWhenEdit(event.target.value)} /><small className="field-help">Leave empty to keep the currently scheduled slot.</small></label>}</div>}
+          {parcel && form.deliveryMode === 'PICKUP' && <label>Pickup reschedule reason<input maxLength={300} value={rescheduleReason} onChange={(event) => setRescheduleReason(event.target.value)} placeholder="Why is the collection slot changing?" /></label>}
           <div className="form-row">
-            <label>Recipient phone<input value={form.recipientPhone} onChange={(event) => setForm({ ...form, recipientPhone: event.target.value })} /></label>
-            <label>Package type<select value={form.packageType} onChange={(event) => setForm({ ...form, packageType: event.target.value })}>{['BOX', 'BARREL', 'TV', 'APPLIANCE', 'FURNITURE', 'PALLET', 'VEHICLE', 'DOCUMENTS', 'OTHER'].map((type) => <option key={type}>{type}</option>)}</select></label>
+            <label>Recipient phone<input type="tel" maxLength={80} value={form.recipientPhone} onChange={(event) => setForm({ ...form, recipientPhone: event.target.value })} /></label>
+            <label>Package type<select value={form.packageType} onChange={(event) => setForm({ ...form, packageType: event.target.value })}>{['BOX', 'SUITCASE', 'BARREL', 'TV', 'APPLIANCE', 'FURNITURE', 'PALLET', 'VEHICLE', 'DOCUMENTS', 'OTHER'].map((type) => <option key={type}>{type}</option>)}</select></label>
           </div>
           <div className="form-row">
             <label>Weight (kg)<input type="number" min="0.01" max="10000" step="0.01" required value={form.weightKg} onChange={(event) => setForm({ ...form, weightKg: event.target.value })} /></label>
-            <label>Shipping method<select value={form.method} onChange={(event) => setForm({ ...form, method: event.target.value })}><option value="AIR">Air</option><option value="SEA">Sea</option><option value="ROAD">Road</option></select></label>
+            <label>Shipping method<select disabled={routeLocked} value={form.method} onChange={(event) => setForm({ ...form, method: event.target.value })}><option value="AIR">Air</option><option value="SEA">Sea</option><option value="ROAD">Road</option></select></label>
           </div>
           <div className="form-row">
-            <label>Origin<input list="d2f-route-locations" required maxLength={120} value={form.origin} onChange={(event) => setForm({ ...form, origin: event.target.value })} /></label>
-            <label>Destination<input list="d2f-route-locations" required maxLength={120} value={form.destination} onChange={(event) => setForm({ ...form, destination: event.target.value })} /></label>
+            <label>Origin<input disabled={routeLocked} list="d2f-route-locations" required pattern=".*\S.*" maxLength={120} value={form.origin} onChange={(event) => setForm({ ...form, origin: event.target.value })} /></label>
+            <label>Destination<input disabled={routeLocked} list="d2f-route-locations" required pattern=".*\S.*" maxLength={120} value={form.destination} onChange={(event) => setForm({ ...form, destination: event.target.value })} /></label>
           </div>
+          <small className="field-help">Origin is where the shipment starts; the receiving D2F warehouse is recorded separately at intake. Domestic Togo cities are available for road routes. Air and sea need different cities; same-city road needs different pickup and delivery addresses.</small>
           <label>Staff note (optional)<input maxLength={1000} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
-          <div className="alert info-alert"><ShieldCheck size={16} /> The shipment is saved to the shared D2F API and appears in staff operations.</div>
-          <button className="button primary full-button" disabled={saving || customerLoading || !customerId}>{saving ? <span className="spinner" /> : <PackageCheck size={16} />} Create shipment</button>
+          {routeLocked && <p className="muted">Route and method are managed by container {parcel.container.code}. Remove the parcel from a loading container to change them.</p>}
+          {parcel?.container && parcel.container.status !== 'LOADING' && <p className="muted">The departure manifest keeps the details recorded at departure.</p>}
+          <div className="alert info-alert"><ShieldCheck size={16} /> {parcel ? 'Corrections are saved to the shared shipment record and recorded in the admin audit trail.' : 'The shipment is saved to the shared D2F API and appears in staff operations.'}</div>
+          <div className="form-row"><button type="button" className="button secondary" disabled={saving} onClick={onClose}>Cancel</button><button className="button primary full-button" disabled={saving || customerLoading || !customerId}>{saving ? <span className="spinner" /> : <PackageCheck size={16} />} {parcel ? 'Save changes' : 'Create shipment'}</button></div>
         </form>
       </section>
     </div>
   );
 }
 
-function ShipmentModal({ parcel, loading, busy, onClose, onUpdate }) {
-  const [next, setNext] = useState('');
-  const [note, setNote] = useState('');
-  const [location, setLocation] = useState('');
+// Goods photos arrive from the API as raw bytes behind an Authorization
+// header, so this component fetches each blob itself and turns it into an
+// object URL for the <img> tag. Object URLs are revoked when it unmounts.
+function GoodsPhotos({ parcelId, images, goods, token }) {
+  const [urls, setUrls] = useState({});
+  const [error, setError] = useState('');
+
   useEffect(() => {
-    setNext(TRANSITIONS[parcel.status]?.[0] || '');
-  }, [parcel.id, parcel.status]);
+    const controller = new AbortController();
+    const created = [];
+    (async () => {
+      for (const image of images || []) {
+        try {
+          const response = await fetch(
+            `${getApiBaseUrl()}/parcels/${encodeURIComponent(parcelId)}/images/${encodeURIComponent(image.id)}/raw`,
+            {
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+              signal: controller.signal,
+            },
+          );
+          if (!response.ok) {
+            if (response.status === 401) {
+              window.dispatchEvent(new Event('d2f-session-expired'));
+            }
+            throw new Error(`A goods photo could not be loaded (${response.status}).`);
+          }
+          const url = URL.createObjectURL(await response.blob());
+          created.push(url);
+          setUrls((current) => ({ ...current, [image.id]: url }));
+        } catch (loadError) {
+          if (!controller.signal.aborted) setError(loadError.message);
+        }
+      }
+    })();
+    return () => {
+      controller.abort();
+      created.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [parcelId, token]);
+
+  return (
+    <>
+      {error && <div className="alert error-alert" role="alert">{error}</div>}
+      <div className="photo-grid">
+        {(images || []).map((image) => (
+          <figure key={image.id} style={{ margin: 0 }}>
+          <img
+            className={urls[image.id] ? 'photo-thumb' : 'photo-thumb photo-loading'}
+            src={urls[image.id]}
+            alt={image.fileName || 'Goods photo'}
+            title={image.fileName || ''}
+          />
+          <figcaption>{image.itemId ? goods.find((item) => item.id === image.itemId)?.name || 'Declared package' : 'Whole shipment'}</figcaption>
+          </figure>
+        ))}
+      </div>
+      <small className="field-help">Showing {images?.length || 0} of 8 optional goods photos attached to this shipment.</small>
+    </>
+  );
+}
+
+function staffStatusOptions(parcel) {
+  if (parcel.serviceType === 'AIR_TRAVELLER' || parcel.status === 'OUT_FOR_DELIVERY') return [];
+  if (parcel.method === 'SEA' && parcel.status === 'PROCESSING') return parcel.warehouseReceivedAt ? ['READY_FOR_LOADING'] : [];
+  if (parcel.method === 'SEA' && ['READY_FOR_LOADING','LOADED_IN_CONTAINER','IN_TRANSIT','ARRIVED_PORT','CUSTOMS_CLEARANCE','CUSTOMS_CLEARED'].includes(parcel.status)) return [];
+  return (TRANSITIONS[parcel.status] || []).filter(s => !['PICKUP_SCHEDULED','PICKED_UP','RECEIVED','OUT_FOR_DELIVERY','RELEASED'].includes(s) && (parcel.warehouseReceivedAt || !['PROCESSING','IN_TRANSIT'].includes(s)) && (!PICKUP_ONLY_STATUSES.has(s) || parcel.deliveryMode === 'PICKUP'));
+}
+
+function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token, notify, currentUserId, canEditAllNotes, onRefreshDetail }) {
+  const [next, setNext] = useState('');
+  const [operationalNote, setOperationalNote] = useState({});
+  const [locations, setLocations] = useState([]);
+  const [locationId, setLocationId] = useState('');
+  const [locationsError, setLocationsError] = useState('');
+  const [confirmed, setConfirmed] = useState(false);
+  const [releasedToName, setReleasedToName] = useState('');
+  const [releasedToId, setReleasedToId] = useState('');
+  const [releasedAt, setReleasedAt] = useState(localInputValue());
+  const [deliveredToName, setDeliveredToName] = useState(parcel.releasedToName || '');
+  const [deliveredToId, setDeliveredToId] = useState(parcel.releasedToIdNumber || '');
+  const [deliveredAt, setDeliveredAt] = useState(localInputValue());
+  const [proofType, setProofType] = useState('');
+  const [proofReference, setProofReference] = useState('');
+  const [pickupWhen, setPickupWhen] = useState('');
+  const [missedItems, setMissedItems] = useState({});
+  const [formError, setFormError] = useState('');
+  const [editingNote, setEditingNote] = useState(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [noteBusy, setNoteBusy] = useState(false);
+  const goods = Array.isArray(parcel.items) ? parcel.items : [];
+  const goodsCount = goods.length;
+
+  useEffect(() => {
+    const options = staffStatusOptions(parcel);
+    // Pickup requests default to scheduling the collection; everything else
+    // defaults to the first available stage.
+    const preferred =
+      parcel.deliveryMode === 'PICKUP' && options.includes('PICKUP_SCHEDULED')
+        ? 'PICKUP_SCHEDULED'
+        : options[0];
+    setNext(preferred || '');
+    setConfirmed(false);
+    setFormError('');
+    setReleasedToName('');
+    setReleasedToId('');
+    setReleasedAt(localInputValue());
+    setDeliveredToName(parcel.releasedToName || '');
+    setDeliveredToId(parcel.releasedToIdNumber || '');
+    setDeliveredAt(localInputValue());
+    setProofType('');
+    setProofReference('');
+    setPickupWhen('');
+    setMissedItems({});
+    setEditingNote(null);
+  }, [parcel.id, parcel.status, parcel.releasedToName, parcel.releasedToIdNumber]);
+
+  useEffect(() => {
+    let active = true;
+    setLocationsError('');
+    request('/warehouse/locations', { token })
+      .then((list) => {
+        if (!active) return;
+        setLocations(list);
+        if (list.length === 1) setLocationId(list[0].id);
+      })
+      .catch((error) => { if (active) setLocationsError(error.message); });
+    return () => { active = false; };
+  }, [token]);
+
   const containerManaged = parcel.container && parcel.container.status !== 'ARRIVED';
-  const available = containerManaged ? [] : TRANSITIONS[parcel.status] || [];
+  // Mode-aware transition options: drop-off shipments skip the pickup stages
+  // (REQUESTED → RECEIVED), pickup requests can be scheduled and collected.
+  const available = containerManaged ? [] : staffStatusOptions(parcel);
+  const needsFacility = FACILITY_REQUIRED_STATUSES.has(next);
+  const needsConfirmation = CONFIRMATION_STATUSES.has(next);
+  const isReleased = next === 'RELEASED';
+  const isDelivered = next === 'DELIVERED';
+  const isPickup = parcel.deliveryMode === 'PICKUP';
+  const schedulingPickup = next === 'PICKUP_SCHEDULED';
+  const collecting = next === 'PICKED_UP' && goods.length > 0;
+  const missingGoods = goods.filter((item) => item.notCollectedReason && !item.collectedAt);
+
+  function submit(event) {
+    event.preventDefault();
+    if (!next) return;
+    if (needsFacility && !locationId) {
+      setFormError('Select the D2F facility where this update is taking place.');
+      return;
+    }
+    if (needsConfirmation && !confirmed) {
+      setFormError('Confirm that you have physically verified this shipment at the selected facility.');
+      return;
+    }
+    if (collecting && Object.values(missedItems).some((reason) => !reason.trim())) {
+      setFormError('Record why each missing package was not collected.');
+      return;
+    }
+    if (isReleased) {
+      if (!releasedToName.trim()) { setFormError('Enter the name of the person receiving the parcel.'); return; }
+      if (!releasedToId.trim()) { setFormError('Record the handover ID or reference before releasing the parcel.'); return; }
+      if (!releasedAt || Number.isNaN(Date.parse(releasedAt))) { setFormError('Enter a valid handover date and time.'); return; }
+    }
+    if (isDelivered) {
+      if (!deliveredToName.trim()) { setFormError('Enter the recipient name before confirming delivery.'); return; }
+      if (!proofType) { setFormError('Select the proof of delivery recorded for this handover.'); return; }
+      if (!proofReference.trim()) { setFormError('Record the proof reference (signature, photo, or ID details).'); return; }
+      if (proofType === 'ID_CONFIRMATION' && !deliveredToId.trim()) { setFormError('Record the recipient ID number for an ID-confirmed delivery.'); return; }
+      if (!deliveredAt || Number.isNaN(Date.parse(deliveredAt))) { setFormError('Enter a valid delivery date and time.'); return; }
+    }
+    if (schedulingPickup && pickupWhen.trim()) {
+      if (Number.isNaN(Date.parse(pickupWhen)) || new Date(pickupWhen).getTime() < Date.now()) {
+        setFormError('Enter a future pickup date and time, or leave the window empty to keep the customer\u2019s requested slot.');
+        return;
+      }
+    }
+    setFormError('');
+    const payload = {
+      status: next,
+      ...operationalNote,
+      ...(collecting ? { missedItems: Object.entries(missedItems).map(([itemId, reason]) => ({ itemId, reason: reason.trim() })) } : {}),
+      ...(locationId ? { locationId } : {}),
+      ...(confirmed ? { confirmed: true } : {}),
+      ...(schedulingPickup && pickupWhen.trim() ? { pickupScheduledAt: new Date(pickupWhen).toISOString() } : {}),
+      ...(isReleased ? {
+        releasedToName: releasedToName.trim(),
+        releasedToIdNumber: releasedToId.trim(),
+        releasedAt: new Date(releasedAt).toISOString(),
+      } : {}),
+      ...(isDelivered ? {
+        deliveredToName: deliveredToName.trim(),
+        deliveredToIdNumber: deliveredToId.trim(),
+        deliveredAt: new Date(deliveredAt).toISOString(),
+        deliveryProofType: proofType,
+        deliveryProofReference: proofReference.trim(),
+      } : {}),
+    };
+    onUpdate(payload);
+  }
+
+  function canEditNote(event) {
+    return Boolean(currentUserId) && (canEditAllNotes || event.actorId === currentUserId);
+  }
+
+  async function saveNote(event) {
+    setNoteBusy(true);
+    try {
+      await request(`/parcels/${encodeURIComponent(parcel.id)}/events/${encodeURIComponent(event.id)}/note`, {
+        token,
+        method: 'PATCH',
+        body: JSON.stringify({ note: noteDraft.trim() }),
+      });
+      setEditingNote(null);
+      notify('Operational note corrected.');
+      await onRefreshDetail();
+    } catch (error) {
+      notify(error.message, 'error');
+    } finally {
+      setNoteBusy(false);
+    }
+  }
+
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <datalist id="d2f-route-locations">{ROUTE_LOCATIONS.map(l => <option key={l} value={l} />)}</datalist><section className="modal shipment-modal" role="dialog" aria-modal="true" aria-labelledby="shipment-title">
@@ -603,9 +1021,58 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate }) {
         {loading ? <LoadingPanel label="Loading tracking history…" /> : <div className="modal-body">
           <div className="detail-status"><span><small>CURRENT STATUS</small><StatusPill status={parcel.status} /></span><span><small>CREATED</small><b>{formatDate(parcel.createdAt, { year: 'numeric', month: 'long', day: 'numeric' })}</b></span></div>
           <div className="detail-grid"><div><small>Customer</small><b>{parcel.customer?.displayName || '—'}</b></div><div><small>Recipient</small><b>{parcel.recipientName}</b></div><div><small>Route</small><b>{parcel.origin} → {parcel.destination}</b></div><div><small>Package</small><b>{parcel.packageType} · {parcel.weightKg} kg</b></div></div>
+          <div className="detail-grid"><div><small>Recipient phone</small><b>{parcel.recipientPhone || '—'}</b></div><div><small>Delivery address</small><b>{parcel.recipientAddress || '—'}</b></div><div><small>Pickup address</small><b>{parcel.pickupAddress || '—'}</b></div><div><small>Shipping method</small><b>{parcel.method}</b></div></div>
+          <div className="detail-grid">
+            <div><small>Customer contact</small><b>{[parcel.customer?.phone, parcel.customer?.email].filter(Boolean).join(' · ') || '—'}</b></div>
+            <div><small>Collection</small><b>{parcel.deliveryMode === 'PICKUP' ? 'D2F collects the goods' : 'Warehouse drop-off'}</b></div>
+            <div><small>D2F confirmed pickup</small><b>{parcel.pickupScheduledAt ? formatDate(parcel.pickupScheduledAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'To be confirmed'}</b></div>
+            <div><small>Goods pieces</small><b>{goodsCount ? `${goodsCount} package${goodsCount === 1 ? '' : 's'}` : '—'}</b></div>
+          </div>
+          <div className="detail-grid"><div><small>Service</small><b>{parcel.serviceType === 'AIR_CARGO' ? 'D2F Air Cargo' : parcel.serviceType === 'AIR_TRAVELLER' ? 'D2F Connect · Air Traveller' : parcel.method}</b></div><div><small>Customer contents declaration</small><b>{parcel.restrictionsAcknowledgedAt ? formatDate(parcel.restrictionsAcknowledgedAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Not recorded on this legacy / staff registration'}</b></div></div>
+          {missingGoods.length > 0 && <div className="alert error-alert" role="status">Collected {goods.length - missingGoods.length} of {goods.length} packages. Missing packages remain recorded below.</div>}
+          <LabelPrintPanel parcelId={parcel.id} token={token} />
+          <CustodyActions parcel={parcel} token={token} onSaved={onRefreshDetail} isAdmin={canEditAllNotes} />
+          <AirCargoReference parcel={parcel} token={token} notify={notify} onSaved={onRefreshDetail} />
+      {goods.length > 0 && <div className="goods-list">{goods.map((item, index) => <div className="goods-row" key={item.id || index}>
+            <b>{`${item.type || 'BOX'} ${index + 1} of ${goods.length}`} · {item.name}</b>
+            <span>{item.quantity} contents unit{item.quantity === 1 ? '' : 's'}{item.weightKg != null ? ` · ${item.weightKg} kg` : ''}{item.details ? ` · ${item.details}` : ''}</span>
+            {item.lengthCm != null && item.widthCm != null && item.heightCm != null && <span>{`${item.lengthCm} × ${item.widthCm} × ${item.heightCm} cm`}</span>}
+            {item.packageCode && <span>Package code: {item.packageCode}</span>}
+            {item.notCollectedReason && !item.collectedAt && <strong>Not collected: {item.notCollectedReason}</strong>}
+          </div>)}</div>}
+          <div className="detail-grid"><div><small>Staff note</small><b>{parcel.notes || '—'}</b></div><div><small>Released to</small><b>{parcel.releasedToName ? `${parcel.releasedToName}${parcel.releasedAt ? ` · ${formatDate(parcel.releasedAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}` : '—'}</b></div><div><small>Delivered to</small><b>{parcel.deliveredToName || '—'}</b></div><div><small>Proof of delivery</small><b>{parcel.deliveryProofType ? `${DELIVERY_PROOF_TYPES[parcel.deliveryProofType] || parcel.deliveryProofType}${parcel.deliveryProofReference ? ` · ${parcel.deliveryProofReference}` : ''}` : '—'}</b></div></div>
+          {parcel.images?.length > 0 && <div className="goods-photos"><h3 className="modal-section-title">{`Goods photos (${parcel.images.length})`}</h3><GoodsPhotos parcelId={parcel.id} images={parcel.images} goods={goods} token={token} /></div>}
+          {onEdit && <button className="button secondary" disabled={busy} onClick={onEdit}><Pencil size={16} /> Edit shipment</button>}
           <h3 className="modal-section-title">Tracking history</h3>
-          <div className="timeline">{parcel.events?.map((event) => <div className="timeline-item" key={event.id}><span className="timeline-dot" style={{ '--status-color': STATUS_COLORS[event.status] || '#788295' }} /><div><b>{statusLabel(event.status)}</b><span>{event.note || event.location || 'Status updated'}</span><small>{formatDate(event.createdAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{event.actor?.fullName ? ` · ${event.actor.fullName}` : ''}</small></div></div>)}</div>
-          {available.length > 0 ? <form className="status-update-form" onSubmit={(event) => { event.preventDefault(); onUpdate(next, note, location); }}><h3 className="modal-section-title">Update shipment</h3><div className="form-row"><label>Move to<select value={next} onChange={(event) => setNext(event.target.value)}>{available.map((state) => <option key={state} value={state}>{statusLabel(state)}</option>)}</select></label><label>Location<input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="e.g. Omaha Warehouse" /></label></div><label>Update note<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Add a short tracking update (optional)" /></label><button className="button primary" disabled={busy || !next}>{busy ? <span className="spinner" /> : <Check size={16} />} Save status update</button></form> : <div className="complete-note"><Check size={16} /> {containerManaged ? `Managed by container ${parcel.container.code}. Record freight departure and arrival in Containers.` : "This shipment is marked delivered. No further status changes are available."}</div>}
+          {canEditAllNotes && parcel.method==='SEA' && parcel.status==='IN_TRANSIT' && (!parcel.container || parcel.container.status==='LOADING') && <form className="ops-confirm" onSubmit={async e=>{e.preventDefault();const f=new FormData(e.currentTarget);try{await request(`/parcels/${parcel.id}/reconcile-sea-departure`,{token,method:'POST',body:JSON.stringify({locationId:parcel.locationId,reason:f.get('reason'),confirmed:f.get('confirmed')==='on'})});await onRefreshDetail();notify('Premature departure corrected with the original history preserved.');}catch(e){setFormError(e.message);}}}><h3>Reconcile a premature sea departure</h3><p>Use only after physically confirming these goods are still at their recorded origin warehouse. This adds a correction event and preserves the earlier entry.</p><label>Correction reason<textarea name="reason" required maxLength={1000}/></label><label className="confirm-check"><input type="checkbox" name="confirmed" required/>I physically verified these goods remain at the recorded origin warehouse; departure has not occurred.</label><button className="button secondary">Record audited warehouse correction</button></form>}
+          <div className="timeline">{parcel.events?.map((event) => <div className="timeline-item" key={event.id}><span className="timeline-dot" style={{ '--status-color': STATUS_COLORS[event.status] || '#788295' }} /><div><b>{statusLabel(event.status)}</b><span>{event.internalNote || event.note || event.location || 'Status updated'}</span><small>{formatDate(event.createdAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{event.actor?.fullName ? ` · ${event.actor.fullName}` : ''}{event.location ? ` · ${event.location}` : ''}</small>{event.originalNote && event.originalNote !== (event.internalNote || event.note) && <details><summary>Original operational note</summary><p>{event.originalNote}</p></details>}{canEditNote(event) && <button type="button" className="text-button timeline-note-edit" onClick={() => { setEditingNote(event); setNoteDraft(event.internalNote || event.note || ''); }}>Correct note</button>}{editingNote?.id === event.id && <form className="note-editor" onSubmit={(submitEvent) => { submitEvent.preventDefault(); saveNote(event); }}><label>Operational note<textarea autoFocus maxLength={1000} rows={3} value={noteDraft} onChange={(changeEvent) => setNoteDraft(changeEvent.target.value)} /></label><div className="heading-actions"><button type="button" className="button secondary" disabled={noteBusy} onClick={() => setEditingNote(null)}>Cancel</button><button className="button primary" disabled={noteBusy}>{noteBusy ? <span className="spinner" /> : <Check size={15} />} Save correction</button></div></form>}</div></div>)}</div>
+          {available.length > 0 ? <form className="status-update-form" onSubmit={submit}>
+            <h3 className="modal-section-title">Update shipment</h3>
+            <div className="form-row">
+              <label>Move to<select value={next} onChange={(event) => { setNext(event.target.value); setConfirmed(false); setFormError(''); }}>{available.map((state) => <option key={state} value={state}>{statusLabel(state)}</option>)}</select></label>
+              <label>Facility<select value={locationId} onChange={(event) => setLocationId(event.target.value)} disabled={!needsFacility || Boolean(locationsError)}><option value="">{locationsError ? 'Facilities unavailable' : 'Select D2F facility'}</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name} · {location.city}, {location.country}</option>)}</select></label>
+            </div>
+            {needsFacility && !locationsError && <small className="field-help">The facility must match where the parcel physically is. Staff can only confirm at their assigned facility; administrators can operate anywhere.</small>}
+            {locationsError && <div className="alert error-alert" role="alert">{locationsError}</div>}
+            {needsConfirmation && <label className="confirm-check"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> I physically verified this shipment at the selected facility.</label>}
+            {schedulingPickup && <div className="handover-fields"><label>Pickup date and time<input type="datetime-local" min={localInputValue()} value={pickupWhen} onChange={(event) => setPickupWhen(event.target.value)} /></label><small className="field-help">Optional — confirm or adjust the customer&#39;s requested slot. Leave empty to keep {parcel.pickupScheduledAt ? 'the currently scheduled window' : "the customer's requested slot"}.</small></div>}
+            {collecting && <fieldset className="handover-fields"><legend>Collection checklist</legend>
+              <small className="field-help">Mark only the packages that were not collected. Record a reason for each missing package.</small>
+              {goods.map((item, index) => <div key={item.id}>
+                <label className="confirm-check"><input type="checkbox" checked={Object.hasOwn(missedItems, item.id)} onChange={(event) => setMissedItems((current) => {
+                  const changed = { ...current };
+                  if (event.target.checked) changed[item.id] = ''; else delete changed[item.id];
+                  return changed;
+                })} />{`Not collected: ${item.name} (${index + 1} of ${goods.length})`}</label>
+                {Object.hasOwn(missedItems, item.id) && <label>Reason for {item.name}<input maxLength={300} value={missedItems[item.id]} onChange={(event) => setMissedItems({ ...missedItems, [item.id]: event.target.value })} /></label>}
+              </div>)}
+            </fieldset>}
+            {isReleased && <div className="handover-fields"><div className="form-row"><label>Received by<input required maxLength={120} value={releasedToName} onChange={(event) => setReleasedToName(event.target.value)} placeholder="Person collecting the parcel" /></label><label>Handover ID / reference<input required maxLength={80} value={releasedToId} onChange={(event) => setReleasedToId(event.target.value)} placeholder="ID number or collection code" /></label></div><label>Handover date and time<input type="datetime-local" required value={releasedAt} max={localInputValue()} onChange={(event) => setReleasedAt(event.target.value)} /></label></div>}
+            {isDelivered && <div className="handover-fields"><div className="form-row"><label>Delivered to<input required maxLength={120} value={deliveredToName} onChange={(event) => setDeliveredToName(event.target.value)} /></label><label>Recipient ID / reference<input maxLength={80} value={deliveredToId} onChange={(event) => setDeliveredToId(event.target.value)} placeholder={proofType === 'ID_CONFIRMATION' ? 'Required for ID confirmation' : 'Optional reference'} /></label></div><div className="form-row"><label>Proof of delivery<select required value={proofType} onChange={(event) => setProofType(event.target.value)}><option value="">Select proof</option>{Object.entries(DELIVERY_PROOF_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>Proof reference<input required maxLength={300} value={proofReference} onChange={(event) => setProofReference(event.target.value)} placeholder="Signature, photo, or ID reference" /></label></div><label>Delivery date and time<input type="datetime-local" required value={deliveredAt} max={localInputValue()} onChange={(event) => setDeliveredAt(event.target.value)} /></label></div>}
+            <OperationalNoteField token={token} status={next} serviceType={parcel.serviceType || parcel.method} onChange={setOperationalNote} />
+            {formError && <div className="alert error-alert" role="alert">{formError}</div>}
+            <button className="button primary" disabled={busy || !next}>{busy ? <span className="spinner" /> : <Check size={16} />} Save status update</button>
+          </form> : <div className="complete-note"><Check size={16} /> {containerManaged ? `Managed by container ${parcel.container.code}. Record freight departure and arrival in Containers.` : (parcel.status === 'DELIVERED' ? "Delivery is complete." : parcel.status === 'OUT_FOR_DELIVERY' ? "The assigned driver confirms actual delivery in Driver tasks." : "Use the pickup and warehouse custody actions above for the next physical step.")}</div>}
         </div>}
       </section>
     </div>
@@ -766,7 +1233,7 @@ function Team({ token, notify, refreshKey, currentUserId }) {
 
   return (
     <>
-      <PageHeading eyebrow="PEOPLE & PERMISSIONS" title="Team & access" subtitle="Review account roles and invite trusted staff or drivers." >
+      <PageHeading eyebrow="PEOPLE & PERMISSIONS" title="Team & access" subtitle="Review account roles and invite trusted staff, drivers, or administrators." >
         <button className="button primary" onClick={() => { setInvite(null); setInviteOpen(true); }}><UsersRound size={16} /> Create invitation</button>
       </PageHeading>
       <section className="panel table-panel">
@@ -776,7 +1243,7 @@ function Team({ token, notify, refreshKey, currentUserId }) {
         </tbody></table></div>
         <div className="table-foot"><span>Roles and access are enforced by the backend</span><PageControls total={total} offset={offset} limit={PAGE_SIZE} onPage={setOffset} /></div>
       </section>
-      {inviteOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setInviteOpen(false); }}><section className="modal invite-modal" role="dialog" aria-modal="true" aria-labelledby="invite-title"><div className="modal-header"><div><span className="eyebrow">SECURE TEAM ONBOARDING</span><h2 id="invite-title">{invite ? 'Invitation ready' : 'Invite a teammate'}</h2></div><button className="icon-button" onClick={() => setInviteOpen(false)} aria-label="Close invitation"><X size={19} /></button></div>{invite ? <div className="modal-body"><div className="invite-success"><span><Check size={20} /></span><div><b>{invite.role} invitation created</b><small>For {invite.email} · expires in {invite.expiresInDays} days</small></div></div><label className="invite-code-label">ONE-TIME SIGNUP CODE</label><div className="invite-code"><code>{invite.invitation}</code><button className="button secondary" onClick={copyInvite}><Copy size={15} /> Copy</button></div><div className="alert warning-alert">This code grants {invite.role.toLowerCase()} access. Send it only to {invite.email} through a private channel. The invitee must sign up with that exact email.</div><button className="button primary full-button" onClick={() => setInviteOpen(false)}>Done</button></div> : <form className="modal-body invite-form" onSubmit={createInvite}><p className="muted">Invitations are restricted to Staff or Driver and are bound to the recipient’s email address.</p><label>Email address<input autoFocus type="email" required value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="teammate@example.com" /></label><label>Role<select value={inviteRole} onChange={(event) => setInviteRole(event.target.value)}><option value="STAFF">Staff · shipping operations</option><option value="DRIVER">Driver · delivery workflow</option></select></label><div className="alert info-alert"><ShieldCheck size={16} /> Admin access cannot be granted through public invitations.</div><button className="button primary full-button" disabled={inviteBusy}>{inviteBusy ? <span className="spinner" /> : <UsersRound size={16} />} Generate secure invitation</button></form>}</section></div>}
+      {inviteOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setInviteOpen(false); }}><section className="modal invite-modal" role="dialog" aria-modal="true" aria-labelledby="invite-title"><div className="modal-header"><div><span className="eyebrow">SECURE TEAM ONBOARDING</span><h2 id="invite-title">{invite ? 'Invitation ready' : 'Invite a teammate'}</h2></div><button className="icon-button" onClick={() => setInviteOpen(false)} aria-label="Close invitation"><X size={19} /></button></div>{invite ? <div className="modal-body"><div className="invite-success"><span><Check size={20} /></span><div><b>{invite.role} invitation created</b><small>For {invite.email} · expires in {invite.expiresInDays} days</small></div></div><label className="invite-code-label">ONE-TIME SIGNUP CODE</label><div className="invite-code"><code>{invite.invitation}</code><button className="button secondary" onClick={copyInvite}><Copy size={15} /> Copy</button></div><div className="alert warning-alert">This code grants {invite.role.toLowerCase()} access. Send it only to {invite.email} through a private channel. The invitee must sign up with that exact email.</div><button className="button primary full-button" onClick={() => setInviteOpen(false)}>Done</button></div> : <form className="modal-body invite-form" onSubmit={createInvite}><p className="muted">Invitations are issued by an authenticated administrator and are bound to the recipient’s exact email address.</p><label>Email address<input autoFocus type="email" required value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="teammate@example.com" /></label><label>Role<select value={inviteRole} onChange={(event) => setInviteRole(event.target.value)}><option value="STAFF">Staff · shipping operations</option><option value="DRIVER">Driver · delivery workflow</option><option value="ADMIN">Admin · full workspace access</option></select></label><div className="alert info-alert"><ShieldCheck size={16} /> Administrator invitations can only be created by a signed-in administrator and remain bound to one email and one role.</div><button className="button primary full-button" disabled={inviteBusy}>{inviteBusy ? <span className="spinner" /> : <UsersRound size={16} />} Generate secure invitation</button></form>}</section></div>}
     </>
   );
 }
@@ -821,6 +1288,39 @@ function SystemHealth({ token, notify, refreshKey }) {
   );
 }
 
+function ChangePasswordModal({ token, onClose, notify, onChanged }) {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit(event) {
+    event.preventDefault();
+    setError('');
+    if (newPassword.length < 8) { setError('Use at least 8 characters for the new password.'); return; }
+    if (newPassword !== confirmPassword) { setError('The new passwords do not match.'); return; }
+    setBusy(true);
+    try {
+      const result = await request('/auth/password/change', {
+        token,
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      saveSession(result.token, result.user);
+      onChanged(result);
+      notify('Password updated. Other devices have been signed out.');
+      onClose();
+    } catch (problem) {
+      setError(problem.message || 'Unable to change the password.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (!busy && event.target === event.currentTarget) onClose(); }}><section className="modal invite-modal" role="dialog" aria-modal="true" aria-labelledby="password-title"><div className="modal-header"><div><span className="eyebrow">ACCOUNT SECURITY</span><h2 id="password-title">Change password</h2></div><button className="icon-button" disabled={busy} onClick={onClose} aria-label="Close password form"><X size={19} /></button></div><form className="modal-body invite-form" onSubmit={submit}><p className="muted">Changing your password signs out every other active device and keeps this dashboard signed in.</p><label>Current password<input autoFocus type="password" autoComplete="current-password" required value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label><label>New password<input type="password" autoComplete="new-password" minLength={8} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /><small className="field-help">At least 8 characters and no more than 72 bytes.</small></label><label>Confirm new password<input type="password" autoComplete="new-password" minLength={8} required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>{error && <div className="alert error-alert" role="alert">{error}</div>}<div className="form-row"><button type="button" className="button secondary" disabled={busy} onClick={onClose}>Cancel</button><button className="button primary full-button" disabled={busy}>{busy ? <span className="spinner" /> : <KeyRound size={16} />} Update password</button></div></form></section></div>;
+}
+
 function Toast({ toast, onClose }) {
   useEffect(() => {
     if (!toast) return undefined;
@@ -839,6 +1339,7 @@ export default function App() {
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [toast, setToast] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const notify = useCallback((message, type = 'success') => setToast({ message, type, key: Date.now() }), []);
   const token = session?.token;
@@ -901,13 +1402,15 @@ export default function App() {
     <div className="app-shell">
       <Sidebar page={page} setPage={setPage} user={session.user} onLogout={() => window.dispatchEvent(new Event('d2f-logout'))} open={menuOpen} setOpen={setMenuOpen} />
       <div className="main-shell">
-        <Header page={page} onMenu={() => setMenuOpen(true)} user={session.user} onRefresh={page === 'overview' ? loadOverview : () => setRefreshKey((value) => value + 1)} refreshing={refreshing} />
+        <Header page={page} onMenu={() => setMenuOpen(true)} user={session.user} onRefresh={page === 'overview' ? loadOverview : () => setRefreshKey((value) => value + 1)} refreshing={refreshing} onChangePassword={() => setPasswordOpen(true)} />
         <main className="content">
           {isAdmin && page === 'overview' && <Overview data={overview} days={days} onPeriod={setDays} loading={overviewLoading} onGo={setPage} />}
-          {page === 'shipments' && <Shipments staffAccess={!isAdmin} token={token} notify={notify} refreshOverview={loadOverview} refreshKey={refreshKey} key="shipments" />}
+          {page === 'shipments' && <Shipments staffAccess={!isAdmin} token={token} notify={notify} refreshOverview={loadOverview} refreshKey={refreshKey} currentUserId={session.user.id} key="shipments" />}
+          {page === 'connect' && <ConnectOperations token={token} notify={notify} refreshKey={refreshKey} isAdmin={isAdmin} />}
           {page === 'containers' && <Containers token={token} notify={notify} refreshKey={refreshKey} />}
+          {isAdmin && page === 'operational-notes' && <OperationalNotes token={token} notify={notify} refreshKey={refreshKey} />}
           {isAdmin && page === 'locations' && <Locations token={token} notify={notify} refreshKey={refreshKey} />}
-          {page === 'bookings' && <Shipments staffAccess={!isAdmin} token={token} notify={notify} refreshOverview={loadOverview} refreshKey={refreshKey} bookings key="bookings" />}
+          {page === 'bookings' && <Shipments staffAccess={!isAdmin} token={token} notify={notify} refreshOverview={loadOverview} refreshKey={refreshKey} currentUserId={session.user.id} bookings key="bookings" />}
           {isAdmin && page === 'marketplace' && <Commerce kind="MARKETPLACE" token={token} notify={notify} refreshKey={refreshKey} key="marketplace" />}
           {isAdmin && page === 'buy-for-me' && <Commerce kind="BUY_FOR_ME" token={token} notify={notify} refreshKey={refreshKey} key="buy-for-me" />}
           {page === 'customers' && <Customers staffAccess={!isAdmin} token={token} notify={notify} refreshKey={refreshKey} key="customers" />}
@@ -916,6 +1419,7 @@ export default function App() {
           <footer className="page-footer"><span>© {new Date().getFullYear()} D2F Global</span><span><ShieldCheck size={13} /> {isAdmin ? 'Admin' : 'Staff'} operations · Data from D2F API</span></footer>
         </main>
       </div>
+      {passwordOpen && <ChangePasswordModal token={token} notify={notify} onClose={() => setPasswordOpen(false)} onChanged={(result) => setSession((existing) => ({ ...existing, token: result.token, user: result.user }))} />}
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   ) : (

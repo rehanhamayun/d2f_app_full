@@ -1,17 +1,29 @@
+import '../widgets/operational_note_field.dart';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../core/api.dart';
 import '../core/theme.dart';
 import '../models/models.dart';
+import '../models/warehouse.dart';
 import '../widgets/common.dart';
 
 /// Update Parcel Status (design screen 10). Shows only the server-allowed
-/// forward statuses; backend re-validates every transition.
+/// forward statuses; backend re-validates every transition, facility, proof
+/// and confirmation.
 class UpdateStatusScreen extends StatefulWidget {
   final Parcel parcel;
 
-  const UpdateStatusScreen({super.key, required this.parcel});
+  /// Optional loader so widget tests (and previews) can supply facilities
+  /// without a live API. Production always uses the organization's facilities.
+  final Future<List<WarehouseLocation>> Function()? loadLocations;
+
+  const UpdateStatusScreen({
+    super.key,
+    required this.parcel,
+    this.loadLocations,
+  });
 
   @override
   State<UpdateStatusScreen> createState() => _UpdateStatusScreenState();
@@ -19,23 +31,190 @@ class UpdateStatusScreen extends StatefulWidget {
 
 class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
   String? _selected;
-  String? _location;
-  final _note = TextEditingController();
+  String? _locationId;
+  List<WarehouseLocation> _locations = const [];
+  bool _locationsLoading = true;
+  String? _locationsError;
+
+  Map<String, dynamic> _operationalNote = {};
+  final _releasedToName = TextEditingController();
+  final _releasedToId = TextEditingController();
+  final _deliveredToName = TextEditingController();
+  final _deliveredToId = TextEditingController();
+  final _proofReference = TextEditingController();
+
+  // Pickup collection outcome: crew checks off every declared package that
+  // was NOT on hand and records why — a partial collection is a fact, not
+  // an error, and is never silently completed.
+  final Set<int> _missedRows = <int>{};
+  final Map<int, TextEditingController> _missedReasons = {};
+
+  DateTime _releasedAt = DateTime.now();
+  DateTime _deliveredAt = DateTime.now();
+  String? _proofType;
+  bool _confirmed = false;
   bool _saving = false;
   String? _error;
 
-  late final List<String> _allowed =
-      kAllowedTransitions[widget.parcel.status] ?? [];
+  // Mode-aware forward statuses: drop-off shipments cannot enter the pickup
+  // stages; pickup requests can be scheduled and collected before intake.
+  late final List<String> _allowed = staffStatusOptionsFor(widget.parcel);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLocations();
+  }
 
   @override
   void dispose() {
-    _note.dispose();
+    _releasedToName.dispose();
+    _releasedToId.dispose();
+    _deliveredToName.dispose();
+    _deliveredToId.dispose();
+    _proofReference.dispose();
+    for (final controller in _missedReasons.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
+  Future<void> _loadLocations() async {
+    setState(() {
+      _locationsLoading = true;
+      _locationsError = null;
+    });
+    try {
+      final list = await (widget.loadLocations ?? Api.I.warehouseLocations)();
+      if (!mounted) return;
+      setState(() {
+        _locations = list;
+        _locationsLoading = false;
+        if (list.length == 1) _locationId = list.first.id;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _locationsLoading = false;
+        _locationsError = 'Could not load D2F facilities. Check the connection and try again.';
+      });
+    }
+  }
+
+  bool get _needsFacility =>
+      _selected != null && kFacilityRequiredStatuses.contains(_selected);
+  bool get _needsConfirmation =>
+      _selected != null && kConfirmationStatuses.contains(_selected);
+  bool get _isReleased => _selected == 'RELEASED';
+  bool get _isDelivered => _selected == 'DELIVERED';
+  // The collection checklist applies only to pickups with itemized goods.
+  bool get _isCollection =>
+      _selected == 'PICKED_UP' && widget.parcel.items.isNotEmpty;
+
+  void _chooseStatus(String status) {
+    setState(() {
+      _selected = status;
+      _operationalNote = {};
+      _error = null;
+      _confirmed = false;
+      if (status == 'DELIVERED') {
+        if (_deliveredToName.text.trim().isEmpty &&
+            widget.parcel.releasedToName != null) {
+          _deliveredToName.text = widget.parcel.releasedToName!;
+        }
+        if (_deliveredToId.text.trim().isEmpty &&
+            widget.parcel.releasedToIdNumber != null) {
+          _deliveredToId.text = widget.parcel.releasedToIdNumber!;
+        }
+      }
+    });
+  }
+
+  /// Ticks/unticks one row of the collection checklist. Reasons live in a
+  /// controller retained on untick so an accidental tap does not lose text.
+  void _toggleMissed(int row) {
+    setState(() {
+      if (_missedRows.contains(row)) {
+        _missedRows.remove(row);
+      } else {
+        _missedRows.add(row);
+        _missedReasons.putIfAbsent(row, () => TextEditingController());
+      }
+      _error = null;
+    });
+  }
+
+  Future<DateTime?> _pickDateTime(DateTime initial) async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(initial.year - 2),
+      lastDate: DateTime.now(),
+      helpText: 'Select date',
+    );
+    if (date == null || !mounted) return null;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(initial),
+      helpText: 'Select time',
+    );
+    if (time == null) return null;
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
+  String? _validate() {
+    if (_selected == null) return 'Select a new status first.';
+    if (_operationalNote.isEmpty ||
+        (_operationalNote.containsKey('customMessage') &&
+            '${_operationalNote['customMessage']}'.trim().isEmpty))
+      return 'Select an operational message or enter a custom message.';
+    if (_needsFacility && _locationId == null) {
+      return 'Select the D2F facility where this update is taking place.';
+    }
+    if (_needsConfirmation && !_confirmed) {
+      return 'Confirm that you have physically verified this shipment at the selected facility.';
+    }
+    if (_isCollection) {
+      // Every declared package the crew did not take needs a reason.
+      for (final entry in _missedReasons.entries) {
+        if (!_missedRows.contains(entry.key)) continue;
+        final reason = entry.value.text.trim();
+        if (reason.isEmpty) {
+          return 'Record why “${widget.parcel.items[entry.key].name}” was not '
+              'collected, or untick it if it was collected.';
+        }
+      }
+    }
+    if (_isReleased) {
+      if (_releasedToName.text.trim().isEmpty) {
+        return 'Enter the name of the person receiving the parcel.';
+      }
+      if (_releasedToId.text.trim().isEmpty) {
+        return 'Record the handover ID or reference before releasing the parcel.';
+      }
+    }
+    if (_isDelivered) {
+      if (_deliveredToName.text.trim().isEmpty) {
+        return 'Enter the recipient name before confirming delivery.';
+      }
+      if (_proofType == null) {
+        return 'Select the proof of delivery recorded for this handover.';
+      }
+      if (_proofReference.text.trim().isEmpty) {
+        return 'Record the proof reference (signature, photo, or ID details).';
+      }
+      if (_proofType == 'ID_CONFIRMATION' &&
+          _deliveredToId.text.trim().isEmpty) {
+        return 'Record the recipient ID number for an ID-confirmed delivery.';
+      }
+    }
+    return null;
+  }
+
   Future<void> _submit() async {
-    if (_selected == null) {
-      setState(() => _error = 'Select a new status first.');
+    final validationError = _validate();
+    if (validationError != null) {
+      setState(() => _error = validationError);
       return;
     }
     setState(() {
@@ -46,8 +225,28 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
       await Api.I.updateStatus(
         widget.parcel.id,
         status: _selected!,
-        location: _location,
-        note: _note.text.trim(),
+        locationId: _locationId,
+        operationalNote: _operationalNote,
+        confirmed: _confirmed,
+        missedItems: _isCollection
+            ? [
+                for (final row in _missedRows)
+                  (
+                    itemId: widget.parcel.items[row].id,
+                    reason: _missedReasons[row]!.text.trim(),
+                  ),
+              ]
+            : const [],
+        releasedToName: _isReleased ? _releasedToName.text.trim() : null,
+        releasedToIdNumber: _isReleased ? _releasedToId.text.trim() : null,
+        releasedAt: _isReleased ? _releasedAt : null,
+        deliveredToName: _isDelivered ? _deliveredToName.text.trim() : null,
+        deliveredToIdNumber: _isDelivered ? _deliveredToId.text.trim() : null,
+        deliveredAt: _isDelivered ? _deliveredAt : null,
+        deliveryProofType: _isDelivered ? _proofType : null,
+        deliveryProofReference: _isDelivered
+            ? _proofReference.text.trim()
+            : null,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -151,95 +350,32 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
             _StatusOption(
               status: status,
               selected: _selected == status,
-              onSelect: () => setState(() {
-                _selected = status;
-                _error = null;
-              }),
+              onSelect: () => _chooseStatus(status),
             ),
             const SizedBox(height: 10),
           ],
 
-          const SizedBox(height: 6),
-          const Text(
-            'Location',
-            style: TextStyle(
-              color: AppColors.navy,
-              fontWeight: FontWeight.w700,
-              fontSize: 13.5,
-            ),
-          ),
-          const SizedBox(height: 6),
-          DropdownButtonFormField<String>(
-            isExpanded: true,
-            initialValue: _location,
-            items: [
-              for (final l in kEventLocations)
-                DropdownMenuItem(
-                  value: l,
-                  child: Text(l, style: AppTheme.body),
-                ),
-            ],
-            onChanged: (v) => setState(() => _location = v),
-            decoration: const InputDecoration(
-              hintText: 'Select location',
-              prefixIcon: Icon(Icons.place_rounded),
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          Text.rich(
-            TextSpan(
-              text: 'Notes ',
-              style: const TextStyle(
-                color: AppColors.navy,
-                fontWeight: FontWeight.w700,
-                fontSize: 13.5,
-              ),
-              children: const [
-                TextSpan(
-                  text: '(optional)',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.textGrey,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 6),
-          TextField(
-            controller: _note,
-            maxLength: 250,
-            maxLines: 3,
-            decoration: const InputDecoration(
-              hintText: 'Add a note about this update...',
-              counterStyle: TextStyle(color: AppColors.textGrey, fontSize: 11),
-            ),
-          ),
-
-          if (_error != null) ...[
-            const SizedBox(height: 10),
+          if (_allowed.isEmpty) ...[
+            const SizedBox(height: 4),
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: AppColors.coralSoft,
-                borderRadius: BorderRadius.circular(12),
+                color: AppColors.greenSoft,
+                borderRadius: BorderRadius.circular(16),
               ),
               child: Row(
                 children: [
-                  const Icon(
-                    Icons.error_outline_rounded,
-                    color: AppColors.coral,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
+                  const Icon(Icons.verified_rounded, color: AppColors.green),
+                  SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      _error!,
-                      style: const TextStyle(
-                        color: AppColors.coral,
+                      widget.parcel.status == 'DELIVERED'
+                          ? 'Delivery is complete.'
+                          : 'Use the pickup and warehouse actions on the shipment overview. The assigned driver confirms physical collection separately.',
+                      style: TextStyle(
+                        color: AppColors.green,
+                        fontWeight: FontWeight.w700,
                         fontSize: 13,
-                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
@@ -248,16 +384,386 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
             ),
           ],
 
+          if (_selected != null) ...[
+            const SizedBox(height: 8),
+            if (_needsFacility) ...[
+              const Text(
+                'Facility',
+                style: TextStyle(
+                  color: AppColors.navy,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13.5,
+                ),
+              ),
+              const SizedBox(height: 6),
+              if (_locationsLoading)
+                const LinearProgressIndicator(
+                  minHeight: 3,
+                  color: AppColors.blue,
+                )
+              else if (_locationsError != null)
+                _InlineError(message: _locationsError!, onRetry: _loadLocations)
+              else
+                DropdownButtonFormField<String>(
+                  key: ValueKey('facility-$_locationId'),
+                  isExpanded: true,
+                  initialValue: _locationId,
+                  items: [
+                    for (final location in _locations)
+                      DropdownMenuItem(
+                        value: location.id,
+                        child: Text(
+                          '${location.name} · ${location.label}',
+                          style: AppTheme.body,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                  onChanged: (value) => setState(() => _locationId = value),
+                  decoration: const InputDecoration(
+                    hintText: 'Select D2F facility',
+                    prefixIcon: Icon(Icons.warehouse_outlined),
+                  ),
+                ),
+              const SizedBox(height: 6),
+              Text(
+                'Only the facility where the parcel physically is may confirm this update.',
+                style: AppTheme.caption.copyWith(fontSize: 10.5, height: 1.4),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (_needsConfirmation) ...[
+              CheckboxListTile(
+                value: _confirmed,
+                onChanged: (value) =>
+                    setState(() => _confirmed = value ?? false),
+                controlAffinity: ListTileControlAffinity.leading,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                activeColor: AppColors.blue,
+                tileColor: AppColors.goldSoft,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                title: const Text(
+                  'I physically verified this shipment',
+                  style: TextStyle(
+                    color: AppColors.navy,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+                subtitle: Text(
+                  'Required before recording a physical movement or handover.',
+                  style: AppTheme.caption.copyWith(fontSize: 10.5),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (_isCollection) ...[
+              _SectionLabel('Collection checklist'),
+              const SizedBox(height: 6),
+              Text(
+                'Tick only the declared packages you could NOT take — record '
+                'why. Everything unticked is recorded as collected, so a '
+                'partial collection is never hidden.',
+                style: AppTheme.caption.copyWith(fontSize: 10.5, height: 1.4),
+              ),
+              const SizedBox(height: 6),
+              ...[
+                for (var row = 0; row < widget.parcel.items.length; row += 1)
+                  Column(
+                    key: ValueKey('collect-$row'),
+                    children: [
+                      CheckboxListTile(
+                        dense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                        ),
+                        controlAffinity: ListTileControlAffinity.leading,
+                        activeColor: AppColors.coral,
+                        value: _missedRows.contains(row),
+                        onChanged: (_) => _toggleMissed(row),
+                        title: Text(
+                          '${widget.parcel.items[row].name} '
+                          '(${widget.parcel.items[row].typeLabel} ${row + 1} of ${widget.parcel.items.length})',
+                          style: const TextStyle(
+                            color: AppColors.navy,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                          ),
+                        ),
+                        subtitle: Text(
+                          _missedRows.contains(row)
+                              ? 'Not collected'
+                              : 'Collected',
+                          style: TextStyle(
+                            color: AppColors.textGrey,
+                            fontSize: 10.5,
+                          ),
+                        ),
+                      ),
+                      if (_missedRows.contains(row))
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(26, 0, 12, 8),
+                          child: _TextField(
+                            key: ValueKey('missed-reason-$row'),
+                            controller: _missedReasons[row]!,
+                            label: 'Why was it not collected?',
+                            hint:
+                                'e.g. driver at location, still at the '
+                                'house, refused on sight…',
+                            icon: Icons.help_outline_rounded,
+                            maxLength: 300,
+                          ),
+                        ),
+                    ],
+                  ),
+              ],
+              const SizedBox(height: 12),
+            ],
+            if (_isReleased) ...[
+              _SectionLabel('Handover details'),
+              const SizedBox(height: 8),
+              _TextField(
+                controller: _releasedToName,
+                label: 'Received by',
+                hint: 'Full name of the person collecting',
+                icon: Icons.person_outline_rounded,
+                maxLength: 120,
+              ),
+              const SizedBox(height: 10),
+              _TextField(
+                controller: _releasedToId,
+                label: 'Handover ID / reference',
+                hint: 'ID number, collection code, or reference',
+                icon: Icons.badge_outlined,
+                maxLength: 80,
+              ),
+              const SizedBox(height: 10),
+              _DateTimeField(
+                label: 'Handover date and time',
+                value: _releasedAt,
+                onPick: () async {
+                  final picked = await _pickDateTime(_releasedAt);
+                  if (picked != null) setState(() => _releasedAt = picked);
+                },
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (_isDelivered) ...[
+              _SectionLabel('Proof of delivery'),
+              const SizedBox(height: 8),
+              _TextField(
+                controller: _deliveredToName,
+                label: 'Delivered to',
+                hint: 'Recipient full name',
+                icon: Icons.person_outline_rounded,
+                maxLength: 120,
+              ),
+              const SizedBox(height: 10),
+              _TextField(
+                controller: _deliveredToId,
+                label: 'Recipient ID / reference',
+                hint: 'Required for ID-confirmed delivery',
+                icon: Icons.badge_outlined,
+                maxLength: 80,
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                key: ValueKey('proof-type-$_proofType'),
+                isExpanded: true,
+                initialValue: _proofType,
+                items: [
+                  for (final type in kDeliveryProofTypes)
+                    DropdownMenuItem(
+                      value: type,
+                      child: Text(
+                        deliveryProofLabel(type),
+                        style: AppTheme.body,
+                      ),
+                    ),
+                ],
+                onChanged: (value) => setState(() => _proofType = value),
+                decoration: const InputDecoration(
+                  labelText: 'Proof type',
+                  hintText: 'Select proof of delivery',
+                  prefixIcon: Icon(Icons.verified_user_outlined),
+                ),
+              ),
+              const SizedBox(height: 10),
+              _TextField(
+                controller: _proofReference,
+                label: 'Proof reference',
+                hint: switch (_proofType) {
+                  'SIGNATURE' => 'Signed release form reference',
+                  'PHOTO' => 'Photo file name or upload reference',
+                  'ID_CONFIRMATION' => 'ID number recorded at handover',
+                  'RECIPIENT_CONFIRMATION' => 'Recipient confirmation note',
+                  _ => 'Signature, photo, or ID reference',
+                },
+                icon: Icons.attachment_outlined,
+                maxLength: 300,
+              ),
+              const SizedBox(height: 10),
+              _DateTimeField(
+                label: 'Delivery date and time',
+                value: _deliveredAt,
+                onPick: () async {
+                  final picked = await _pickDateTime(_deliveredAt);
+                  if (picked != null) setState(() => _deliveredAt = picked);
+                },
+              ),
+              const SizedBox(height: 12),
+            ],
+          ],
+
+          if (_selected != null)
+            OperationalNoteField(
+              status: _selected!,
+              serviceType: widget.parcel.serviceType,
+              onChanged: (v) => _operationalNote = v,
+            ),
+          const SizedBox(height: 12),
+          const Text(
+            'Operational details stay private. Customers see a factual message matching the confirmed physical status.',
+            style: AppTheme.caption,
+          ),
+
+          if (_error != null) ...[
+            const SizedBox(height: 10),
+            _InlineError(message: _error!),
+          ],
+
           const SizedBox(height: 18),
           PrimaryButton(
             label: 'Update Status',
             loading: _saving,
-            onPressed: _submit,
+            onPressed: _allowed.isEmpty ? null : _submit,
           ),
         ],
       ),
     );
   }
+}
+
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) => Text(
+    text,
+    style: const TextStyle(
+      color: AppColors.navy,
+      fontWeight: FontWeight.w800,
+      fontSize: 14,
+    ),
+  );
+}
+
+class _TextField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label;
+  final String hint;
+  final IconData icon;
+  final int maxLength;
+
+  const _TextField({
+    super.key,
+    required this.controller,
+    required this.label,
+    required this.hint,
+    required this.icon,
+    required this.maxLength,
+  });
+
+  @override
+  Widget build(BuildContext context) => TextField(
+    controller: controller,
+    maxLength: maxLength,
+    decoration: InputDecoration(
+      labelText: label,
+      hintText: hint,
+      prefixIcon: Icon(icon),
+      counterStyle: const TextStyle(color: AppColors.textGrey, fontSize: 10),
+    ),
+  );
+}
+
+class _DateTimeField extends StatelessWidget {
+  final String label;
+  final DateTime value;
+  final VoidCallback onPick;
+
+  const _DateTimeField({
+    required this.label,
+    required this.value,
+    required this.onPick,
+  });
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onPick,
+    borderRadius: BorderRadius.circular(14),
+    child: InputDecorator(
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: const Icon(Icons.event_available_rounded),
+        suffixIcon: const Icon(Icons.edit_calendar_rounded, size: 19),
+      ),
+      child: Text(
+        DateFormat('MMM d, yyyy · h:mm a').format(value),
+        style: AppTheme.body.copyWith(fontWeight: FontWeight.w700),
+      ),
+    ),
+  );
+}
+
+class _InlineError extends StatelessWidget {
+  final String message;
+  final VoidCallback? onRetry;
+
+  const _InlineError({required this.message, this.onRetry});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: AppColors.coralSoft,
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Row(
+      children: [
+        const Icon(
+          Icons.error_outline_rounded,
+          color: AppColors.coral,
+          size: 20,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            message,
+            style: const TextStyle(
+              color: AppColors.coral,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        if (onRetry != null)
+          TextButton(
+            onPressed: onRetry,
+            child: const Text(
+              'Retry',
+              style: TextStyle(
+                color: AppColors.coral,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
 }
 
 class _StatusOption extends StatelessWidget {
@@ -338,6 +844,8 @@ class _StatusOption extends StatelessWidget {
   }
 
   IconData _iconFor(String status) => switch (status) {
+    'PICKUP_SCHEDULED' => Icons.event_available_rounded,
+    'PICKED_UP' => Icons.takeout_dining_rounded,
     'PROCESSING' => Icons.settings_rounded,
     'IN_TRANSIT' => Icons.local_shipping_rounded,
     'ARRIVED_LOME' => Icons.anchor_rounded,
@@ -349,6 +857,9 @@ class _StatusOption extends StatelessWidget {
   };
 
   String _descFor(String status) => switch (status) {
+    'PICKUP_SCHEDULED' =>
+      'Collection confirmed with the customer for the agreed slot.',
+    'PICKED_UP' => 'Goods collected from the customer, headed to intake.',
     'PROCESSING' => 'Parcel received and being prepared for shipment.',
     'IN_TRANSIT' => 'Parcel is on the way to its destination.',
     'ARRIVED_LOME' => 'Parcel has arrived at our Lomé facility.',

@@ -157,7 +157,16 @@ class _WarehouseScreenState extends State<WarehouseScreen> {
                   label: Text(
                     status == 'ALL'
                         ? 'All'
-                        : status[0] + status.substring(1).toLowerCase(),
+                        : status
+                              .replaceAll('_', ' ')
+                              .toLowerCase()
+                              .split(' ')
+                              .map(
+                                (w) => w.isEmpty
+                                    ? w
+                                    : '${w[0].toUpperCase()}${w.substring(1)}',
+                              )
+                              .join(' '),
                   ),
                   selected: _filter == status,
                   onSelected: (_) {
@@ -302,7 +311,14 @@ class ContainerStatus extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
-        status[0] + status.substring(1).toLowerCase(),
+        status
+            .replaceAll('_', ' ')
+            .toLowerCase()
+            .split(' ')
+            .map(
+              (w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}',
+            )
+            .join(' '),
         style: TextStyle(
           color: color,
           fontSize: 12,

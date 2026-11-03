@@ -28,6 +28,8 @@ services:
       PORT: 4000
       DATABASE_URL: postgres://d2f:${DB_PASSWORD}@db:5432/d2f_shipping
       JWT_SECRET: ${JWT_SECRET}
+      WAREHOUSE_FACILITY_AUTHORIZATION_REQUIRED: ${WAREHOUSE_FACILITY_AUTHORIZATION_REQUIRED:-false}
+      CONNECT_RECEIVING_APPROVAL_REQUIRED: ${CONNECT_RECEIVING_APPROVAL_REQUIRED:-false}
     depends_on:
       db:
         condition: service_healthy

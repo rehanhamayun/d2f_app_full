@@ -10,9 +10,13 @@ class MainActivity : FlutterActivity() {
     private var pendingResult: MethodChannel.Result? = null
     private var pendingBytes: ByteArray? = null
     private val saveRequest = 4206
+    private lateinit var printerBridge: BrotherPrinterBridge
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        printerBridge = BrotherPrinterBridge(this)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "d2f/printer").setMethodCallHandler { call,result -> printerBridge.handle(call,result) }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "d2f/permissions").setMethodCallHandler { call,result -> if(call.method=="camera")printerBridge.requestPermissions("camera",result)else result.notImplemented() }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "d2f/labels").setMethodCallHandler { call, result ->
             if (call.method != "savePdf") { result.notImplemented(); return@setMethodCallHandler }
             if (pendingResult != null) { result.error("BUSY", "A label save is already open.", null); return@setMethodCallHandler }
@@ -33,6 +37,12 @@ class MainActivity : FlutterActivity() {
             }
         }
     }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode,permissions,grantResults)
+        if(::printerBridge.isInitialized)printerBridge.onPermissions(requestCode,grantResults)
+    }
+    override fun onDestroy(){if(::printerBridge.isInitialized)printerBridge.dispose();super.onDestroy()}
 
     @Deprecated("Deprecated in Android; required for FlutterActivity compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

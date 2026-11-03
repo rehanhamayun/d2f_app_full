@@ -127,7 +127,7 @@ void main() {
       expect(find.byType(StaffShell), findsNothing);
       expect(session.saved!.role, UserRole.CUSTOMER);
       expect(session.saved!.phone, '+22890000000');
-      await tester.tap(find.byKey(const ValueKey('nav-profile')));
+      await tester.tap(find.byKey(const ValueKey('header-profile')));
       await tester.pumpAndSettle();
       expect(find.text('CUSTOMER'), findsOneWidget);
       expect(find.text('Assigned location'), findsNothing);
@@ -201,7 +201,7 @@ void main() {
       );
       expect(find.byType(RoleWorkspaceScreen), findsOneWidget);
       expect(find.byType(StaffShell), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('nav-profile')));
+      await tester.tap(find.byKey(const ValueKey('header-profile')));
       await tester.pumpAndSettle();
       expect(find.text('Updated Customer'), findsOneWidget);
       expect(find.text('CUSTOMER'), findsOneWidget);

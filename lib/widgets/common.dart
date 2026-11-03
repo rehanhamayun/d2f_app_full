@@ -475,62 +475,90 @@ void copyToClipboard(
   );
 }
 
-/// Brand header with a quick guide to the working staff tools.
+/// Compact D2F header with the account and shipment-update actions.
 class D2FHomeHeader extends StatelessWidget {
-  final VoidCallback? onBell;
+  final VoidCallback? onBell, onProfile;
   final String actionTooltip;
   final bool dense;
   const D2FHomeHeader({
     super.key,
     this.onBell,
-    this.actionTooltip = 'Shipment activity',
+    this.onProfile,
+    this.actionTooltip = 'Shipment updates',
     this.dense = false,
   });
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Expanded(
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: BrandLogo(fontSize: dense ? 20 : 24),
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Row(
+      children: [
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: BrandLogo(fontSize: dense ? 20 : 23),
+          ),
         ),
-      ),
-      IconButton(
-        tooltip: onBell != null ? actionTooltip : 'Shipping guide',
-        constraints: dense
-            ? const BoxConstraints.tightFor(width: 28, height: 28)
-            : null,
-        padding: dense ? EdgeInsets.zero : null,
-        onPressed:
-            onBell ??
-            () => showDialog<void>(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: const Text(
-                  'Your shipping workspace',
-                  style: AppTheme.sectionTitle,
+        if (onProfile != null)
+          const Padding(
+            padding: EdgeInsets.only(right: 5),
+            child: Row(
+              children: [
+                Icon(Icons.language_rounded, size: 16, color: AppColors.navy),
+                SizedBox(width: 4),
+                Text(
+                  'EN',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800),
                 ),
-                content: const Text(
-                  'Register parcels in Ship, scan or enter a tracking number to find a parcel, and use Activity to review records. Open a parcel to update its status and view its recorded history.',
-                  style: AppTheme.body,
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text('Got it'),
-                  ),
-                ],
-              ),
+              ],
             ),
-        icon: Icon(
-          onBell != null
-              ? Icons.notifications_none_rounded
-              : CupertinoIcons.question_circle,
-          color: AppColors.navy,
-          size: 25,
+          ),
+        IconButton(
+          key: const ValueKey('header-notifications'),
+          tooltip: onBell != null ? actionTooltip : 'Shipping guide',
+          onPressed:
+              onBell ??
+              () => showDialog<void>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Your shipping workspace'),
+                  content: const Text(
+                    'Register parcels in Ship, find saved shipments with their tracking number, and review each recorded status update.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Got it'),
+                    ),
+                  ],
+                ),
+              ),
+          icon: Icon(
+            onBell != null
+                ? Icons.notifications_none_rounded
+                : CupertinoIcons.question_circle,
+            color: AppColors.navy,
+            size: 26,
+          ),
+          style: IconButton.styleFrom(
+            minimumSize: const Size(44, 44),
+            padding: const EdgeInsets.all(9),
+          ),
         ),
-      ),
-    ],
+        if (onProfile != null)
+          IconButton(
+            key: const ValueKey('header-profile'),
+            tooltip: 'Your profile',
+            onPressed: onProfile,
+            style: IconButton.styleFrom(
+              backgroundColor: AppColors.navy,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(40, 40),
+              padding: const EdgeInsets.all(8),
+            ),
+            icon: const Icon(Icons.person_rounded, size: 23),
+          ),
+      ],
+    ),
   );
 }
 

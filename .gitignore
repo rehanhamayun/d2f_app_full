@@ -83,3 +83,6 @@ android/key.properties
 .github/copilot-instructions.*
 .github/prompts/
 .github/instructions/
+
+# Proprietary Brother SDK: download using tool/install_brother_sdk.py.
+/android/app/libs/*.aar

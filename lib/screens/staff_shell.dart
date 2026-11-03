@@ -33,6 +33,7 @@ class _StaffShellState extends State<StaffShell> {
         key: _homeKey,
         onGoRegister: () => _select(1),
         onGoActivity: () => _select(2),
+        onGoProfile: () => _select(3),
         onGoRoute: (ShipmentRoute route) {
           _shipKey.currentState?.presetRoute(route);
           _select(1);

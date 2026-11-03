@@ -1,10 +1,17 @@
+import 'direct_label_print_screen.dart';
+import 'shipment_custody_screen.dart';
+import 'connect_screen.dart';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../core/api.dart';
 import '../core/theme.dart';
 import '../models/models.dart';
+import '../providers/auth_provider.dart';
 import '../widgets/common.dart';
+import '../widgets/goods_gallery.dart';
 import '../widgets/reference_widgets.dart';
 import 'label_preview_screen.dart';
 import '../widgets/timeline.dart';
@@ -15,8 +22,8 @@ import '../services/parcel_report.dart';
 /// Parcel Details (design screen 9): header status card + segmented tabs
 /// Overview / Tracking / Details + "Update Status" staff action. The
 /// Tracking tab carries a "Download parcel details" PDF action.
-class ParcelDetailScreen extends StatefulWidget {
-  final String parcelId; // UUID or public tracking ID
+class ParcelDetailScreen extends ConsumerStatefulWidget {
+  final String parcelId; // UUID, shipment tracking ID, or package code
   final Future<Parcel> Function(String)? loadParcel;
 
   const ParcelDetailScreen({
@@ -26,10 +33,10 @@ class ParcelDetailScreen extends StatefulWidget {
   });
 
   @override
-  State<ParcelDetailScreen> createState() => _ParcelDetailScreenState();
+  ConsumerState<ParcelDetailScreen> createState() => _ParcelDetailScreenState();
 }
 
-class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
+class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
   int _tab = 0;
   Parcel? _parcel;
   String? _error;
@@ -68,6 +75,16 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final parcel = _parcel;
+    if (parcel?.serviceType == 'AIR_TRAVELLER' &&
+        parcel?.connectBookingId != null) {
+      final role = ref.watch(authControllerProvider).valueOrNull?.role;
+      return ConnectBookingScreen(
+        id: parcel!.connectBookingId!,
+        request: Api.I.connect,
+        staff: [UserRole.ADMIN, UserRole.STAFF].contains(role),
+        admin: role == UserRole.ADMIN,
+      );
+    }
 
     return Scaffold(
       appBar: D2FAppBar(
@@ -78,6 +95,17 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
+          if (parcel != null)
+            IconButton(
+              tooltip: 'Print Label',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => DirectLabelPrintScreen(parcel: parcel),
+                ),
+              ),
+              icon: const Icon(Icons.print_outlined),
+            ),
           if (parcel != null)
             IconButton(
               tooltip: 'Shipping label',
@@ -182,10 +210,11 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
 
   /// Each tab has a single scrolling surface with pull-to-refresh.
   Widget _overview(Parcel parcel) {
-    final canUpdate = parcel.status != 'DELIVERED';
+    final canUpdate = staffStatusOptionsFor(parcel).isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        ShipmentCustodyCard(parcel: parcel, onSaved: _fetch),
         SectionCard(
           tint: AppColors.blueSoft,
           child: Row(
@@ -193,11 +222,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
               CircleAvatar(
                 radius: 16,
                 backgroundColor: AppColors.blue,
-                child: const Icon(
-                  Icons.flight_takeoff_rounded,
-                  color: Colors.white,
-                  size: 18,
-                ),
+                child: Icon(parcel.method.icon, color: Colors.white, size: 18),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -213,6 +238,8 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
             ],
           ),
         ),
+        const SizedBox(height: 20),
+        _handoverCard(parcel),
         const SizedBox(height: 20),
         _shipmentGrid(parcel),
         const SizedBox(height: 20),
@@ -261,7 +288,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
               if (updated == true) _fetch();
             },
           )
-        else
+        else if (parcel.status == 'DELIVERED')
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -285,8 +312,84 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
               ],
             ),
           ),
+        if (!canUpdate &&
+            !parcel.containerManaged &&
+            parcel.status != 'DELIVERED')
+          SectionCard(
+            child: Text(
+              parcel.status == 'READY_FOR_LOADING'
+                  ? 'Awaiting physical loading. Scan this parcel from its assigned container workspace.'
+                  : statusHeadline(parcel.status).isEmpty
+                  ? 'Follow the recorded custody workflow for the next step.'
+                  : statusHeadline(parcel.status),
+            ),
+          ),
         const SizedBox(height: 20),
       ],
+    );
+  }
+
+  /// How the goods arrive at D2F — visible to staff at the top of the record.
+  Widget _handoverCard(Parcel parcel) {
+    final isPickup = parcel.deliveryMode == DeliveryMode.PICKUP;
+    final scheduled = parcel.pickupScheduledAt == null
+        ? ''
+        : ' · ${DateFormat('EEE, MMM d · h:mm a').format(parcel.pickupScheduledAt!.toLocal())}';
+    return SectionCard(
+      tint: isPickup ? AppColors.blueSoft : AppColors.greenSoft,
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 16,
+            backgroundColor: Colors.white,
+            child: Icon(
+              isPickup
+                  ? Icons.local_shipping_rounded
+                  : Icons.storefront_rounded,
+              color: isPickup ? AppColors.blue : AppColors.green,
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isPickup ? 'D2F pickup' : 'Warehouse drop-off',
+                  style: AppTheme.body.copyWith(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isPickup
+                      ? 'Scheduled collection from the customer$scheduled'
+                      : 'Customer brings the goods to the intake facility',
+                  style: AppTheme.caption.copyWith(
+                    fontSize: 11.5,
+                    height: 1.35,
+                  ),
+                ),
+                if (isPickup && (parcel.pickupAddress?.isNotEmpty ?? false))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Text(
+                      parcel.pickupAddress!,
+                      style: const TextStyle(
+                        color: AppColors.navy,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -402,6 +505,8 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
               TrackingTimeline(
                 events: parcel.events,
                 currentStatus: parcel.status,
+                canEditNote: _canCorrectNote,
+                onEditNote: (event) => _editNote(parcel, event),
               ),
             ],
           ),
@@ -425,6 +530,72 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
         const SizedBox(height: 20),
       ],
     );
+  }
+
+  bool _canCorrectNote(TrackingEvent event) {
+    final user = ref.watch(authControllerProvider).valueOrNull;
+    if (user == null || !user.isStaff) return false;
+    return user.role == UserRole.ADMIN || event.actorId == user.id;
+  }
+
+  Future<void> _editNote(Parcel parcel, TrackingEvent event) async {
+    final controller = TextEditingController(text: event.note ?? '');
+    final note = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text(
+          'Correct operational note',
+          style: AppTheme.sectionTitle,
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'The event, actor, time and location stay unchanged. The correction is recorded in the audit trail.',
+                style: AppTheme.caption.copyWith(height: 1.4),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                maxLength: 1000,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  hintText: 'Operational note',
+                  alignLabelWithHint: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Save correction'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (note == null || !mounted) return;
+    try {
+      await Api.I.correctParcelNote(parcel.id, event.id, note);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Operational note corrected.')),
+      );
+      await _fetch();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
+    }
   }
 
   Future<void> _downloadDetails(Parcel parcel) async {
@@ -481,13 +652,206 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
               if (parcel.recipientAddress != null)
                 _row('Recipient address', parcel.recipientAddress!),
               _row('Route', '${parcel.origin} → ${parcel.destination}'),
+              _row(
+                'Handover',
+                parcel.deliveryMode == DeliveryMode.PICKUP
+                    ? 'D2F pickup'
+                    : 'Warehouse drop-off',
+              ),
+              if (parcel.deliveryMode == DeliveryMode.PICKUP) ...[
+                if (parcel.pickupAddress != null &&
+                    parcel.pickupAddress!.isNotEmpty)
+                  _row('Collection address', parcel.pickupAddress!),
+                if (parcel.pickupScheduledAt != null)
+                  _row(
+                    'Pickup scheduled',
+                    df.format(parcel.pickupScheduledAt!.toLocal()),
+                  ),
+              ],
               _row('Method', parcel.method.label),
+              if (parcel.awbNumber != null)
+                _row('Air Waybill / AWB', parcel.awbNumber!),
+              if (parcel.airline != null)
+                _row('Airline / carrier', parcel.airline!),
+              if (parcel.flightNumber != null)
+                _row('Flight number', parcel.flightNumber!),
               _row('Package', parcel.packageTypeLabel),
-              _row('Weight', '${parcel.weightKg} kg'),
+              _row(
+                'Weight',
+                parcel.totalPieces > 0
+                    ? '${parcel.weightKg} kg · ${parcel.totalPieces} pieces'
+                    : '${parcel.weightKg} kg',
+              ),
               if (parcel.notes != null && parcel.notes!.isNotEmpty)
                 _row('Notes', parcel.notes!),
               _row('Registered', df.format(parcel.createdAt)),
               _row('Last update', df.format(parcel.updatedAt)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        _goodsCard(parcel),
+        const SizedBox(height: 20),
+        _photosCard(parcel),
+        const SizedBox(height: 20),
+      ],
+    );
+  }
+
+  Widget _goodsCard(Parcel parcel) {
+    if (parcel.items.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Goods in this shipment',
+                style: AppTheme.sectionTitle,
+              ),
+            ),
+            Text(
+              '${parcel.items.length} lines · ${parcel.totalPieces} pieces',
+              style: AppTheme.caption.copyWith(fontSize: 10.5),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        // Staff see the same collection discrepancy customers see: a package
+        // the crew could not take stays visible until it reaches the hub.
+        if (parcel.hasCollectionDiscrepancy)
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.coralSoft,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.report_problem_rounded,
+                  color: AppColors.coral,
+                  size: 18,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Collected ${parcel.items.length - parcel.missedItems.length} '
+                    'of ${parcel.items.length} packages at the pickup. '
+                    'Missing items are marked below.',
+                    style: const TextStyle(
+                      color: AppColors.coral,
+                      fontSize: 11,
+                      height: 1.35,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        SectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final item in parcel.items) ...[
+                if (item.packageCode == widget.parcelId)
+                  const Text('Scanned package', style: AppTheme.sectionTitle),
+                GoodsItemTile(
+                  key: ValueKey('staff-item-${item.position}'),
+                  item: item,
+                  itemCount: parcel.items.length,
+                ),
+                if (item != parcel.items.last) const Divider(height: 18),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+      ],
+    );
+  }
+
+  Widget _photosCard(Parcel parcel) {
+    if (parcel.images.isEmpty) return const SizedBox.shrink();
+    // Photos grouped by the package they document; per-package shots carry
+    // the package caption so staff can match photos to counted items.
+    final shipmentPhotos = parcel.photosFor(null);
+    final sections = <Widget>[];
+    for (final item in parcel.items) {
+      final photos = parcel.photosFor(item.id);
+      if (photos.isEmpty) continue;
+      sections.add(
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${item.name} (${item.typeLabel} ${item.position + 1} of ${parcel.items.length})',
+                style: const TextStyle(
+                  color: AppColors.navy,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              GoodsPhotoGallery(
+                images: photos,
+                compact: true,
+                loadBytes: (image) =>
+                    Api.I.parcelImageBytes(parcel.id, image.id),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    final hasShipmentOnly = shipmentPhotos.isNotEmpty && sections.isNotEmpty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text('Goods photos', style: AppTheme.sectionTitle),
+            ),
+            Text(
+              '${parcel.images.length}',
+              style: AppTheme.caption.copyWith(fontSize: 10.5),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        SectionCard(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (shipmentPhotos.isNotEmpty) ...[
+                if (hasShipmentOnly)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      'Shipment as a whole',
+                      style: TextStyle(
+                        color: AppColors.navy,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                GoodsPhotoGallery(
+                  images: shipmentPhotos,
+                  compact: sections.isNotEmpty,
+                  loadBytes: (image) =>
+                      Api.I.parcelImageBytes(parcel.id, image.id),
+                ),
+              ],
+              ...sections,
             ],
           ),
         ),

@@ -3,6 +3,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../core/api.dart';
 import '../core/theme.dart';
+import '../core/tracking_code.dart';
 import '../widgets/common.dart';
 import 'parcel_detail_screen.dart';
 
@@ -44,6 +45,19 @@ class _ScanScreenState extends State<ScanScreen> {
 
   Future<void> _lookup(String code, {bool scanned = false}) async {
     if (_busy || code.trim().isEmpty) return;
+    final trackingId = normalizeTrackingCode(code);
+    if (trackingId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'This code is not a D2F tracking number. Try the number printed below the barcode.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _busy = true);
     // Pause camera while navigating so repeated frames don't re-trigger.
@@ -52,15 +66,15 @@ class _ScanScreenState extends State<ScanScreen> {
     } catch (_) {}
     try {
       if (widget.returnTracking) {
-        if (mounted) Navigator.pop(context, code.trim().toUpperCase());
+        if (mounted) Navigator.pop(context, trackingId);
         return;
       }
-      final parcel = await Api.I.parcelDetail(code);
+      await Api.I.parcelDetail(trackingId);
       if (!mounted) return;
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => ParcelDetailScreen(parcelId: parcel.id),
+          builder: (_) => ParcelDetailScreen(parcelId: trackingId),
         ),
       );
       if (mounted) setState(() => _busy = false);

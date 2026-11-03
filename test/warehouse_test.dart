@@ -179,20 +179,31 @@ void main() {
         find.byType(TextField),
         fixtureParcel['trackingId'],
       );
+      await tester.ensureVisible(
+        find.text(
+          'I verified every received package in this shipment is physically loaded.',
+        ),
+      );
+      await tester.tap(
+        find.text(
+          'I verified every received package in this shipment is physically loaded.',
+        ),
+      );
+      await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Load parcel'));
       await tester.tap(find.text('Load parcel'));
       await tester.pumpAndSettle();
       expect(calls.single['body']['trackingId'], fixtureParcel['trackingId']);
-      await tester.ensureVisible(find.text('Confirm Departure'));
-      await tester.tap(find.text('Confirm Departure'));
+      await tester.ensureVisible(find.text('Confirm departure'));
+      await tester.tap(find.text('Confirm departure'));
       await tester.pumpAndSettle();
       expect(calls.length, 1);
-      expect(find.text('Confirm departure'), findsOneWidget);
+      expect(find.byType(AlertDialog), findsOneWidget);
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
       expect(calls.length, 1);
-      await tester.ensureVisible(find.text('Confirm Departure'));
-      await tester.tap(find.text('Confirm Departure'));
+      await tester.ensureVisible(find.text('Confirm departure'));
+      await tester.tap(find.text('Confirm departure'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Depart container'));
       await tester.pumpAndSettle();

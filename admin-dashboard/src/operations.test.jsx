@@ -32,6 +32,7 @@ it('container scan errors preserve input; loading and departure require the real
   await user.click(await screen.findByRole('button', { name: 'QA-SEA-001' }));
   const dialog = await screen.findByRole('dialog', { name: 'QA-SEA-001' });
   await user.type(await within(dialog).findByLabelText('Tracking number to load'), parcel.trackingId);
+  await user.click(within(dialog).getByLabelText('I verified that every received package in this shipment is physically loaded.'));
   await user.click(within(dialog).getByRole('button', { name: 'Load parcel', exact: true }));
   expect(await within(dialog).findByRole('alert')).toHaveTextContent('shipping methods must match');
   expect(within(dialog).getByLabelText('Tracking number to load')).toHaveValue(parcel.trackingId);
@@ -43,8 +44,8 @@ it('container scan errors preserve input; loading and departure require the real
   await user.click(within(dialog).getByRole('button', { name: 'Cancel', exact: true }));
   await user.click(within(dialog).getByRole('button', { name: 'Confirm departure', exact: true }));
   await user.click(within(dialog).getByRole('button', { name: 'Confirm', exact: true }));
-  await waitFor(() => expect(writes.at(-1).body).toEqual({ action: 'DEPARTED' }));
-  expect(await within(dialog).findByRole('button', { name: 'Record arrival' })).toBeInTheDocument();
+  await waitFor(() => expect(writes.at(-1).body).toEqual({ action: 'DEPARTED', confirmed:true }));
+  expect(await within(dialog).findByRole('button', { name: 'Confirm destination port arrival' })).toBeInTheDocument();
   expect(within(dialog).queryByLabelText('Tracking number to load')).toBeNull();
 });
 it('location country choices stay inside the agreed service area and errors keep form values', async () => {

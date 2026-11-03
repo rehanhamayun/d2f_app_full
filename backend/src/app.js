@@ -1,7 +1,11 @@
 import express from 'express';
+import labelPrintRouter from './routes/label_print.js';
+import operationalNotesRouter from './routes/operational_notes.js';
 import cors from 'cors';
 import './config.js';
 import { prisma } from './db.js';
+import driverRouter from './routes/driver.js';
+import connectRouter from './routes/connect.js';
 import authRouter from './routes/auth.js';
 import parcelsRouter from './routes/parcels.js';
 import customerParcelsRouter from './routes/customer_parcels.js';
@@ -57,21 +61,28 @@ app.use('/auth/password', recoveryRouter);
 app.use('/auth/social', socialRouter);
 app.use('/admin', adminRouter);
 app.use('/warehouse', warehouseRouter);
+app.use('/label-print', labelPrintRouter);
+app.use('/operational-notes', operationalNotesRouter);
 app.use('/admin/commerce', commerceRouter);
 // Tracking-number possession reveals progress only, never people, contact
 // details, internal notes, actor identity, or the staff parcel record.
 app.get('/tracking/:trackingId', authenticate, authRateLimit(60), async (req, res, next) => {
   try {
-    if (!/^(?:[A-Z0-9]{3,5}(?:\d{12}|\d{15})|D2F-\d{4}-\d{6})$/.test(req.params.trackingId)) {
+    if (!/^(?:[A-Z0-9]{3,5}(?:\d{12}|\d{15})|D2F-\d{4}-\d{6})(?:-P\d{2})?$/.test(req.params.trackingId)) {
       return res.status(400).json({ error: 'Enter a valid tracking number.' });
     }
-    const parcel = await prisma.parcel.findUnique({ where: { trackingId: req.params.trackingId },
-      select: { trackingId: true, status: true, method: true,
+    const parcel = await prisma.parcel.findFirst({ where: { OR: [
+      { trackingId: req.params.trackingId },
+      { items: { some: { packageCode: req.params.trackingId } } },
+    ] },
+      select: { trackingId: true, status: true, method: true, serviceType: true,
         events: { select: { status: true, createdAt: true }, orderBy: { createdAt: 'asc' } } } });
     if (!parcel) return res.status(404).json({ error: 'No shipment found. Check your tracking number.' });
     res.json(parcel);
   } catch (error) { next(error); }
 });
+app.use('/driver', driverRouter);
+app.use('/connect', connectRouter);
 app.use('/parcels', parcelsRouter);
 app.use('/customer/parcels', customerParcelsRouter);
 app.use('/customers', customersRouter);
@@ -81,8 +92,10 @@ app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
 // Error handler
 app.use((err, req, res, next) => {
-  console.error(err);
   const code = err.status || 500;
+  // Client errors (4xx) are expected traffic (bad input, body limits, 409s)
+  // and are already visible to the caller; only server faults are logged.
+  if (code >= 500) console.error(err);
   res.status(code).json({ error: code >= 500 && process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message || 'Internal server error' });
 });
 

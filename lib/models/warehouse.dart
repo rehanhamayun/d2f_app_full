@@ -60,9 +60,29 @@ class FreightContainer {
         .map((e) => Map<String, dynamic>.from(e))
         .toList(),
   );
+  String? get nextAction => (method == 'SEA'
+      ? const {
+          'LOADING': 'DEPARTED',
+          'DEPARTED': 'ARRIVED_PORT',
+          'ARRIVED_PORT': 'CUSTOMS_CLEARANCE',
+          'CUSTOMS_CLEARANCE': 'CUSTOMS_CLEARED',
+          'CUSTOMS_CLEARED': 'ARRIVED',
+        }
+      : const {'LOADING': 'DEPARTED', 'DEPARTED': 'ARRIVED'})[status];
+  String get nextActionLabel => switch (nextAction) {
+    'DEPARTED' => 'Confirm departure',
+    'ARRIVED_PORT' => 'Confirm destination port arrival',
+    'CUSTOMS_CLEARANCE' => 'Start customs clearance',
+    'CUSTOMS_CLEARED' => 'Confirm customs release',
+    'ARRIVED' => 'Confirm destination warehouse receipt',
+    _ => 'Completed',
+  };
   String get statusLabel => switch (status) {
     'DEPARTED' => 'Departed',
-    'ARRIVED' => 'Arrived',
+    'ARRIVED' => 'Received at destination warehouse',
+    'ARRIVED_PORT' => 'Arrived at destination port',
+    'CUSTOMS_CLEARANCE' => 'Customs clearance',
+    'CUSTOMS_CLEARED' => 'Customs released',
     _ => 'Loading',
   };
   double get totalWeight => parcels.fold(0, (sum, p) => sum + p.weightKg);

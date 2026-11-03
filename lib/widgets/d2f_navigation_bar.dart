@@ -28,6 +28,65 @@ class D2FNavigationBar extends StatelessWidget {
   ];
   @override
   Widget build(BuildContext context) {
+    final customer = publicWorkspace && !driver;
+    final items = customer
+        ? [
+            (
+              0,
+              'Home',
+              'home',
+              Icons.home_outlined,
+              Icons.home_rounded,
+              AppColors.coral,
+            ),
+            (
+              1,
+              'Bookings',
+              'ship',
+              Icons.inventory_2_outlined,
+              Icons.inventory_2_rounded,
+              AppColors.blue,
+            ),
+            (
+              2,
+              'Track',
+              'activity',
+              Icons.location_on_outlined,
+              Icons.location_on_rounded,
+              AppColors.blue,
+            ),
+            (
+              4,
+              'Marketplace',
+              'marketplace',
+              Icons.storefront_outlined,
+              Icons.storefront_rounded,
+              const Color(0xFFE77D10),
+            ),
+            (
+              5,
+              'Buy For Me',
+              'buy',
+              Icons.shopping_bag_outlined,
+              Icons.shopping_bag_rounded,
+              const Color(0xFFDC3765),
+            ),
+          ]
+        : [
+            for (final e in _items.asMap().entries)
+              (
+                e.key,
+                driver && e.key == 1
+                    ? 'Dispatch'
+                    : driver && e.key == 2
+                    ? 'Track'
+                    : e.value.$1,
+                e.value.$2,
+                e.value.$3,
+                e.value.$4,
+                AppColors.coral,
+              ),
+          ];
     final duration = MediaQuery.disableAnimationsOf(context)
         ? Duration.zero
         : const Duration(milliseconds: 240);
@@ -41,11 +100,11 @@ class D2FNavigationBar extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 560),
             child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+              margin: const EdgeInsets.symmetric(horizontal: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 6),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(28),
+                borderRadius: BorderRadius.circular(23),
                 border: Border.all(
                   color: AppColors.border.withValues(alpha: .8),
                 ),
@@ -63,60 +122,55 @@ class D2FNavigationBar extends StatelessWidget {
                 ],
               ),
               child: Row(
-                children: List.generate(_items.length, (index) {
-                  final base = _items[index];
-                  final item = (
-                    publicWorkspace && index == 1 && driver
-                        ? 'Dispatch'
-                        : publicWorkspace && index == 2
-                        ? 'Track'
-                        : base.$1,
-                    base.$2,
-                    base.$3,
-                    base.$4,
-                  );
-                  final selected = index == selectedIndex;
+                children: List.generate(items.length, (index) {
+                  final item = items[index];
+                  final selected = item.$1 == selectedIndex;
                   return Expanded(
                     child: Semantics(
                       selected: selected,
                       button: true,
                       child: Tooltip(
-                        message: item.$1,
+                        message: item.$2,
                         child: InkWell(
-                          key: ValueKey('nav-${item.$2}'),
+                          key: ValueKey('nav-${item.$3}'),
                           borderRadius: BorderRadius.circular(14),
                           onTap: () {
                             if (!selected) {
                               HapticFeedback.selectionClick();
-                              onSelected(index);
+                              onSelected(item.$1);
                             }
                           },
                           child: SizedBox(
-                            height: 58,
+                            height:
+                                MediaQuery.textScalerOf(context).scale(1) > 1.15
+                                ? 80
+                                : 62,
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 AnimatedContainer(
                                   duration: duration,
-                                  width: 44,
+                                  width: 40,
                                   height: 32,
                                   decoration: BoxDecoration(
                                     color: selected
-                                        ? AppColors.coralSoft
+                                        ? item.$6.withValues(alpha: .12)
                                         : Colors.transparent,
                                     borderRadius: BorderRadius.circular(16),
                                   ),
                                   child: Icon(
-                                    selected ? item.$4 : item.$3,
+                                    selected ? item.$5 : item.$4,
                                     size: 23,
                                     color: selected
-                                        ? AppColors.coral
+                                        ? item.$6
                                         : AppColors.textGrey,
                                   ),
                                 ),
                                 const SizedBox(height: 5),
                                 Text(
-                                  item.$1,
+                                  item.$2,
+                                  textAlign: TextAlign.center,
+                                  maxLines: 2,
                                   style: TextStyle(
                                     color: selected
                                         ? AppColors.navy
@@ -124,7 +178,8 @@ class D2FNavigationBar extends StatelessWidget {
                                     fontWeight: selected
                                         ? FontWeight.w800
                                         : FontWeight.w500,
-                                    fontSize: 10,
+                                    fontSize: customer ? 9 : 10,
+                                    height: 1.15,
                                   ),
                                 ),
                               ],

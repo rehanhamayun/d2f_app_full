@@ -41,8 +41,8 @@ router.post('/register', authRateLimit(10), async (req, res, next) => {
     if (typeof phone !== 'string' || !/^\+[1-9]\d{7,14}$/.test(phone)) {
       return res.status(400).json({ error: 'Enter a valid international phone number' });
     }
-    if (!['CUSTOMER', 'STAFF', 'DRIVER'].includes(role)) {
-      return res.status(400).json({ error: 'Choose Customer, Driver or Staff' });
+    if (!['CUSTOMER', 'STAFF', 'DRIVER', 'ADMIN'].includes(role)) {
+      return res.status(400).json({ error: 'Choose Customer, Driver, Staff or Admin' });
     }
     if (role !== 'CUSTOMER') {
       let invite;
@@ -56,9 +56,19 @@ router.post('/register', authRateLimit(10), async (req, res, next) => {
         return res.status(403).json({ error: 'This invitation is no longer valid. Ask your administrator for a new one.' });
       }
     }
+    // Invitations inherit the issuing administrator's organization so a new
+    // teammate lands in the correct workspace immediately.
+    let invitedOrganizationId = null;
+    if (role !== 'CUSTOMER') {
+      try {
+        const invite = jwt.verify(invitation, JWT_SECRET, { algorithms: ['HS256'] });
+        invitedOrganizationId = invite?.organizationId || null;
+      } catch { /* Validation above already rejected an invalid invite. */ }
+    }
     const user = await prisma.user.create({ data: {
       email: emailNorm, passwordHash: await bcrypt.hash(password, 10),
       fullName: fullName.trim(), phone, role, isActive: true,
+      organizationId: invitedOrganizationId,
     }, include });
     res.status(201).json(sessionFor(user));
   } catch (error) {
@@ -68,14 +78,18 @@ router.post('/register', authRateLimit(10), async (req, res, next) => {
 });
 
 // Administrative provisioning is deliberately separate from public registration.
+// Only an authenticated administrator can issue an invitation, including for a
+// new administrator. The invitation remains bound to one email and one role.
 router.post('/invitations', authenticate, requireRole('ADMIN'), async (req, res, next) => {
   try {
     const { email, role } = req.body || {};
-    if (!emailValid(email) || !['STAFF', 'DRIVER'].includes(role)) {
-      return res.status(400).json({ error: 'A valid email and STAFF or DRIVER role are required.' });
+    if (!emailValid(email) || !['ADMIN', 'STAFF', 'DRIVER'].includes(role)) {
+      return res.status(400).json({ error: 'A valid email and ADMIN, STAFF or DRIVER role are required.' });
     }
-    const invitation = jwt.sign({ purpose: 'invitation', email: email.trim().toLowerCase(), role, issuedBy: req.user.id },
-      JWT_SECRET, { expiresIn: '7d', algorithm: 'HS256' });
+    const invitation = jwt.sign({
+      purpose: 'invitation', email: email.trim().toLowerCase(), role,
+      issuedBy: req.user.id, organizationId: req.user.organizationId || null,
+    }, JWT_SECRET, { expiresIn: '7d', algorithm: 'HS256' });
     res.status(201).json({ invitation, expiresInDays: 7 });
   } catch (error) { next(error); }
 });

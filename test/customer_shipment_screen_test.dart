@@ -1,3 +1,5 @@
+import 'helpers/us_address.dart';
+
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -18,19 +20,39 @@ final customerParcel = Parcel(
   customerId: 'customer-record-id',
   recipientName: 'Kossi Mensah',
   recipientPhone: '+22890000000',
-  recipientAddress: 'Lomé, Togo',
+  recipientAddress: 'Agoe Assiyeye, Lomé',
   packageType: 'BOX',
   weightKg: 2.5,
   origin: 'Omaha, NE, USA',
   destination: 'Lomé, Togo',
   method: ShippingMethod.AIR,
   status: 'REQUESTED',
+  deliveryMode: DeliveryMode.DROP_OFF,
+  items: [
+    const ParcelItem(
+      id: 'item-1',
+      name: 'Clothing box',
+      details: 'Folded summer wear',
+      quantity: 2,
+      position: 0,
+    ),
+    const ParcelItem(
+      id: 'item-2',
+      name: 'Kitchen blender',
+      quantity: 1,
+      weightKg: 1.2,
+      position: 1,
+    ),
+  ],
   createdAt: DateTime.utc(2026, 10, 22, 8),
   updatedAt: DateTime.utc(2026, 10, 22, 8),
   events: [
     TrackingEvent(
       id: 'request-event',
       status: 'REQUESTED',
+      note:
+          'Shipment request submitted by customer · goods brought to the '
+          'warehouse.',
       createdAt: DateTime.utc(2026, 10, 22, 8),
     ),
   ],
@@ -42,6 +64,7 @@ class _CustomerSession extends AuthController {
     id: 'customer-user',
     email: 'customer@example.test',
     fullName: 'Alex Morgan',
+    phone: '+14025550187',
     role: UserRole.CUSTOMER,
   );
 }
@@ -66,17 +89,37 @@ void main() {
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
   }
 
-  Widget wrap(Widget child, GlobalKey boundary) => MaterialApp(
-    theme: AppTheme.build(),
-    builder: (context, child) => RepaintBoundary(
-      key: boundary,
-      child: MediaQuery(
-        data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(1)),
-        child: child!,
+  Widget wrap(Widget child, GlobalKey boundary) => ProviderScope(
+    overrides: [authControllerProvider.overrideWith(_CustomerSession.new)],
+    child: MaterialApp(
+      theme: AppTheme.build(),
+      builder: (context, child) => RepaintBoundary(
+        key: boundary,
+        child: MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: TextScaler.linear(1)),
+          child: child!,
+        ),
       ),
+      home: Scaffold(body: child),
     ),
-    home: Scaffold(body: child),
   );
+
+  /// Scrolls the shipment form so the keyed widget is fully inside the
+  /// viewport before interacting: the form is one long ListView and widget
+  /// layout shifts under focus between steps.
+  Future<void> reveal(WidgetTester tester, Key key) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    final finder = find.byKey(key);
+    await tester.scrollUntilVisible(
+      finder,
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.ensureVisible(finder);
+    await tester.pumpAndSettle();
+  }
 
   testWidgets('customer Ship tab opens the self-service shipment form', (
     tester,
@@ -95,7 +138,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('nav-ship')));
     await tester.pumpAndSettle();
     expect(find.byType(CustomerShipmentScreen), findsOneWidget);
-    expect(find.text('Your next shipment'), findsOneWidget);
+    expect(find.text('New shipment request'), findsOneWidget);
+    // The signed-in customer's phone shows in the contact card so D2F staff
+    // can always reach them about this request.
+    expect(find.text('+14025550187'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -105,10 +151,27 @@ void main() {
     size(tester, const Size(390, 844));
     final boundaryKey = GlobalKey();
     var parcelLoadCount = 0;
+    var uploadedItemId = '';
+    var detailReloads = 0;
     Map<String, Object?>? submitted;
     await tester.pumpWidget(
       wrap(
         CustomerShipmentScreen(
+          pickPhoto: () async => PhotoDraft(
+            'books.png',
+            'image/png',
+            (await rootBundle.load('assets/images/d2f_2.png')).buffer
+                .asUint8List(),
+          ),
+          uploadPhoto: (parcelId, itemId, photo) async {
+            expect(parcelId, customerParcel.id);
+            expect(photo.fileName, 'books.png');
+            uploadedItemId = itemId;
+          },
+          loadParcel: (id) async {
+            detailReloads++;
+            return customerParcel;
+          },
           loadParcels: () async {
             parcelLoadCount++;
             return parcelLoadCount > 1 ? [customerParcel] : [];
@@ -116,13 +179,18 @@ void main() {
           createParcel:
               ({
                 required recipientName,
-                recipientPhone,
-                recipientAddress,
+                required recipientPhone,
+                required recipientAddress,
                 required packageType,
                 required weightKg,
                 required origin,
                 required destination,
                 required method,
+                required deliveryMode,
+                restrictionsAcknowledged = false,
+                pickupAddress,
+                pickupScheduledAt,
+                items = const [],
                 notes,
                 required clientRequestId,
               }) async {
@@ -135,6 +203,10 @@ void main() {
                   'origin': origin,
                   'destination': destination,
                   'method': method,
+                  'deliveryMode': deliveryMode,
+                  'restrictionsAcknowledged': restrictionsAcknowledged,
+                  'pickupAddress': pickupAddress,
+                  'items': items,
                   'notes': notes,
                   'clientRequestId': clientRequestId,
                 };
@@ -145,7 +217,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Your next shipment'), findsOneWidget);
+    expect(find.text('New shipment request'), findsOneWidget);
 
     final screenshotDirectory = Directory('design/verification-customer')
       ..createSync(recursive: true);
@@ -163,17 +235,38 @@ void main() {
     }
 
     await capture('06-customer-new-shipment');
-    await tester.scrollUntilVisible(
-      find.text('Your shipments'),
-      250,
-      scrollable: find.byType(Scrollable).first,
-    );
-    expect(find.text('Your shipments'), findsOneWidget);
-    expect(
-      find.textContaining('Your shipment requests and tracking IDs'),
-      findsOneWidget,
-    );
 
+    // Goods repeater: physical packages travel with type and dimensions.
+    await tester.enterText(
+      find.byKey(const ValueKey('goods-size-0')),
+      '60x40x45',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('goods-name-0')),
+      'Clothing box',
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('goods-qty-0')), '2');
+    await tester.pumpAndSettle();
+    await reveal(tester, const ValueKey('customer-add-item'));
+    await tester.tap(find.byKey(const ValueKey('customer-add-item')));
+    await tester.pumpAndSettle();
+    // A blank draft before this package must not move its photo to another row.
+    await reveal(tester, const ValueKey('customer-add-item'));
+    await tester.tap(find.byKey(const ValueKey('customer-add-item')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('goods-name-2')),
+      'Kitchen blender',
+    );
+    await reveal(tester, const ValueKey('goods-photo-add-2'));
+    await tester.tap(find.byKey(const ValueKey('goods-photo-add-2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose from gallery'));
+    await tester.pumpAndSettle();
+    await tester.pumpAndSettle();
+
+    await reveal(tester, const ValueKey('customer-recipient-name'));
     await tester.enterText(
       find.byKey(const ValueKey('customer-recipient-name')),
       'Kossi Mensah',
@@ -184,33 +277,66 @@ void main() {
     );
     await tester.enterText(
       find.byKey(const ValueKey('customer-recipient-address')),
-      'Lomé, Togo',
+      'Agoe Assiyeye, Lomé',
     );
+    await tester.pumpAndSettle();
+    await reveal(tester, const ValueKey('customer-package-type'));
     await tester.tap(find.byKey(const ValueKey('customer-package-type')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Box').last);
     await tester.pumpAndSettle();
+    await reveal(tester, const ValueKey('customer-package-weight'));
     await tester.enterText(
       find.byKey(const ValueKey('customer-package-weight')),
       '2.5',
     );
 
-    final submit = find.byKey(const ValueKey('customer-create-shipment'));
-    await tester.ensureVisible(submit);
-    await tester.tap(submit);
+    await reveal(tester, const ValueKey('handover-dropoff'));
     await tester.pumpAndSettle();
 
+    final submit = find.byKey(const ValueKey('customer-create-shipment'));
+    await reveal(tester, const ValueKey('customer-create-shipment'));
+    await tester.tap(submit);
+    await tester.pumpAndSettle();
+    expect(submitted, isNull);
+    expect(find.textContaining('Confirm that your goods list'), findsOneWidget);
+    await reveal(tester, const ValueKey('customer-restrictions-check'));
+    await tester.tap(find.byKey(const ValueKey('customer-restrictions-check')));
+    await reveal(tester, const ValueKey('customer-create-shipment'));
+    await tester.tap(submit);
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 1));
+    expect(submitted?['restrictionsAcknowledged'], isTrue);
+    expect(uploadedItemId, 'item-2');
+    expect(detailReloads, 1);
+
     expect(submitted?['recipientName'], 'Kossi Mensah');
+    expect(submitted?['recipientPhone'], '+22890000000');
+    expect(submitted?['recipientAddress'], 'Agoe Assiyeye, Lomé');
     expect(submitted?['packageType'], 'BOX');
     expect(submitted?['weightKg'], 2.5);
     expect(submitted?['origin'], 'Omaha, NE, USA');
     expect(submitted?['destination'], 'Lomé, Togo');
     expect(submitted?['method'], 'AIR');
+    // Default handover is a warehouse drop-off with no pickup schedule.
+    expect(submitted?['deliveryMode'], 'DROP_OFF');
+    expect(submitted?['pickupAddress'], isNull);
+    final items = submitted?['items'] as List<ParcelItem>;
+    expect(items.map((item) => item.name), ['Clothing box', 'Kitchen blender']);
+    expect(items.first.quantity, 2);
+    expect(items.first.lengthCm, 60);
+    expect(items.first.widthCm, 40);
+    expect(items.first.heightCm, 45);
     expect(submitted?['clientRequestId'], isNotEmpty);
     expect(find.text('Request created.'), findsOneWidget);
     expect(find.text('Request submitted'), findsOneWidget);
     expect(find.text(customerParcel.trackingId), findsOneWidget);
-    expect(find.text('Request Submitted'), findsOneWidget);
+    // The details screen itemizes the goods under the shipment.
+    expect(find.text('Goods in this shipment'), findsOneWidget);
+    expect(find.text('Clothing box'), findsOneWidget);
+    expect(find.text('×2'), findsOneWidget);
+    expect(find.text('Warehouse drop-off'), findsOneWidget);
+    expect(find.text('Awaiting Drop-off'), findsOneWidget);
     await capture('07-customer-parcel-created');
 
     final viewShipments = find.text('View my shipments');
@@ -221,6 +347,12 @@ void main() {
     );
     await tester.tap(viewShipments);
     await tester.pumpAndSettle();
+    // Back on the shipment workspace; the saved request is listed.
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('customer-parcel-customer-parcel-id')),
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(
       find.byKey(const ValueKey('customer-parcel-customer-parcel-id')),
       findsOneWidget,
@@ -228,36 +360,226 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+    'pickup handover requires a collection address and schedule before submit',
+    (tester) async {
+      size(tester, const Size(390, 844));
+      Map<String, Object?>? submitted;
+      await tester.pumpWidget(
+        wrap(
+          CustomerShipmentScreen(
+            loadParcels: () async => [],
+            selectSchedule: () async => DateTime(2026, 11, 15, 10, 30),
+            createParcel:
+                ({
+                  required recipientName,
+                  required recipientPhone,
+                  required recipientAddress,
+                  required packageType,
+                  required weightKg,
+                  required origin,
+                  required destination,
+                  required method,
+                  required deliveryMode,
+                  restrictionsAcknowledged = false,
+                  pickupAddress,
+                  pickupScheduledAt,
+                  items = const [],
+                  notes,
+                  required clientRequestId,
+                }) async {
+                  submitted = {
+                    'deliveryMode': deliveryMode,
+                    'restrictionsAcknowledged': restrictionsAcknowledged,
+                    'pickupAddress': pickupAddress,
+                    'pickupScheduledAt': pickupScheduledAt,
+                    'items': items,
+                  };
+                  return customerParcel;
+                },
+          ),
+          GlobalKey(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const ValueKey('goods-name-0')),
+        'Carton of books',
+      );
+      await reveal(tester, const ValueKey('customer-recipient-name'));
+      await tester.enterText(
+        find.byKey(const ValueKey('customer-recipient-name')),
+        'Awa Mensah',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('customer-recipient-phone')),
+        '+22890000001',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('customer-recipient-address')),
+        'Agoe, Lomé',
+      );
+      await tester.pumpAndSettle();
+      await reveal(tester, const ValueKey('customer-package-type'));
+      await tester.tap(find.byKey(const ValueKey('customer-package-type')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Box').last);
+      await tester.pumpAndSettle();
+      await reveal(tester, const ValueKey('customer-package-weight'));
+      await tester.enterText(
+        find.byKey(const ValueKey('customer-package-weight')),
+        '3',
+      );
+
+      // Choose the pickup module: the schedule card appears.
+      await reveal(tester, const ValueKey('handover-pickup'));
+      await tester.tap(find.byKey(const ValueKey('handover-pickup')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('pickup-details')), findsOneWidget);
+
+      final submit = find.byKey(const ValueKey('customer-create-shipment'));
+      await reveal(tester, const ValueKey('customer-create-shipment'));
+      // Submitting without the collection address fails client-side and no
+      // request is created.
+      await tester.tap(submit);
+      await tester.pumpAndSettle();
+      expect(find.text('Required'), findsWidgets);
+      expect(submitted, isNull);
+
+      // The collection address fills in; submitting still blocks on the
+      // schedule, which is compulsory for a pickup.
+      await fillUsAddress(tester, 'Collection address');
+      await tester.pumpAndSettle();
+      await reveal(tester, const ValueKey('customer-create-shipment'));
+      await tester.tap(submit);
+      await tester.pumpAndSettle();
+      expect(find.text('Choose the collection date and time.'), findsOneWidget);
+      expect(submitted, isNull);
+
+      // Pick a date and time (injectable picker supplied by the test), then
+      // the request goes through carrying the full pickup contract.
+      await reveal(tester, const ValueKey('customer-pickup-schedule'));
+      await tester.tap(find.byKey(const ValueKey('customer-pickup-schedule')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Nov 15'), findsNWidgets(2));
+      await reveal(tester, const ValueKey('customer-restrictions-check'));
+      await tester.tap(
+        find.byKey(const ValueKey('customer-restrictions-check')),
+      );
+      await reveal(tester, const ValueKey('customer-create-shipment'));
+      await tester.tap(submit);
+      await tester.pumpAndSettle();
+      expect(submitted?['deliveryMode'], 'PICKUP');
+      expect(submitted?['pickupAddress'], contains('108 Dodge Street'));
+      expect(submitted?['pickupAddress'], contains('Omaha, NE 68104'));
+      expect(submitted?['pickupScheduledAt'], DateTime(2026, 11, 15, 10, 30));
+      expect(find.text('Request created.'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('customer shipment form fits a compact screen with larger text', (
     tester,
   ) async {
     size(tester, const Size(320, 640), scale: 1.2);
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.build(),
-        home: Scaffold(
-          body: CustomerShipmentScreen(
-            loadParcels: () async => [],
-            createParcel: ({
-              required recipientName,
-              recipientPhone,
-              recipientAddress,
-              required packageType,
-              required weightKg,
-              required origin,
-              required destination,
-              required method,
-              notes,
-              required clientRequestId,
-            }) async => customerParcel,
+      ProviderScope(
+        overrides: [authControllerProvider.overrideWith(_CustomerSession.new)],
+        child: MaterialApp(
+          theme: AppTheme.build(),
+          home: Scaffold(
+            body: CustomerShipmentScreen(
+              loadParcels: () async => [],
+              createParcel: ({
+                required recipientName,
+                required recipientPhone,
+                required recipientAddress,
+                required packageType,
+                required weightKg,
+                required origin,
+                required destination,
+                required method,
+                required deliveryMode,
+                restrictionsAcknowledged = false,
+                pickupAddress,
+                pickupScheduledAt,
+                items = const [],
+                notes,
+                required clientRequestId,
+              }) async => customerParcel,
+            ),
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('customer-create-shipment')),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.ensureVisible(
       find.byKey(const ValueKey('customer-create-shipment')),
     );
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
+  testWidgets(
+    'section shortcuts preserve package drafts and expose measurement errors',
+    (tester) async {
+      size(tester, const Size(390, 844));
+      final boundaryKey = GlobalKey();
+      await tester.pumpWidget(
+        wrap(CustomerShipmentScreen(loadParcels: () async => []), boundaryKey),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('shipment-section-1')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('goods-name-0')),
+        'Clothes and shoes',
+      );
+      await reveal(tester, const ValueKey('goods-size-0'));
+      await tester.enterText(
+        find.byKey(const ValueKey('goods-size-0')),
+        '60x40',
+      );
+      await tester.tap(find.byKey(const ValueKey('shipment-section-2')));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Use three measurements, e.g. 60 x 40 x 45.'),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('shipment-section-1')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextFormField>(find.byKey(const ValueKey('goods-name-0')))
+            .controller!
+            .text,
+        'Clothes and shoes',
+      );
+      await reveal(tester, const ValueKey('goods-size-0'));
+      await tester.enterText(
+        find.byKey(const ValueKey('goods-size-0')),
+        '60x40x45',
+      );
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('shipment-section-1')));
+      await tester.pumpAndSettle();
+      await tester.runAsync(() async {
+        final boundary =
+            boundaryKey.currentContext!.findRenderObject()
+                as RenderRepaintBoundary;
+        final img = await boundary.toImage(pixelRatio: 2);
+        final png = await img.toByteData(format: ui.ImageByteFormat.png);
+        File('design/verification-customer/08-package-entry.png')
+            .writeAsBytesSync(png!.buffer.asUint8List());
+        img.dispose();
+      });
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

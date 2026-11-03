@@ -16,12 +16,21 @@ const userSelect = {
 };
 const shipmentStatuses = [
   'REQUESTED',
+  'PICKUP_SCHEDULED',
+  'PICKED_UP',
   'RECEIVED',
   'PROCESSING',
+  'READY_FOR_LOADING',
+  'LOADED_IN_CONTAINER',
+  'ARRIVED_PORT',
+  'CUSTOMS_CLEARANCE',
+  'CUSTOMS_CLEARED',
+  'RECEIVED_DESTINATION',
   'IN_TRANSIT',
   'ARRIVED_LOME',
   'ARRIVED_DESTINATION',
   'READY_FOR_PICKUP',
+  'OUT_FOR_DELIVERY',
   'RELEASED',
   'DELIVERED',
 ];
@@ -200,6 +209,7 @@ router.get('/parcels', async (req, res, next) => {
 
     const where = {
       organizationId: req.organizationId,
+      serviceType: { not: 'AIR_TRAVELLER' },
       ...(status && status !== 'ALL' ? { status } : {}),
       ...(q
         ? {

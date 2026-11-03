@@ -1,0 +1,35 @@
+D2F Global source — version 1.1.8+2022
+
+Android app: Flutter. API: backend/ (Express, Prisma, PostgreSQL).
+Admin dashboard: admin-dashboard/ (React/Vite).
+Direct printer bridge: android/app/src/main/kotlin/com/example/d2f_application/BrotherPrinterBridge.kt
+Windows local printer connector: tools/windows-print-connector/.
+
+Before an Android build, review assets/licenses/Brother-SDK-EULA.txt, then run:
+  python3 tool/install_brother_sdk.py --accept-brother-license
+  flutter pub get
+  flutter test
+  flutter build apk --release --split-per-abi
+The installer retrieves the unchanged official Brother SDK 4.13.2 and verifies
+its pinned checksum. The raw proprietary AAR is intentionally not in GitHub.
+For an owner-signed ARM64 build, configure private android/key.properties and
+run python3 tool/build_android_release.py with Flutter, Android SDK and Java
+available. Signing keys and account credentials are never included here.
+
+Backend: npm ci in backend/, configure a private .env from .env.example,
+run npx prisma generate and npx prisma migrate deploy, then npm start.
+Use an isolated PostgreSQL database for npm test.
+Admin dashboard: npm ci, npm test and npm run build in admin-dashboard/.
+Windows connector: install Python 3.9+ and the official Brother Windows driver,
+then run tools/windows-print-connector/start.cmd. Enter its local pairing key
+in the production D2F dashboard's Print Label panel. Configure the correct 4x6
+paper and verify physical output. The connector binds only to 127.0.0.1:18441.
+
+Printing targets Brother QL-1110NWB/QL-1110NWBc. Other Bluetooth brands require
+separate integration. Actual printer output and Android Play Protect results
+remain unverified without physical test hardware. Local release reports record
+118 Flutter, 79 backend, 29 dashboard, 4 connector and 74 live API checks passed.
+
+The repository's existing publishing rules exclude Markdown, design inputs and
+build outputs. Guides, source archives and signed APKs remain in the owner's
+local workspace/deliverables; this commit publishes source and build inputs.

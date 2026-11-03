@@ -5,6 +5,7 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { resolveOrganizationId } from '../tracking.js';
 import { warehouseLock, fail, locationLabel, containerInclude, manifestFor, containerAudit } from '../warehouse.js';
 import { SERVICE_COUNTRIES, COUNTRY_TIMEZONES, countryInLocation } from '../service_area.js';
+import { isFacilityAuthorized, facilityDeniedMessage, destinationMatchesLocation } from '../parcel_rules.js';
 const router = Router();
 router.use(authenticate, requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
   try { req.organizationId = await resolveOrganizationId(prisma, req.user); next(); } catch (e) { next(e); }
@@ -45,7 +46,7 @@ router.get('/containers', async (req, res, next) => {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(offset) || offset < 0) fail(400, 'Invalid page.');
     const q = req.query.q?.toString().trim();
     const status = req.query.status?.toString();
-    if (status && !['ALL', 'LOADING', 'DEPARTED', 'ARRIVED'].includes(status)) fail(400, 'Choose a valid container status.');
+    if (status && !['ALL', 'LOADING', 'DEPARTED', 'ARRIVED_PORT', 'CUSTOMS_CLEARANCE', 'CUSTOMS_CLEARED', 'ARRIVED'].includes(status)) fail(400, 'Choose a valid container status.');
     const where = { organizationId: req.organizationId, ...(status && status !== 'ALL' ? { status } : {}), ...(q ? { code: { contains: q, mode: 'insensitive' } } : {}) };
     const [containers, total] = await prisma.$transaction([
       prisma.container.findMany({ where, include: containerInclude, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], take: limit, skip: offset }), prisma.container.count({ where }),
@@ -61,6 +62,8 @@ router.post('/containers', async (req, res, next) => {
       await warehouseLock(tx, req.organizationId);
       const locations = await tx.location.findMany({ where: { id: { in: [originId, destinationId] }, organizationId: req.organizationId } });
       if (locations.length !== 2) fail(400, 'Choose locations belonging to your organization.');
+      const origin = locations.find((location) => location.id === originId);
+      if (!isFacilityAuthorized(req.user, origin)) fail(403, facilityDeniedMessage(origin));
       const container = await tx.container.create({ data: { organizationId: req.organizationId, code: code.trim().toUpperCase(), originId, destinationId, method, sealNumber: sealNumber?.trim() || null, notes: notes?.trim() || null }, include: containerInclude });
       await containerAudit(tx, req.user, container.id, 'CREATED', 'Container opened for loading');
       return container;
@@ -90,22 +93,37 @@ router.get('/containers/:id/manifest', async (req, res, next) => {
 router.post('/containers/:id/parcels', async (req, res, next) => {
   try {
     const trackingId = req.body?.trackingId;
+    if (req.body?.loadingConfirmed !== true) fail(400, 'Confirm that every warehouse-verified package in this shipment has physically been loaded.');
     if (!text(trackingId, 80)) fail(400, 'Scan or enter a tracking number.');
     const result = await prisma.$transaction(async tx => {
       await warehouseLock(tx, req.organizationId);
       const container = await tx.container.findFirst({ where: { id: req.params.id, organizationId: req.organizationId }, include: containerInclude });
       if (!container) fail(404, 'Container not found.');
       if (container.status !== 'LOADING') fail(409, 'Loading is closed for this container.');
+      if (!isFacilityAuthorized(req.user, container.origin)) fail(403, facilityDeniedMessage(container.origin));
       const parcel = await tx.parcel.findFirst({ where: { trackingId: trackingId.trim().toUpperCase(), organizationId: req.organizationId } });
       if (!parcel) fail(404, 'Parcel not found.');
+      if (parcel.serviceType === 'AIR_TRAVELLER') fail(409, 'D2F Connect parcels use a traveller manifest, not a cargo container.');
       if (parcel.containerId === container.id) return { parcel, alreadyLoaded: true };
       if (parcel.containerId) fail(409, 'This parcel is already assigned to another container.');
-      if (!['RECEIVED', 'PROCESSING'].includes(parcel.status)) fail(409, 'Only received or processing parcels can be loaded.');
+      if (!(parcel.method === 'SEA' ? ['READY_FOR_LOADING'] : ['RECEIVED', 'PROCESSING']).includes(parcel.status)) fail(409, 'Complete processing and mark sea parcels Ready for Loading before loading.');
+      const packages = await tx.parcelItem.findMany({ where: { parcelId: parcel.id, notCollectedReason: null } });
+      if (packages.some(p => !p.warehouseReceivedAt)) fail(409, 'All collected packages require warehouse verification before loading.');
+      if (!parcel.warehouseReceivedAt) fail(409, 'Warehouse staff must scan and verify receipt before container loading.');
+      if (!destinationMatchesLocation(parcel.destination, container.destination)) fail(409, 'Parcel destination does not match the container destination.');
+      if (parcel.locationId !== container.originId) fail(409, 'The parcel must be received at the container origin before it can be loaded.');
       const parcelOriginCountry = countryInLocation(parcel.origin);
       if (parcelOriginCountry && parcelOriginCountry !== container.origin.country) fail(409, 'Parcel origin does not match the container origin country.');
       if (parcel.method !== container.method) fail(409, 'Parcel and container shipping methods must match.');
-      const updated = await tx.parcel.update({ where: { id: parcel.id }, data: { containerId: container.id } });
-      await tx.trackingEvent.create({ data: { parcelId: parcel.id, status: parcel.status, actorId: req.user.id, location: locationLabel(container.origin), note: `Loaded into container ${container.code}` } });
+      // Loading is the physical processing step, so a received parcel moves to
+      // PROCESSING before the container can depart. This preserves the strict
+      // RECEIVED → PROCESSING → IN_TRANSIT lifecycle.
+      const nextStatus = parcel.method === 'SEA' ? 'LOADED_IN_CONTAINER' : parcel.status === 'RECEIVED' ? 'PROCESSING' : parcel.status;
+      const updated = await tx.parcel.update({
+        where: { id: parcel.id },
+        data: { containerId: container.id, status: nextStatus, locationId: container.originId },
+      });
+      await tx.trackingEvent.create({ data: { parcelId: parcel.id, status: nextStatus, actorId: req.user.id, facilityId: container.originId, location: locationLabel(container.origin), note: `Loaded into container ${container.code}` } });
       await containerAudit(tx, req.user, container.id, 'PARCEL_LOADED', parcel.trackingId);
       return { parcel: updated, alreadyLoaded: false };
     });
@@ -119,10 +137,11 @@ router.delete('/containers/:id/parcels/:parcelId', async (req, res, next) => {
       const container = await tx.container.findFirst({ where: { id: req.params.id, organizationId: req.organizationId }, include: containerInclude });
       if (!container) fail(404, 'Container not found.');
       if (container.status !== 'LOADING') fail(409, 'Parcels cannot be removed after departure.');
+      if (!isFacilityAuthorized(req.user, container.origin)) fail(403, facilityDeniedMessage(container.origin));
       const parcel = await tx.parcel.findFirst({ where: { id: req.params.parcelId, containerId: container.id, organizationId: req.organizationId } });
       if (!parcel) fail(404, 'Loaded parcel not found.');
-      await tx.parcel.update({ where: { id: parcel.id }, data: { containerId: null } });
-      await tx.trackingEvent.create({ data: { parcelId: parcel.id, status: parcel.status, actorId: req.user.id, location: locationLabel(container.origin), note: `Removed from container ${container.code}` } });
+      await tx.parcel.update({ where: { id: parcel.id }, data: { containerId: null, ...(parcel.method === 'SEA' ? { status: 'READY_FOR_LOADING' } : {}) } });
+      await tx.trackingEvent.create({ data: { parcelId: parcel.id, status: parcel.method === 'SEA' ? 'READY_FOR_LOADING' : parcel.status, actorId: req.user.id, facilityId: container.originId, location: locationLabel(container.origin), note: `Removed from container ${container.code}` } });
       await containerAudit(tx, req.user, container.id, 'PARCEL_REMOVED', parcel.trackingId);
     });
     res.json({ ok: true });
@@ -130,23 +149,37 @@ router.delete('/containers/:id/parcels/:parcelId', async (req, res, next) => {
 });
 router.post('/containers/:id/events', async (req, res, next) => {
   try {
-    const { action } = req.body || {};
-    if (!['DEPARTED', 'ARRIVED'].includes(action)) fail(400, 'Choose departure or arrival.');
+    let { action } = req.body || {};
+    if (!['DEPARTED', 'ARRIVED_PORT', 'CUSTOMS_CLEARANCE', 'CUSTOMS_CLEARED', 'ARRIVED'].includes(action)) fail(400, 'Choose a valid physical container event.');
+    if (req.body?.confirmed !== true) fail(400, 'Confirm the actual physical container event before continuing.');
     const result = await prisma.$transaction(async tx => {
       await warehouseLock(tx, req.organizationId);
       const container = await tx.container.findFirst({ where: { id: req.params.id, organizationId: req.organizationId }, include: { ...containerInclude, parcels: true } });
       if (!container) fail(404, 'Container not found.');
-      if ((action === 'DEPARTED' && container.status !== 'LOADING') || (action === 'ARRIVED' && container.status !== 'DEPARTED')) fail(409, 'This container has already changed. Refresh before continuing.');
+      // Older clients call their single arrival action ARRIVED. For sea this
+      // records port arrival only, never customs release or warehouse receipt.
+      if (container.method === 'SEA' && container.status === 'DEPARTED' && action === 'ARRIVED') action = 'ARRIVED_PORT';
+      const sequence = container.method === 'SEA'
+        ? { LOADING: 'DEPARTED', DEPARTED: 'ARRIVED_PORT', ARRIVED_PORT: 'CUSTOMS_CLEARANCE', CUSTOMS_CLEARANCE: 'CUSTOMS_CLEARED', CUSTOMS_CLEARED: 'ARRIVED' }
+        : { LOADING: 'DEPARTED', DEPARTED: 'ARRIVED' };
+      if (sequence[container.status] !== action) fail(409, 'Follow confirmed departure, port arrival, customs clearance and destination warehouse receipt in order. Refresh this container.');
+      const eventFacility = action === 'DEPARTED' ? container.origin : container.destination;
+      if (!isFacilityAuthorized(req.user, eventFacility)) fail(403, facilityDeniedMessage(eventFacility));
       if (!container.parcels.length) fail(409, 'Load at least one parcel before departure.');
       const departing = action === 'DEPARTED';
-      if (container.parcels.some(p => !(departing ? ['RECEIVED', 'PROCESSING'] : ['IN_TRANSIT']).includes(p.status))) fail(409, 'A parcel has an incompatible status. Review the container before continuing.');
-      const location = locationLabel(departing ? container.origin : container.destination);
-      const note = `${departing ? 'Departed' : 'Arrived at'} ${location} · Container ${container.code}`;
-      const status = departing ? 'IN_TRANSIT' : (container.destination.country === 'Togo' ? 'ARRIVED_LOME' : 'ARRIVED_DESTINATION');
+      const expected = departing ? (container.method === 'SEA' ? ['LOADED_IN_CONTAINER'] : ['RECEIVED', 'PROCESSING'])
+        : { DEPARTED: ['IN_TRANSIT'], ARRIVED_PORT: ['ARRIVED_PORT'], CUSTOMS_CLEARANCE: ['CUSTOMS_CLEARANCE'], CUSTOMS_CLEARED: ['CUSTOMS_CLEARED'] }[container.status];
+      if (container.parcels.some(p => !expected.includes(p.status))) fail(409, 'A parcel has an incompatible status. Review the container before continuing.');
+      const location = locationLabel(eventFacility);
+      const labels = { DEPARTED: 'Departure confirmed', ARRIVED_PORT: 'Destination port arrival confirmed', CUSTOMS_CLEARANCE: 'Customs clearance started', CUSTOMS_CLEARED: 'Customs release confirmed', ARRIVED: 'Destination warehouse receipt confirmed' };
+      const note = `${labels[action]} · ${location} · Container ${container.code}`;
+      const status = departing ? 'IN_TRANSIT' : container.method === 'SEA'
+        ? { ARRIVED_PORT: 'ARRIVED_PORT', CUSTOMS_CLEARANCE: 'CUSTOMS_CLEARANCE', CUSTOMS_CLEARED: 'CUSTOMS_CLEARED', ARRIVED: 'RECEIVED_DESTINATION' }[action]
+        : (container.destination.country === 'Togo' ? 'ARRIVED_LOME' : 'ARRIVED_DESTINATION');
       const manifest = departing ? await manifestFor(tx, container) : undefined;
       if (manifest) manifest.provisional = false;
       await tx.parcel.updateMany({ where: { containerId: container.id, organizationId: req.organizationId }, data: { status, locationId: departing ? container.originId : container.destinationId } });
-      await tx.trackingEvent.createMany({ data: container.parcels.map(p => ({ parcelId: p.id, status, location, note, actorId: req.user.id })) });
+      await tx.trackingEvent.createMany({ data: container.parcels.map(p => ({ parcelId: p.id, status, location, note, originalNote: note, facilityId: eventFacility.id, actorId: req.user.id })) });
       await containerAudit(tx, req.user, container.id, action, note);
       return tx.container.update({ where: { id: container.id }, data: { status: action, ...(manifest ? { manifest } : {}) }, include: containerInclude });
     }, { timeout: 20000 });

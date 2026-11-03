@@ -98,15 +98,18 @@ class _BrandIdentScreenState extends State<BrandIdentScreen>
                       padding: const EdgeInsets.symmetric(horizontal: 24),
                       child: LayoutBuilder(
                         builder: (context, constraints) {
-                          final artHeight =
-                              (constraints.maxHeight * .44).clamp(210.0, 340.0);
+                          final artHeight = (constraints.maxHeight * .44).clamp(
+                            210.0,
+                            340.0,
+                          );
                           return Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               ScaleTransition(
-                                scale: Tween(begin: 0.86, end: 1.0).animate(
-                                  _wordmark,
-                                ),
+                                scale: Tween(
+                                  begin: 0.86,
+                                  end: 1.0,
+                                ).animate(_wordmark),
                                 child: FadeTransition(
                                   opacity: _wordmark,
                                   child: const Center(
@@ -274,7 +277,7 @@ class FlightLoadingBar extends StatelessWidget {
                     Icons.flight_rounded,
                     size: 21,
                     color: AppColors.gold,
-                          ),
+                  ),
                 ),
               ),
             ],

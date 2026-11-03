@@ -1,3 +1,9 @@
+import 'shipment_custody_screen.dart';
+import '../widgets/service_experience.dart';
+import '../widgets/shipment_updates.dart';
+import 'scan_screen.dart';
+import 'connect_screen.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,6 +23,7 @@ import '../providers/auth_provider.dart';
 import '../widgets/auth_widgets.dart';
 import 'account_screen.dart';
 import 'customer_shipment_screen.dart';
+import '../widgets/customer_tracking_history.dart';
 
 /// Customers and drivers never mount the staff shell or fetch staff records.
 class RoleWorkspaceScreen extends ConsumerStatefulWidget {
@@ -220,14 +227,61 @@ class _RoleWorkspaceScreenState extends ConsumerState<RoleWorkspaceScreen> {
     ],
   );
 
+  Future<void> _updates() => showShipmentUpdates(
+    context,
+    loadParcels: widget.loadCustomerParcels ?? Api.I.customerTrackingParcels,
+    onOpen: (parcel) => Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            parcel.serviceType == 'AIR_TRAVELLER' &&
+                parcel.connectBookingId != null
+            ? ConnectBookingScreen(
+                id: parcel.connectBookingId!,
+                request: Api.I.connect,
+              )
+            : CustomerParcelDetailsScreen(parcel: parcel),
+      ),
+    ),
+  );
+
+  Future<void> _scanTracking() async {
+    final value = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const ScanScreen(returnTracking: true)),
+    );
+    if (!mounted || value == null) return;
+    _tracking.text = value;
+    await _track();
+  }
+
+  void _openService(D2FService service) {
+    if (service == D2FService.buy) {
+      _select(5);
+      return;
+    }
+    if (service == D2FService.marketplace) {
+      _select(4);
+      return;
+    }
+    openD2FService(
+      context,
+      service,
+      onShip: () => _select(1),
+      onContact: _contact,
+    );
+  }
+
   void _select(int index) => setState(() => _section = index);
-  Widget _trackingPanel() => Column(
+  Widget _trackingPanel({required bool driver}) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       const Text('Track a shipment', style: AppTheme.display),
       const SizedBox(height: 8),
-      const Text(
-        'Every update, all in one place. Enter the number on your shipping label.',
+      Text(
+        driver
+            ? 'Every update, all in one place. Enter the number on your shipping label.'
+            : 'Every update, all in one place. Enter a tracking number or find your shipment below.',
         style: AppTheme.caption,
       ),
       const SizedBox(height: 24),
@@ -239,18 +293,19 @@ class _RoleWorkspaceScreenState extends ConsumerState<RoleWorkspaceScreen> {
       const SizedBox(height: 14),
       PrimaryButton(label: 'Track Shipment', loading: _busy, onPressed: _track),
       const SizedBox(height: 24),
-      ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: const ReferenceArt('journey', height: 230),
-      ),
+      if (!driver)
+        CustomerTrackingHistory(loadParcels: widget.loadCustomerParcels),
+      if (driver)
+        ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: const ReferenceArt('journey', height: 230),
+        ),
     ],
   );
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authControllerProvider).valueOrNull;
     final driver = user?.role == UserRole.DRIVER;
-    final compact = MediaQuery.sizeOf(context).width < 360;
-    final enlargedText = MediaQuery.textScalerOf(context).scale(1) > 1.15;
     return Scaffold(
       backgroundColor: authCanvas,
       bottomNavigationBar: D2FNavigationBar(
@@ -261,6 +316,17 @@ class _RoleWorkspaceScreenState extends ConsumerState<RoleWorkspaceScreen> {
       ),
       body: _section == 3
           ? AccountScreen(onTrack: () => _select(2), onShip: () => _select(1))
+          : !driver && (_section == 4 || _section == 5)
+          ? D2FServiceScreen(
+              key: ValueKey('customer-service-$_section'),
+              service: _section == 4 ? D2FService.marketplace : D2FService.buy,
+              embedded: true,
+              onContact: _contact,
+              onProfile: () => _select(3),
+              onNotifications: _updates,
+            )
+          : driver && _section == 1
+          ? const DriverTasksScreen()
           : !driver && _section == 1
           ? CustomerShipmentScreen(
               initialRoute:
@@ -278,18 +344,22 @@ class _RoleWorkspaceScreenState extends ConsumerState<RoleWorkspaceScreen> {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 600),
                   child: ListView(
+                    key: PageStorageKey('workspace-section-$_section'),
                     padding: !driver && _section == 0
                         ? const EdgeInsets.fromLTRB(18, 0, 18, 10)
                         : AppSpacing.pageInsets,
                     children: [
                       D2FHomeHeader(
-                        onBell: () => _select(2),
-                        actionTooltip: 'Track a parcel',
+                        onBell: driver ? () => _select(2) : _updates,
+                        onProfile: () => _select(3),
+                        actionTooltip: driver
+                            ? 'Track a parcel'
+                            : 'Shipment updates',
                         dense: !driver && _section == 0,
                       ),
                       SizedBox(height: !driver && _section == 0 ? 0 : 22),
                       if (_section == 2)
-                        _trackingPanel()
+                        _trackingPanel(driver: driver)
                       else if (_section == 1) ...[
                         ScreenIntro(
                           title: driver
@@ -367,148 +437,56 @@ class _RoleWorkspaceScreenState extends ConsumerState<RoleWorkspaceScreen> {
                             onPressed: _contact,
                           ),
                           const SizedBox(height: 24),
-                          _trackingPanel(),
+                          _trackingPanel(driver: true),
                         ] else ...[
-                          Text(
-                            'Good things.\nGoing places.',
-                            style: AppTheme.display.copyWith(
-                              fontSize: 29,
-                              height: 1.06,
+                          D2FServiceHome(
+                            onShip: () => _select(1),
+                            onTrack: () => _select(2),
+                            onContact: _contact,
+                            onServiceSelected: _openService,
+                            trackingField: TextField(
+                              key: const ValueKey('home-tracking-input'),
+                              controller: _tracking,
+                              textInputAction: TextInputAction.search,
+                              onSubmitted: (_) => _track(),
+                              decoration: InputDecoration(
+                                hintText: 'Enter tracking number',
+                                contentPadding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                  horizontal: 10,
+                                ),
+                                prefixIcon: IconButton(
+                                  tooltip: 'Track shipment',
+                                  onPressed: _track,
+                                  icon: const Icon(
+                                    Icons.search_rounded,
+                                    color: AppColors.blue,
+                                  ),
+                                ),
+                                suffixIcon: IconButton(
+                                  key: const ValueKey('home-scan-tracking'),
+                                  tooltip: 'Scan tracking label',
+                                  onPressed: _scanTracking,
+                                  icon: const Icon(
+                                    Icons.qr_code_scanner_rounded,
+                                    color: AppColors.blue,
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 0),
-                          Text(
-                            'Send a little closer to home.',
-                            style: AppTheme.caption.copyWith(fontSize: 13),
-                          ),
-                          const SizedBox(height: 4),
-                          SizedBox(
-                            height: enlargedText
-                                ? 270
-                                : compact
-                                ? 176
-                                : 184,
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                            shippingMethods: Row(
                               children: [
-                                Expanded(
-                                  flex: 6,
-                                  child: ReferenceActionCard(
-                                    title: 'Send\nPackage',
-                                    artwork: 'assets/images/send_parcel_reference.png',
-                                    subtitle:
-                                        'Across borders.\nCloser to home.',
-                                    color: AppColors.coral,
-                                    icon: Icons.inventory_2_outlined,
-                                    onTap: () => _select(1),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  flex: 4,
-                                  child: Column(
-                                    children: [
-                                      Expanded(
-                                        child: ReferenceActionCard(
-                                          title: 'Track Parcel',
-                                          subtitle: 'Follow its journey',
-                                          color: AppColors.blue,
-                                          icon: Icons.location_on_outlined,
-                                          onTap: () => _select(2),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Expanded(
-                                        child: ReferenceActionCard(
-                                          title: 'Buy For Me',
-                                          subtitle: 'Coming soon',
-                                          color: AppColors.yellow,
-                                          icon: Icons.shopping_bag_outlined,
-                                          onTap: () => showComingSoon(
-                                            context,
-                                            'Buy For Me',
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                                for (final method in ShippingMethod.values) ...[
+                                  Expanded(child: _shippingMethodCard(method)),
+                                  if (method != ShippingMethod.ROAD)
+                                    const SizedBox(width: 10),
+                                ],
                               ],
                             ),
-                          ),
-                          const SizedBox(height: 8),
-                          D2FSearchField(
-                            controller: _tracking,
-                            hint: 'Enter tracking number',
-                            onSubmit: (_) => _track(),
-                            compact: true,
+                            destinations: _customerRouteCard(),
                           ),
                           if (_busy)
                             const LinearProgressIndicator(minHeight: 2),
-                          const SizedBox(height: 8),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(18),
-                            child: const ReferenceArt(
-                              'warehouse',
-                              height: 150,
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                          const Text(
-                            'How would you like to send?',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              for (final method in ShippingMethod.values) ...[
-                                Expanded(child: _shippingMethodCard(method)),
-                                if (method != ShippingMethod.ROAD)
-                                  const SizedBox(width: 10),
-                              ],
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Explore more',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(height: 5),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _explore(
-                                  'Shop & Ship',
-                                  Icons.shopping_bag_outlined,
-                                  AppColors.coralSoft,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: _explore(
-                                  'Recharge & Data',
-                                  Icons.phone_android_rounded,
-                                  AppColors.blueSoft,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: _explore(
-                                  'Partner Offers',
-                                  Icons.sell_outlined,
-                                  AppColors.goldSoft,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          _customerRouteCard(),
                         ],
                       ],
                     ],
@@ -600,7 +578,7 @@ class _RoleWorkspaceScreenState extends ConsumerState<RoleWorkspaceScreen> {
                       const Padding(
                         padding: EdgeInsets.symmetric(horizontal: 8),
                         child: Icon(
-                          Icons.flight_takeoff_rounded,
+                          Icons.public_rounded,
                           color: AppColors.navy,
                           size: 17,
                         ),
@@ -677,55 +655,6 @@ class _RoleWorkspaceScreenState extends ConsumerState<RoleWorkspaceScreen> {
     ),
     visualDensity: VisualDensity.compact,
   );
-
-  Widget _explore(String title, IconData icon, Color tint) => Material(
-    color: tint,
-    borderRadius: BorderRadius.circular(16),
-    child: InkWell(
-      onTap: () => showComingSoon(context, title),
-      borderRadius: BorderRadius.circular(16),
-      child: SizedBox(
-        height: MediaQuery.textScalerOf(context).scale(1) > 1.15 ? 72 : 38,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-          child: Row(
-            children: [
-              Icon(icon, size: 19, color: AppColors.navy),
-              const SizedBox(width: 5),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 8,
-                        height: 1.15,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    const Text(
-                      'Coming soon',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppColors.textGrey,
-                        fontSize: 6.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    ),
-  );
 }
 
 /// Only the public, redacted tracking response is rendered for customers/drivers.
@@ -750,7 +679,9 @@ class PublicTrackingScreen extends StatelessWidget {
           ParcelSummaryCard(
             trackingId: shipment['trackingId'] as String,
             status: shipment['status'] as String,
-            method: shippingMethodFrom(shipment['method'] as String).label,
+            method: shipment['serviceType'] == 'AIR_TRAVELLER'
+                ? 'D2F Connect · Air Traveller'
+                : shippingMethodFrom(shipment['method'] as String).label,
             onCopy: () =>
                 copyToClipboard(context, shipment['trackingId'] as String),
           ),

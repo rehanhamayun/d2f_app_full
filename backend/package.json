@@ -23,5 +23,9 @@
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
     "prisma": "^6.19.3"
+  },
+  "overrides": {
+    "body-parser": "2.4.0",
+    "deepmerge-ts": "8.0.2"
   }
 }

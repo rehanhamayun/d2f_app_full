@@ -1,9 +1,13 @@
+import 'connect_screen.dart';
+import 'account_screen.dart';
+import '../widgets/shipment_updates.dart';
+
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/auth_provider.dart';
 import '../widgets/reference_widgets.dart';
+import '../widgets/service_experience.dart';
 
 import '../core/api.dart';
 import '../core/theme.dart';
@@ -18,6 +22,7 @@ import 'warehouse_screen.dart';
 /// Staff and admin dashboard. Counts and recents come from the existing API.
 class HomeScreen extends ConsumerStatefulWidget {
   final VoidCallback onGoRegister, onGoActivity;
+  final VoidCallback? onGoProfile;
   final ValueChanged<ShippingMethod>? onGoMethod;
   final ValueChanged<ShipmentRoute>? onGoRoute;
   final Future<Map<String, int>> Function()? loadStats;
@@ -26,6 +31,7 @@ class HomeScreen extends ConsumerStatefulWidget {
     super.key,
     required this.onGoRegister,
     required this.onGoActivity,
+    this.onGoProfile,
     this.onGoMethod,
     this.onGoRoute,
     this.loadStats,
@@ -89,7 +95,26 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
           children: [
-            D2FHomeHeader(onBell: widget.onGoActivity),
+            D2FHomeHeader(
+              onBell: () => showShipmentUpdates(
+                context,
+                loadParcels: widget.loadRecent ?? Api.I.parcels,
+                onOpen: (parcel) => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => ParcelDetailScreen(parcelId: parcel.id),
+                  ),
+                ),
+              ),
+              onProfile:
+                  widget.onGoProfile ??
+                  () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const Scaffold(body: AccountScreen()),
+                    ),
+                  ),
+            ),
             const SizedBox(height: 19),
             Row(
               children: [
@@ -150,6 +175,8 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                 ],
               ),
             ),
+            const SizedBox(height: 16),
+            const ConnectServiceCard(),
             const SizedBox(height: 16),
             LayoutBuilder(
               builder: (context, c) => Wrap(
@@ -367,26 +394,9 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
             const SizedBox(height: 22),
             const Text('Explore more', style: AppTheme.sectionTitle),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _FutureService(
-                    title: 'Marketplace',
-                    color: AppColors.coralSoft,
-                    artworkAsset: 'assets/images/home_marketplace.svg',
-                    onTap: () => showComingSoon(context, 'D2F Marketplace'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _FutureService(
-                    title: 'Buy For Me',
-                    color: AppColors.blueSoft,
-                    artworkAsset: 'assets/images/home_buy_for_me.svg',
-                    onTap: () => showComingSoon(context, 'Buy For Me'),
-                  ),
-                ),
-              ],
+            D2FServiceDirectory(
+              onSelected: (service) =>
+                  openD2FService(context, service, onShip: widget.onGoRegister),
             ),
             const SizedBox(height: 22),
             RoutePlannerCard(
@@ -457,12 +467,14 @@ class _MethodCard extends StatelessWidget {
               children: [
                 Icon(method.icon, color: fg, size: 22),
                 const SizedBox(width: 6),
-                Text(
-                  method.label,
-                  style: TextStyle(
-                    color: AppColors.navy,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 15,
+                Flexible(
+                  child: Text(
+                    method.label,
+                    style: TextStyle(
+                      color: AppColors.navy,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 15,
+                    ),
                   ),
                 ),
               ],
@@ -477,72 +489,4 @@ class _MethodCard extends StatelessWidget {
       ),
     );
   }
-}
-
-class _FutureService extends StatelessWidget {
-  final String title;
-  final String artworkAsset;
-  final Color color;
-  final VoidCallback onTap;
-  const _FutureService({
-    required this.title,
-    required this.artworkAsset,
-    required this.color,
-    required this.onTap,
-  });
-  @override
-  Widget build(BuildContext context) => Material(
-    color: color,
-    borderRadius: BorderRadius.circular(22),
-    clipBehavior: Clip.antiAlias,
-    child: InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: double.infinity,
-              height: 100,
-              child: ExcludeSemantics(
-                child: SvgPicture.asset(
-                  artworkAsset,
-                  fit: BoxFit.contain,
-                  alignment: Alignment.center,
-                ),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: AppColors.navy,
-                fontSize: 15,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(7),
-              ),
-              child: const Text(
-                'COMING SOON',
-                style: TextStyle(
-                  color: AppColors.textGrey,
-                  fontSize: 8,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: .9,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
 }

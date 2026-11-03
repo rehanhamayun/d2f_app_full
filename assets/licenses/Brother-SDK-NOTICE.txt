@@ -1,0 +1,3 @@
+Brother Print SDK for Android 4.13.2
+Copyright Brother Industries, Ltd. All rights reserved.
+The embedded Brother SDK may be used only with this D2F application to print to supported Brother printers. End users must not redistribute the Brother SDK separately. See the accompanying Brother SDK EULA.

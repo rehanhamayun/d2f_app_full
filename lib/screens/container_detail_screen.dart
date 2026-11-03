@@ -34,6 +34,7 @@ class _ContainerDetailScreenState extends State<ContainerDetailScreen> {
   final _tracking = TextEditingController();
   FreightContainer? _container;
   String? _error;
+  bool _loadingConfirmed = false;
   bool _busy = false;
   @override
   void initState() {
@@ -88,13 +89,27 @@ class _ContainerDetailScreenState extends State<ContainerDetailScreen> {
       Api.I.warehouseRequest(path, method: method, data: data);
   Future<void> _loadParcel(String tracking) async {
     if (tracking.trim().isEmpty) return;
+    if (!_loadingConfirmed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Verify that every received package in this shipment is physically loaded.',
+          ),
+        ),
+      );
+      return;
+    }
     await _perform(() async {
       final result = await _request(
         '/containers/${widget.containerId}/parcels',
         method: 'POST',
-        data: {'trackingId': tracking.trim()},
+        data: {
+          'trackingId': tracking.trim(),
+          'loadingConfirmed': _loadingConfirmed,
+        },
       );
       _tracking.clear();
+      _loadingConfirmed = false;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -132,11 +147,11 @@ class _ContainerDetailScreenState extends State<ContainerDetailScreen> {
     final c = _container!;
     final departure = action == 'DEPARTED';
     if (!await _confirm(
-          departure ? 'Confirm departure' : 'Confirm arrival',
+          c.nextActionLabel,
           departure
               ? 'Mark ${c.code} and all ${c.parcelCount} parcels as departed from ${c.origin.label}? Loading will close and the manifest will be finalized.'
-              : 'Mark ${c.code} and all ${c.parcelCount} parcels as arrived at ${c.destination.label}?',
-          departure ? 'Depart container' : 'Record arrival',
+              : '${c.nextActionLabel} for ${c.code} and all ${c.parcelCount} parcels at ${c.destination.label}? Confirm only after this physical event.',
+          departure ? 'Depart container' : c.nextActionLabel,
         ) ||
         !mounted) {
       return;
@@ -145,7 +160,7 @@ class _ContainerDetailScreenState extends State<ContainerDetailScreen> {
       await _request(
         '/containers/${c.id}/events',
         method: 'POST',
-        data: {'action': action},
+        data: {'action': action, 'confirmed': true},
       );
     });
   }
@@ -339,6 +354,19 @@ class _ContainerDetailScreenState extends State<ContainerDetailScreen> {
                             ),
                           ),
                           const SizedBox(height: 12),
+                          CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            value: _loadingConfirmed,
+                            onChanged: _busy
+                                ? null
+                                : (v) => setState(
+                                    () => _loadingConfirmed = v ?? false,
+                                  ),
+                            title: const Text(
+                              'I verified every received package in this shipment is physically loaded.',
+                              style: TextStyle(fontSize: 12, height: 1.5),
+                            ),
+                          ),
                           FormFieldPair(
                             first: OutlinedButton.icon(
                               onPressed: _busy
@@ -453,18 +481,14 @@ class _ContainerDetailScreenState extends State<ContainerDetailScreen> {
                         ),
                       ),
                     ),
-                  if (c.status != 'ARRIVED') ...[
+                  if (c.nextAction != null) ...[
                     const SizedBox(height: 16),
                     PrimaryButton(
-                      label: c.status == 'LOADING'
-                          ? 'Confirm Departure'
-                          : 'Record Arrival',
+                      label: c.nextActionLabel,
                       loading: _busy,
                       onPressed: c.parcelCount == 0
                           ? null
-                          : () => _event(
-                              c.status == 'LOADING' ? 'DEPARTED' : 'ARRIVED',
-                            ),
+                          : () => _event(c.nextAction!),
                     ),
                   ],
                   const SizedBox(height: 26),

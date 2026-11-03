@@ -12,12 +12,12 @@ datasource db {
 
 // Organizations: D2F and permitted partner orgs (future SaaS-ready)
 model Organization {
-  id              String         @id @default(uuid())
+  id              String           @id @default(uuid())
   name            String
-  trackingPrefix  String         @unique
-  trackingCounter BigInt         @default(1)
-  isActive        Boolean        @default(true)
-  createdAt       DateTime       @default(now())
+  trackingPrefix  String           @unique
+  trackingCounter BigInt           @default(1)
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
   users           User[]
   locations       Location[]
   customers       Customer[]
@@ -25,6 +25,9 @@ model Organization {
   containers      Container[]
   products        Product[]
   serviceOrders   ServiceOrder[]
+  connectTrips    ConnectTrip[]
+  connectRates    ConnectRate[]
+  connectBookings ConnectBooking[]
 }
 
 // These identity reservations intentionally outlive deleted organizations/parcels.
@@ -47,20 +50,26 @@ model TrackingNumberReservation {
 
 // Locations: Omaha warehouse, Lomé facility, etc.
 model Location {
-  id             String   @id @default(uuid())
-  organizationId String
-  name           String
-  code           String // e.g. OMA-1, LOME-1
-  city           String?
-  country        String?
-  timezone       String   @default("America/Chicago")
-  createdAt      DateTime @default(now())
+  id               String   @id @default(uuid())
+  organizationId   String
+  name             String
+  code             String // e.g. OMA-1, LOME-1
+  city             String?
+  country          String?
+  timezone         String   @default("America/Chicago")
+  address          String?
+  connectReceiving Boolean  @default(false)
+  createdAt        DateTime @default(now())
 
-  organization       Organization @relation(fields: [organizationId], references: [id])
+  organization       Organization     @relation(fields: [organizationId], references: [id])
   users              User[]
   parcels            Parcel[]
-  outboundContainers Container[]  @relation("containerOrigin")
-  inboundContainers  Container[]  @relation("containerDestination")
+  transfersFrom      ParcelTransfer[] @relation("transferFrom")
+  transfersTo        ParcelTransfer[] @relation("transferTo")
+  outboundContainers Container[]      @relation("containerOrigin")
+  inboundContainers  Container[]      @relation("containerDestination")
+  connectTrips       ConnectTrip[]
+  connectBookings    ConnectBooking[]
 
   @@unique([organizationId, code])
 }
@@ -91,10 +100,13 @@ model User {
   location     Location?     @relation(fields: [locationId], references: [id])
 
   parcelsCreated   Parcel[]         @relation("parcelsCreatedBy")
+  parcelImages     ParcelImage[]
   customerProfile  Customer?
   events           TrackingEvent[]
+  transfers        ParcelTransfer[] @relation("transferActor")
   socialIdentities SocialIdentity[]
   passwordResets   PasswordReset[]
+  connectTrips     ConnectTrip[]
 }
 
 model SocialIdentity {
@@ -156,36 +168,71 @@ model Customer {
 
 // Parcels: permanent UUID + public tracking ID
 model Parcel {
-  id               String   @id @default(uuid()) // permanent internal UUID
-  trackingId       String   @unique // immutable, globally unique public tracking ID
-  organizationId   String
-  trackingSequence BigInt?
-  customerId       String // shipper
-  recipientName    String
-  recipientPhone   String?
-  recipientAddress String?
-  packageType      String // BOX, BARREL, TV, APPLIANCE, FURNITURE, PALLET, VEHICLE...
-  weightKg         Float
-  origin           String
-  destination      String
-  method           String   @default("SEA") // AIR | SEA | ROAD
-  notes            String?
-  status           String   @default("RECEIVED")
-  createdById      String
-  locationId       String?
-  containerId      String?
-  clientRequestId  String? // retry keys belong to the organization that issued them
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                         String          @id @default(uuid()) // permanent internal UUID
+  trackingId                 String          @unique // immutable, globally unique public tracking ID
+  organizationId             String
+  trackingSequence           BigInt?
+  customerId                 String // shipper
+  recipientName              String
+  recipientPhone             String?
+  recipientAddress           String?
+  packageType                String // BOX, BARREL, TV, APPLIANCE, FURNITURE, PALLET, VEHICLE...
+  weightKg                   Float
+  origin                     String // commercial shipping origin, separate from the intake warehouse
+  destination                String
+  pickupAddress              String? // required for same-city road pickups
+  method                     String          @default("SEA") // AIR | SEA | ROAD
+  serviceType                String          @default("SEA") // AIR_CARGO | AIR_TRAVELLER | SEA | ROAD
+  awbNumber                  String?
+  airline                    String?
+  flightNumber               String?
+  volumetricWeightKg         Float?
+  customsDocuments           String?
+  connectBooking             ConnectBooking?
+  notes                      String?
+  status                     String          @default("RECEIVED")
+  // Customer shipment requests: how goods reach D2F.
+  // PICKUP = D2F collects from the customer's address (pickupScheduledAt).
+  // DROP_OFF = the customer brings the goods to the D2F warehouse.
+  deliveryMode               String          @default("DROP_OFF") // PICKUP | DROP_OFF
+  pickupPreferredAt          DateTime?
+  pickupDriverId             String?
+  pickupTargetLocationId     String?
+  pickupConfirmedAt          DateTime?
+  pickupConfirmedById        String?
+  pickupProofReference       String?
+  warehouseReceivedAt        DateTime?
+  warehouseReceivedById      String?
+  deliveryDriverId           String?
+  pickupScheduledAt          DateTime? // D2F-confirmed pickup appointment
+  restrictionsAcknowledgedAt DateTime? // customer acknowledged the content/shipping rules when requesting
+  createdById                String
+  locationId                 String? // current physical facility; separate from origin/destination
+  containerId                String?
+  items                      ParcelItem[]
+  images                     ParcelImage[]
+  clientRequestId            String? // retry keys belong to the organization that issued them
+  // Handover and delivery evidence. These are written once and retained with the parcel.
+  releasedToName             String?
+  releasedToIdNumber         String?
+  releasedAt                 DateTime?
+  deliveredToName            String?
+  deliveredToIdNumber        String?
+  deliveredAt                DateTime?
+  deliveryProofType          String? // SIGNATURE | PHOTO | ID_CONFIRMATION
+  deliveryProofReference     String?
+  createdAt                  DateTime        @default(now())
+  updatedAt                  DateTime        @updatedAt
 
-  organization  Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  customer      Customer        @relation(fields: [customerId], references: [id])
-  createdBy     User            @relation("parcelsCreatedBy", fields: [createdById], references: [id])
-  location      Location?       @relation(fields: [locationId], references: [id])
-  events        TrackingEvent[] @relation("parcelEvents")
+  organization  Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer      Customer         @relation(fields: [customerId], references: [id])
+  createdBy     User             @relation("parcelsCreatedBy", fields: [createdById], references: [id])
+  location      Location?        @relation(fields: [locationId], references: [id])
+  events        TrackingEvent[]  @relation("parcelEvents")
+  transfers     ParcelTransfer[]
   trackingIndex TrackingIndex?
   serviceOrders ServiceOrder[]
-  container     Container?      @relation(fields: [containerId], references: [id], onDelete: Restrict)
+  container     Container?       @relation(fields: [containerId], references: [id], onDelete: Restrict)
 
   @@unique([organizationId, trackingSequence])
   @@unique([organizationId, clientRequestId])
@@ -201,18 +248,89 @@ model TrackingIndex {
   parcel Parcel @relation(fields: [parcelId], references: [id])
 }
 
+// Goods the customer is sending, itemized under one shipment request.
+// A shipment can hold many things (5–6 boxes, clothing, appliances...).
+model ParcelItem {
+  id                  String    @id @default(uuid())
+  parcelId            String
+  name                String // "Clothing box", "60-inch TV", "Spices"...
+  details             String? // short free-form description for the intake team
+  quantity            Int       @default(1)
+  weightKg            Float? // optional per-item estimate
+  position            Int       @default(0)
+  type                String    @default("BOX") // BOX | SUITCASE | BARREL | TV | APPLIANCE | FURNITURE | PALLET | VEHICLE | DOCUMENTS | OTHER
+  lengthCm            Float? // optional package dimensions, recorded together
+  widthCm             Float?
+  heightCm            Float?
+  packageCode         String? // D2F…-P01-style sub-ID allocated when goods enter D2F custody
+  warehouseReceivedAt DateTime?
+  collectedAt         DateTime? // set for every observed package at a pickup collection
+  notCollectedReason  String? // why a declared package was not on hand
+  createdAt           DateTime  @default(now())
+
+  parcel       Parcel        @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+  parcelImages ParcelImage[]
+
+  @@index([parcelId, position])
+}
+
+// Photos of the goods, attached by the customer. Stored as bytes so the
+// shipped-evidence gallery survives hosting redeploys without object storage.
+// An image attaches to the whole shipment or, via itemId, to one declared
+// package; the association freezes once the shipment leaves intake editing.
+model ParcelImage {
+  id           String   @id @default(uuid())
+  parcelId     String
+  itemId       String? // optional: this photo documents one declared package
+  fileName     String
+  contentType  String // image/jpeg | image/png | image/webp
+  sizeBytes    Int
+  bytes        Bytes
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  parcel     Parcel      @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+  item       ParcelItem? @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  uploadedBy User?       @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([parcelId, createdAt])
+}
+
 // Timestamped, traceable event history
 model TrackingEvent {
   id        String   @id @default(uuid())
   parcelId  String
   status    String
   note      String?
+  originalNote String?
+  internalNote String?
+  templateId String?
+  facilityId String?
   location  String?
   actorId   String?
   createdAt DateTime @default(now())
 
   parcel Parcel @relation("parcelEvents", fields: [parcelId], references: [id])
   actor  User?  @relation(fields: [actorId], references: [id])
+
+  @@index([parcelId, createdAt])
+}
+
+// Physical facility-to-facility movement after international arrival. A parcel
+// must be received at the named destination before it can be released there.
+model ParcelTransfer {
+  id             String   @id @default(uuid())
+  parcelId       String
+  fromLocationId String?
+  toLocationId   String
+  actorId        String?
+  note           String?
+  createdAt      DateTime @default(now())
+
+  parcel       Parcel    @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  fromLocation Location? @relation("transferFrom", fields: [fromLocationId], references: [id], onDelete: SetNull)
+  toLocation   Location  @relation("transferTo", fields: [toLocationId], references: [id], onDelete: Restrict)
+  actor        User?     @relation("transferActor", fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([parcelId, createdAt])
 }
@@ -306,4 +424,227 @@ model ServiceOrder {
   parcel         Parcel?      @relation(fields: [parcelId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, kind, createdAt])
+}
+
+// D2F Connect has its own commercial and custody workflow. Traveller access is
+// projected by the API: never return customer identities, addresses or contacts.
+model ConnectTrip {
+  id                    String              @id @default(uuid())
+  organizationId        String
+  travellerId           String
+  origin                String
+  destination           String
+  departureAt           DateTime
+  flightNumber          String
+  capacityKg            Float
+  categories            String[]
+  verificationReference String
+  status                String              @default("PENDING_REVIEW")
+  reviewNote            String?
+  receivingLocationId   String?
+  compensationMinor     Int                 @default(0)
+  expensesMinor         Int                 @default(0)
+  currency              String              @default("USD")
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  organization          Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  traveller             User                @relation(fields: [travellerId], references: [id], onDelete: Restrict)
+  receivingLocation     Location?           @relation(fields: [receivingLocationId], references: [id], onDelete: Restrict)
+  requestedBookings     ConnectBooking[]    @relation("requestedTrip")
+  assignments           ConnectAssignment[]
+
+  @@index([organizationId, status, departureAt])
+}
+
+model ConnectRate {
+  id             String       @id @default(uuid())
+  organizationId String
+  origin         String
+  destination    String
+  category       String
+  unit           String // KG | ITEM | FLAT | MANUAL
+  amountMinor    Int
+  maxWeightKg    Float?
+  currency       String       @default("USD")
+  isActive       Boolean      @default(true)
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, origin, destination, category])
+}
+
+model ConnectBooking {
+  id                       String              @id @default(uuid())
+  organizationId           String
+  parcelId                 String              @unique
+  category                 String
+  quantity                 Int
+  declaredValueMinor       Int
+  preferredDate            DateTime
+  requestedTripId          String?
+  verifiedWeightKg         Float?
+  contentsVerifiedAt       DateTime?
+  contentsVerificationNote String?
+  internationalFeeMinor    Int?
+  domesticCostMinor        Int?
+  currency                 String              @default("USD")
+  paymentInstructions      String?
+  pricingSnapshot          Json?
+  quoteAcceptedAt          DateTime?
+  handoverMode             String // DOMESTIC_SHIPPING | DROP_OFF | PICKUP
+  senderCity               String
+  senderAddress            String?
+  deliveryPreference       String              @default("D2F_PICKUP")
+  domesticCarrier          String?
+  domesticTrackingNumber   String?
+  domesticLabelUrl         String?
+  domesticStatus           String              @default("NOT_REQUIRED")
+  receivingLocationId      String?
+  originReceivedAt         DateTime?
+  handoverCodeHash         String?
+  handoverCodeExpiresAt    DateTime?
+  handoverAttempts         Int                 @default(0)
+  collectedAt              DateTime?
+  destinationReceivedAt    DateTime?
+  deliveredAt              DateTime?
+  deliveryEvidence         String?
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+  organization             Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  parcel                   Parcel              @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  requestedTrip            ConnectTrip?        @relation("requestedTrip", fields: [requestedTripId], references: [id], onDelete: Restrict)
+  receivingLocation        Location?           @relation(fields: [receivingLocationId], references: [id], onDelete: Restrict)
+  assignments              ConnectAssignment[]
+  payment                  ConnectPayment?
+  declarations             ConnectDeclaration[]
+  paymentSubmissions       ConnectPaymentSubmission[]
+  reviewedDeclarationId    String?
+  complianceReviewedById   String?
+  paymentInstructionsVersion Int @default(0)
+
+  @@index([organizationId, createdAt])
+}
+
+model ConnectAssignment {
+  id           String         @id @default(uuid())
+  bookingId    String
+  tripId       String
+  status       String         @default("PROPOSED")
+  responseNote String?
+  createdAt    DateTime       @default(now())
+  acceptedAt   DateTime?
+  confirmedAt  DateTime?
+  declarations ConnectTravellerDeclaration[]
+  booking      ConnectBooking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  trip         ConnectTrip    @relation(fields: [tripId], references: [id], onDelete: Restrict)
+
+  @@index([tripId, status])
+  @@index([bookingId, status])
+}
+
+model ConnectPayment {
+  id             String         @id @default(uuid())
+  organizationId String
+  bookingId      String         @unique
+  reference      String
+  amountMinor    Int
+  currency       String         @default("USD")
+  recordedById   String
+  createdAt      DateTime       @default(now())
+  booking        ConnectBooking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, reference])
+}
+
+
+// Append-only customer acknowledgments. Contents changes create a new revision.
+model ConnectDeclaration {
+  id String @id @default(uuid())
+  bookingId String
+  customerId String
+  userId String
+  legalName String
+  contents String
+  contentsHash String
+  termsVersion String
+  acknowledgment String
+  checks Json
+  guidance Json
+  audit Json
+  createdAt DateTime @default(now())
+  booking ConnectBooking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  @@index([bookingId, createdAt])
+}
+
+// Submission is evidence awaiting admin verification; it never confirms payment.
+model ConnectPaymentSubmission {
+  id String @id @default(uuid())
+  bookingId String
+  userId String
+  method String
+  transactionId String?
+  instructionsVersion Int
+  instructionsSnapshot String
+  fileName String?
+  contentType String?
+  bytes Bytes?
+  status String @default("PENDING")
+  reviewNote String?
+  reviewedById String?
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  booking ConnectBooking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  @@index([bookingId, createdAt])
+}
+
+model OperationalNoteTemplate {
+  id String @id @default(uuid())
+  organizationId String
+  status String
+  serviceType String @default("ALL")
+  message String
+  customerMessage String
+  isActive Boolean @default(true)
+  position Int @default(0)
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+  @@index([organizationId, status, isActive])
+}
+
+
+model ConnectTravellerDeclaration {
+  id String @id @default(uuid())
+  assignmentId String
+  userId String
+  legalName String
+  contentsHash String
+  termsVersion String
+  contents String
+  checks Json
+  acknowledgment String
+  audit Json
+  createdAt DateTime @default(now())
+  assignment ConnectAssignment @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  @@index([assignmentId, createdAt])
+}
+
+// Device-reported print audit. These records do not change physical custody.
+model LabelPrintJob {
+  id String @id @default(uuid())
+  organizationId String
+  parcelId String
+  actorId String
+  clientJobId String
+  printerName String
+  printerAddress String?
+  labelHash String
+  pages Int
+  status String
+  message String?
+  source String
+  reason String?
+  deviceAt DateTime
+  createdAt DateTime @default(now())
+  @@unique([organizationId, actorId, clientJobId])
+  @@index([organizationId, parcelId, createdAt])
 }

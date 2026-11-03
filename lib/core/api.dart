@@ -1,3 +1,9 @@
+import 'dart:convert';
+
+import 'package:flutter/services.dart';
+
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -30,6 +36,52 @@ class Api {
 
   static const _tokenKey = 'd2f_jwt';
   static const _baseUrlKey = 'd2f_base_url';
+  static const _printIdentityKey = 'd2f_print_identity_v1';
+  Map<String, dynamic>? _printIdentity;
+  bool offlinePrintingOnly = false;
+
+  // A remembered operational identity unlocks cached labels only for 24 hours.
+  // This never authorizes an API mutation or an offline shipment update.
+  User? get offlinePrintingUser {
+    final record = _printIdentity;
+    if (record == null ||
+        _token == null ||
+        record['token'] != _token ||
+        record['origin'] != currentBaseUrl)
+      return null;
+    final age =
+        DateTime.now().millisecondsSinceEpoch - (record['verifiedAt'] as int);
+    if (age < 0 || age > const Duration(hours: 24).inMilliseconds) return null;
+    return User.fromJson(Map<String, dynamic>.from(record['user']));
+  }
+
+  User? enterOfflinePrinting() {
+    final user = offlinePrintingUser;
+    offlinePrintingOnly = user != null;
+    return user;
+  }
+
+  Future<void> _rememberPrintIdentity(Map<String, dynamic> data) async {
+    offlinePrintingOnly = false;
+    final user = User.fromJson(data);
+    if (!(user.isStaff || user.role == UserRole.DRIVER)) {
+      _printIdentity = null;
+      await _storage.delete(key: _printIdentityKey);
+      return;
+    }
+    _printIdentity = {
+      'token': _token,
+      'origin': currentBaseUrl,
+      'verifiedAt': DateTime.now().millisecondsSinceEpoch,
+      'user': data,
+    };
+    // Never persist an identity for a session the user chose not to remember.
+    if (await _storage.read(key: _tokenKey) == _token)
+      await _storage.write(
+        key: _printIdentityKey,
+        value: jsonEncode(_printIdentity),
+      );
+  }
 
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
@@ -42,6 +94,13 @@ class Api {
     if (_ready) return;
     _baseOverride = await _storage.read(key: _baseUrlKey);
     _token = await _storage.read(key: _tokenKey);
+    try {
+      final raw = await _storage.read(key: _printIdentityKey);
+      if (raw != null)
+        _printIdentity = Map<String, dynamic>.from(jsonDecode(raw));
+    } catch (_) {
+      _printIdentity = null;
+    }
     _dio = _buildDio();
     _ready = true;
   }
@@ -87,6 +146,9 @@ class Api {
       _baseOverride = clean;
       await _storage.write(key: _baseUrlKey, value: clean);
     }
+    _printIdentity = null;
+    offlinePrintingOnly = false;
+    await _storage.delete(key: _printIdentityKey);
     _dio = _buildDio();
   }
 
@@ -103,9 +165,12 @@ class Api {
       if (error.statusCode == 401 && _token == restoringToken) {
         await signOut();
       }
-      return null;
+      return error.statusCode == 401 ||
+              (error.statusCode != null && error.statusCode! < 500)
+          ? null
+          : enterOfflinePrinting();
     } catch (_) {
-      return null;
+      return enterOfflinePrinting();
     }
   }
 
@@ -125,6 +190,7 @@ class Api {
       } else {
         await _storage.delete(key: _tokenKey);
       }
+      await _rememberPrintIdentity(Map<String, dynamic>.from(res.data['user']));
       return User.fromJson(res.data['user'] as Map<String, dynamic>);
     } on DioException catch (e) {
       throw _map(e);
@@ -255,8 +321,13 @@ class Api {
   }
 
   Future<User> me() async {
+    final requestedToken = _token;
     try {
       final res = await _dio!.get('/auth/me');
+      if (_token == requestedToken)
+        await _rememberPrintIdentity(
+          Map<String, dynamic>.from(res.data['user']),
+        );
       return User.fromJson(res.data['user'] as Map<String, dynamic>);
     } on DioException catch (e) {
       throw _map(e);
@@ -284,8 +355,97 @@ class Api {
   }
 
   Future<void> signOut() async {
+    final cached = _printIdentity == null
+        ? null
+        : User.fromJson(Map<String, dynamic>.from(_printIdentity!['user']));
+    if (cached != null) {
+      try {
+        await const MethodChannel('d2f/printer').invokeMethod('purgeLabels', {
+          'ownerId': '${Uri.parse(currentBaseUrl).host}:${cached.id}',
+        });
+      } catch (_) {
+        /* Non-Android platforms do not have a label cache. */
+      }
+    }
+    _printIdentity = null;
+    offlinePrintingOnly = false;
+    await _storage.delete(key: _printIdentityKey);
     _token = null;
     await _storage.delete(key: _tokenKey);
+  }
+
+  Future<dynamic> shipmentOperation(
+    String path, {
+    String method = 'GET',
+    Map<String, dynamic>? data,
+  }) async {
+    if (offlinePrintingOnly)
+      throw ApiException(
+        'Offline printing mode. Reconnect and sign in to access live operations or sync history.',
+      );
+    try {
+      final response = await _dio!.request(
+        path,
+        data: data,
+        options: Options(method: method),
+      );
+      return response.data;
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  /// Authenticated D2F Connect API, separate from cargo operations.
+  Future<dynamic> connect(
+    String path, {
+    String method = 'GET',
+    Map<String, dynamic>? data,
+  }) async {
+    try {
+      final response = await _dio!.request(
+        '/connect$path',
+        data: data,
+        options: Options(method: method),
+      );
+      return response.data;
+    } on DioException catch (error) {
+      throw _map(error);
+    }
+  }
+
+  Future<Uint8List> connectPaymentImage(
+    String bookingId,
+    String submissionId,
+  ) => _imageBytes(
+    '/connect/bookings/$bookingId/payment-submissions/$submissionId/image',
+  );
+  Future<void> submitConnectPaymentEvidence(
+    String bookingId, {
+    required String method,
+    required int instructionsVersion,
+    required String transactionId,
+    required Uint8List bytes,
+  }) async {
+    final mime = bytes.length > 8 && bytes[0] == 137 && bytes[1] == 80
+        ? 'image/png'
+        : bytes.length > 12 && String.fromCharCodes(bytes.take(4)) == 'RIFF'
+        ? 'image/webp'
+        : 'image/jpeg';
+    try {
+      await _dio!.post(
+        '/connect/bookings/$bookingId/payment-submissions',
+        queryParameters: {
+          'method': method,
+          'instructionsVersion': instructionsVersion,
+          'accepted': 'true',
+          if (transactionId.isNotEmpty) 'transactionId': transactionId,
+        },
+        data: bytes,
+        options: Options(contentType: mime),
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
   }
 
   // ── Customers ──────────────────────────────────────────────────────────────
@@ -332,9 +492,12 @@ class Api {
 
   // ── Parcels ────────────────────────────────────────────────────────────────
 
-  Future<List<Parcel>> customerParcels() async {
+  Future<List<Parcel>> customerParcels({bool tracking = false}) async {
     try {
-      final res = await _dio!.get('/customer/parcels');
+      final res = await _dio!.get(
+        '/customer/parcels',
+        queryParameters: tracking ? {'scope': 'tracking'} : null,
+      );
       return (res.data as List)
           .map((j) => Parcel.fromJson(j as Map<String, dynamic>))
           .toList();
@@ -343,15 +506,35 @@ class Api {
     }
   }
 
+  Future<List<Parcel>> customerTrackingParcels() =>
+      customerParcels(tracking: true);
+
+  Future<Parcel> customerParcelDetail(String parcelId) async {
+    try {
+      final res = await _dio!.get('/customer/parcels/$parcelId');
+      return Parcel.fromJson(res.data as Map<String, dynamic>);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  /// Creates a shipment request. Returns the created (or previously-created,
+  /// when the same [clientRequestId] is retried) shipment with its itemized
+  /// goods list.
   Future<Parcel> createCustomerParcel({
     required String recipientName,
-    String? recipientPhone,
-    String? recipientAddress,
+    required String recipientPhone,
+    required String recipientAddress,
     required String packageType,
     required double weightKg,
     required String origin,
     required String destination,
     required String method,
+    required String deliveryMode,
+    bool restrictionsAcknowledged = false,
+    String? pickupAddress,
+    DateTime? pickupScheduledAt,
+    List<ParcelItem> items = const [],
     String? notes,
     required String clientRequestId,
   }) async {
@@ -360,20 +543,91 @@ class Api {
         '/customer/parcels',
         data: {
           'recipientName': recipientName,
-          if (recipientPhone != null && recipientPhone.isNotEmpty)
-            'recipientPhone': recipientPhone,
-          if (recipientAddress != null && recipientAddress.isNotEmpty)
-            'recipientAddress': recipientAddress,
+          'recipientPhone': recipientPhone,
+          'recipientAddress': recipientAddress,
           'packageType': packageType,
           'weightKg': weightKg,
           'origin': origin,
           'destination': destination,
           'method': method,
+          'deliveryMode': deliveryMode,
+          'restrictionsAcknowledged': restrictionsAcknowledged,
+          if (pickupAddress != null && pickupAddress.isNotEmpty)
+            'pickupAddress': pickupAddress,
+          if (pickupScheduledAt != null)
+            'pickupScheduledAt': pickupScheduledAt.toUtc().toIso8601String(),
+          if (items.isNotEmpty)
+            'items': [for (final item in items) item.toCreateJson()],
           if (notes != null && notes.isNotEmpty) 'notes': notes,
           'clientRequestId': clientRequestId,
         },
       );
       return Parcel.fromJson(res.data as Map<String, dynamic>);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  // ── Goods photos (optional, customer-attached) ────────────────────────────
+
+  /// Uploads one photo of the goods. The bytes travel in the request body;
+  /// metadata rides as query parameters.
+  Future<ParcelImageMeta> addParcelImage(
+    String parcelId,
+    Uint8List bytes, {
+    required String fileName,
+    required String contentType,
+    String? label,
+    String? itemId,
+  }) async {
+    try {
+      final query = {
+        'name': fileName,
+        if (label != null && label.isNotEmpty) 'label': label,
+        if (itemId != null && itemId.isNotEmpty) 'itemId': itemId,
+      };
+      final res = await _dio!.post(
+        '/customer/parcels/$parcelId/images',
+        queryParameters: query,
+        data: bytes,
+        options: Options(
+          contentType: contentType,
+          headers: {'Content-Length': bytes.length},
+        ),
+      );
+      return ParcelImageMeta.fromJson(res.data as Map<String, dynamic>);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  /// Removes a photo the customer attached (only before warehouse intake).
+  Future<void> deleteCustomerParcelImage(
+    String parcelId,
+    String imageId,
+  ) async {
+    try {
+      await _dio!.delete('/customer/parcels/$parcelId/images/$imageId');
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  /// Image bytes for the customer's own parcel.
+  Future<Uint8List> customerParcelImageBytes(String parcelId, String imageId) =>
+      _imageBytes('/customer/parcels/$parcelId/images/$imageId/raw');
+
+  /// Image bytes for staff and admin record views.
+  Future<Uint8List> parcelImageBytes(String parcelId, String imageId) =>
+      _imageBytes('/parcels/$parcelId/images/$imageId/raw');
+
+  Future<Uint8List> _imageBytes(String path) async {
+    try {
+      final res = await _dio!.get(
+        path,
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return res.data as Uint8List;
     } on DioException catch (e) {
       throw _map(e);
     }
@@ -407,6 +661,32 @@ class Api {
     }
   }
 
+  /// Rows and counters from one server snapshot. Use this instead of separate
+  /// list/stats calls so filter chips cannot disagree with the visible rows.
+  Future<ParcelBoardResult> parcelBoard({
+    String? q,
+    String? status,
+    int limit = 500,
+    int offset = 0,
+  }) async {
+    try {
+      final res = await _dio!.get(
+        '/parcels/board',
+        queryParameters: {
+          if (q != null && q.isNotEmpty) 'q': q,
+          if (status != null && status != 'ALL') 'status': status,
+          'limit': limit,
+          'offset': offset,
+        },
+      );
+      return ParcelBoardResult.fromJson(
+        Map<String, dynamic>.from(res.data as Map),
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
   /// Creates a parcel. Returns the created (or previously-created, when the
   /// same [clientRequestId] is retried) parcel.
   Future<Parcel> createParcel({
@@ -414,6 +694,7 @@ class Api {
     required String recipientName,
     String? recipientPhone,
     String? recipientAddress,
+    String? pickupAddress,
     required String packageType,
     required double weightKg,
     required String origin,
@@ -432,6 +713,8 @@ class Api {
             'recipientPhone': recipientPhone,
           if (recipientAddress != null && recipientAddress.isNotEmpty)
             'recipientAddress': recipientAddress,
+          if (pickupAddress != null && pickupAddress.isNotEmpty)
+            'pickupAddress': pickupAddress,
           'packageType': packageType,
           'weightKg': weightKg,
           'origin': origin,
@@ -458,24 +741,97 @@ class Api {
     }
   }
 
-  /// Records a status update. Accepts UUID or tracking ID.
+  /// Records a status update. Accepts UUID or tracking ID. Physical updates
+  /// must name a facility and set [confirmed] after staff verification.
   Future<void> updateStatus(
     String idOrTracking, {
     required String status,
+    String? locationId,
     String? location,
     String? note,
+    Map<String, dynamic>? operationalNote,
+    bool confirmed = false,
+    List<({String itemId, String reason})> missedItems = const [],
+    String? releasedToName,
+    String? releasedToIdNumber,
+    DateTime? releasedAt,
+    String? deliveredToName,
+    String? deliveredToIdNumber,
+    DateTime? deliveredAt,
+    String? deliveryProofType,
+    String? deliveryProofReference,
   }) async {
     try {
       await _dio!.post(
         '/parcels/$idOrTracking/events',
         data: {
           'status': status,
+          ...?operationalNote,
+          if (locationId != null && locationId.isNotEmpty)
+            'locationId': locationId,
           if (location != null && location.isNotEmpty) 'location': location,
           if (note != null && note.isNotEmpty) 'note': note,
+          if (confirmed) 'confirmed': true,
+          if (missedItems.isNotEmpty)
+            'missedItems': [
+              for (final missed in missedItems)
+                {'itemId': missed.itemId, 'reason': missed.reason},
+            ],
+          if (releasedToName != null && releasedToName.isNotEmpty)
+            'releasedToName': releasedToName,
+          if (releasedToIdNumber != null && releasedToIdNumber.isNotEmpty)
+            'releasedToIdNumber': releasedToIdNumber,
+          if (releasedAt != null) 'releasedAt': releasedAt.toIso8601String(),
+          if (deliveredToName != null && deliveredToName.isNotEmpty)
+            'deliveredToName': deliveredToName,
+          if (deliveredToIdNumber != null && deliveredToIdNumber.isNotEmpty)
+            'deliveredToIdNumber': deliveredToIdNumber,
+          if (deliveredAt != null) 'deliveredAt': deliveredAt.toIso8601String(),
+          if (deliveryProofType != null && deliveryProofType.isNotEmpty)
+            'deliveryProofType': deliveryProofType,
+          if (deliveryProofReference != null &&
+              deliveryProofReference.isNotEmpty)
+            'deliveryProofReference': deliveryProofReference,
         },
       );
     } on DioException catch (e) {
       throw _map(e);
+    }
+  }
+
+  /// Corrects an operational note in place. The original event, actor,
+  /// timestamp and location remain; the server records the before/after audit.
+  Future<void> correctParcelNote(
+    String parcelId,
+    String eventId,
+    String note,
+  ) async {
+    try {
+      await _dio!.patch(
+        '/parcels/$parcelId/events/$eventId/note',
+        data: {'note': note},
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<User> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/auth/password/change',
+        data: {'currentPassword': currentPassword, 'newPassword': newPassword},
+      );
+      _token = response.data['token'] as String;
+      await _storage.write(key: _tokenKey, value: _token!);
+      return User.fromJson(
+        Map<String, dynamic>.from(response.data['user'] as Map),
+      );
+    } on DioException catch (error) {
+      throw _map(error);
     }
   }
 

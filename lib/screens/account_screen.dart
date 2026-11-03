@@ -1,3 +1,5 @@
+import 'direct_label_print_screen.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -95,9 +97,27 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     }
   }
 
+  Future<void> _changePassword() async {
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (_) => const _ChangePasswordDialog(),
+    );
+    if (changed == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Password updated. Other devices have been signed out.',
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> _support() async {
     try {
-      if (await launchUrl(Uri(scheme: 'mailto', path: 'info@d2fshipping.com'))) {
+      if (await launchUrl(
+        Uri(scheme: 'mailto', path: 'info@d2fshipping.com'),
+      )) {
         return;
       }
     } catch (_) {
@@ -126,6 +146,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
         onSupport: _support,
         onSignOut: _signOut,
         onCheckConnection: _checkConnection,
+        onChangePassword: _changePassword,
         onTrack: widget.onTrack,
         onShip: widget.onShip,
       );
@@ -239,6 +260,17 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
           ),
           const SizedBox(height: 22),
           if (user?.isStaff == true || user?.role == UserRole.DRIVER)
+            OutlinedButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const DirectLabelPrintScreen(),
+                ),
+              ),
+              icon: const Icon(Icons.print_outlined),
+              label: const Text('Bluetooth printer & saved offline labels'),
+            ),
+          if (user?.isStaff == true || user?.role == UserRole.DRIVER)
             SectionCard(
               dark: false,
               tint: AppColors.greenSoft,
@@ -340,6 +372,23 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
             ),
           ),
           const SizedBox(height: 16),
+          SectionCard(
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(
+                Icons.lock_outline_rounded,
+                color: AppColors.blue,
+              ),
+              title: const Text('Change password', style: AppTheme.body),
+              subtitle: const Text(
+                'Sign out other devices and keep your account secure.',
+                style: AppTheme.caption,
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded, size: 20),
+              onTap: _changePassword,
+            ),
+          ),
+          const SizedBox(height: 16),
           if (user?.isStaff == true)
             ExpansionTile(
               tilePadding: const EdgeInsets.symmetric(horizontal: 4),
@@ -416,6 +465,129 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
             ),
           ],
         ),
+      ),
+    ],
+  );
+}
+
+class _ChangePasswordDialog extends ConsumerStatefulWidget {
+  const _ChangePasswordDialog();
+
+  @override
+  ConsumerState<_ChangePasswordDialog> createState() =>
+      _ChangePasswordDialogState();
+}
+
+class _ChangePasswordDialogState extends ConsumerState<_ChangePasswordDialog> {
+  final _current = TextEditingController();
+  final _next = TextEditingController();
+  final _confirm = TextEditingController();
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _current.dispose();
+    _next.dispose();
+    _confirm.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_current.text.isEmpty) {
+      setState(() => _error = 'Enter your current password.');
+      return;
+    }
+    if (_next.text.length < 8) {
+      setState(
+        () => _error = 'Use at least 8 characters for the new password.',
+      );
+      return;
+    }
+    if (_next.text != _confirm.text) {
+      setState(() => _error = 'The new passwords do not match.');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await ref
+          .read(authControllerProvider.notifier)
+          .changePassword(
+            currentPassword: _current.text,
+            newPassword: _next.text,
+          );
+      if (mounted) Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = e.message;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Change password', style: AppTheme.sectionTitle),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _current,
+            obscureText: true,
+            autofillHints: const [AutofillHints.password],
+            decoration: const InputDecoration(
+              labelText: 'Current password',
+              prefixIcon: Icon(Icons.lock_outline_rounded),
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _next,
+            obscureText: true,
+            autofillHints: const [AutofillHints.newPassword],
+            decoration: const InputDecoration(
+              labelText: 'New password',
+              helperText: 'At least 8 characters',
+              prefixIcon: Icon(Icons.lock_reset_rounded),
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _confirm,
+            obscureText: true,
+            autofillHints: const [AutofillHints.newPassword],
+            decoration: const InputDecoration(
+              labelText: 'Confirm new password',
+              prefixIcon: Icon(Icons.verified_user_outlined),
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _error!,
+              style: const TextStyle(
+                color: AppColors.coral,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: _saving ? null : () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      TextButton(
+        onPressed: _saving ? null : _save,
+        child: Text(_saving ? 'Saving…' : 'Update password'),
       ),
     ],
   );

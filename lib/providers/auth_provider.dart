@@ -17,7 +17,7 @@ class AuthController extends AsyncNotifier<User?> {
     if (Api.I.sessionToken == null) return null; // instant sign-in screen
     return Api.I.restoreSession().timeout(
       _restoreWindow,
-      onTimeout: () => null, // fall through to the sign-in screen
+      onTimeout: Api.I.enterOfflinePrinting,
     );
   }
 
@@ -59,6 +59,18 @@ class AuthController extends AsyncNotifier<User?> {
 
   Future<void> updateProfile(String name, String? phone) async {
     state = AsyncData(await Api.I.updateProfile(fullName: name, phone: phone));
+  }
+
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    state = AsyncData(
+      await Api.I.changePassword(
+        currentPassword: currentPassword,
+        newPassword: newPassword,
+      ),
+    );
   }
 
   Future<void> signOut() async {

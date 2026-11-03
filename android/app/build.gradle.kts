@@ -65,3 +65,6 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+// Official Brother Print SDK 4.13.2 (unchanged redistributable runtime).
+dependencies { implementation(files("libs/BrotherPrintLibrary.aar")) }

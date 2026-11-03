@@ -23,6 +23,7 @@ test('M2: warehouse, two-way freight, permissions and selected revenue modules',
     const org = organizations[0], otherOrg = organizations[1];
     for (const [role, organizationId] of [['ADMIN', org.id], ['STAFF', org.id], ['CUSTOMER', org.id], ['DRIVER', org.id], ['ADMIN', otherOrg.id]]) users.push(await prisma.user.create({ data: { email: `${role}-${organizationId}-${suffix}@example.test`, fullName: `M2 ${role}`, passwordHash: 'unused', role, organizationId } }));
     const [admin, staff, customerUser, driver, foreignAdmin] = users;
+    let lomeStaff, brusselsStaff;
     let omaha, lome, brussels, profile, foreignProfile, container, competing, outboundParcel, returnParcel, otherParcel;
     await t.test('operational routes reject anonymous, customer and driver access; commerce is Admin only', async () => {
       for (const actor of [null, customerUser, driver]) for (const path of ['/warehouse/containers', '/warehouse/locations', '/admin/commerce/marketplace']) expectStatus(await req(path, actor), actor ? 403 : 401);
@@ -39,6 +40,9 @@ test('M2: warehouse, two-way freight, permissions and selected revenue modules',
       omaha = await create('Omaha Warehouse', 'OMA-QA', 'Omaha, NE', 'United States');
       lome = await create('Lomé Facility', 'LOM-QA', 'Lomé', 'Togo');
       brussels = await create('Brussels Facility', 'BRU-QA', 'Brussels', 'Belgium');
+      lomeStaff = await prisma.user.create({ data: { email: `lome-staff-${suffix}@example.test`, fullName: 'M2 Lomé Staff', passwordHash: 'unused', role: 'STAFF', organizationId: org.id, locationId: lome.id } });
+      brusselsStaff = await prisma.user.create({ data: { email: `brussels-staff-${suffix}@example.test`, fullName: 'M2 Brussels Staff', passwordHash: 'unused', role: 'STAFF', organizationId: org.id, locationId: brussels.id } });
+      users.push(lomeStaff, brusselsStaff);
       expectStatus(await req('/warehouse/locations', admin, 'POST', { name: 'Outside scope', code: 'BAD', city: 'Sydney', country: 'Australia' }), 400);
       expectStatus(await req('/warehouse/locations', admin, 'POST', { name: {}, code: 'BAD', city: 'Omaha', country: 'United States' }), 400);
       expectStatus(await req('/warehouse/locations', admin, 'POST', { name: 'Timezone check', code: 'TZ', city: 'Omaha', country: 'United States', timezone: 'Invalid/Zone' }), 400);
@@ -52,12 +56,12 @@ test('M2: warehouse, two-way freight, permissions and selected revenue modules',
       assert.equal(saved.country, 'Benin');
       expectStatus(await req(`/customers/${profile.id}`, staff, 'PATCH', { displayName: 'No' }), 403);
       expectStatus(await req(`/customers/${foreignProfile.id}`, admin, 'PATCH', { displayName: 'No' }), 404);
-      const createParcel = async (method, origin, destination) => {
-        const parcel = expectStatus(await req('/parcels', staff, 'POST', { customerId: profile.id, recipientName: 'M2 Recipient', weightKg: 2.5, packageType: 'BOX', method, origin, destination, clientRequestId: randomUUID() }), 201);
+      const createParcel = async (method, origin, destination, actor = staff) => {
+        const parcel = expectStatus(await req('/parcels', actor, 'POST', { customerId: profile.id, recipientName: 'M2 Recipient', weightKg: 2.5, packageType: 'BOX', method, origin, destination, clientRequestId: randomUUID() }), 201);
         parcelIds.push(parcel.id); return parcel;
       };
       outboundParcel = await createParcel('SEA', 'Omaha, NE, USA', 'Lomé, Togo');
-      returnParcel = await createParcel('SEA', 'Lomé, Togo', 'Brussels, Belgium');
+      returnParcel = await createParcel('SEA', 'Lomé, Togo', 'Brussels, Belgium', lomeStaff);
       otherParcel = await createParcel('AIR', 'Omaha, NE, USA', 'Lomé, Togo');
     });
     await t.test('container creation validates routes, unique references and tenant isolation', async () => {
@@ -65,65 +69,157 @@ test('M2: warehouse, two-way freight, permissions and selected revenue modules',
       container = expectStatus(await req('/warehouse/containers', staff, 'POST', input), 201);
       competing = expectStatus(await req('/warehouse/containers', admin, 'POST', { ...input, code: `QA-OTHER-${suffix.slice(0, 8)}` }), 201);
       expectStatus(await req('/warehouse/containers', admin, 'POST', input), 409);
+      expectStatus(await req('/warehouse/containers', staff, 'POST', { ...input, code: `DENIED-${suffix.slice(0, 8)}`, originId: lome.id, destinationId: brussels.id }), 403);
       expectStatus(await req('/warehouse/containers', foreignAdmin, 'POST', { ...input, code: 'ILLEGAL' }), 400);
       expectStatus(await req(`/warehouse/containers/${container.id}`, foreignAdmin), 404);
       expectStatus(await req(`/warehouse/containers/${container.id}/manifest`, foreignAdmin), 404);
-      expectStatus(await req(`/warehouse/containers/${container.id}/events`, staff, 'POST', { action: 'DEPARTED' }), 409);
+      expectStatus(await req(`/warehouse/containers/${container.id}/events`, staff, 'POST', { action: 'DEPARTED', confirmed: true }), 409);
       expectStatus(await req('/warehouse/containers?offset=-1', staff), 400);
       const listed = expectStatus(await req(`/warehouse/containers?q=${container.code}&limit=1`, staff), 200);
       assert.equal(listed.total, 1); assert.equal(listed.containers[0].id, container.id);
       expectStatus(await req(`/warehouse/locations/${omaha.id}`, admin, 'PATCH', { name: 'Changed', code: 'OMA-NEW', city: 'Omaha', country: 'United States' }), 409);
     });
     await t.test('concurrent repeated scans load once and reject incompatible or competing assignments', async () => {
+      expectStatus(await req(`/parcels/${outboundParcel.id}/events`, staff, 'POST', {status:'PROCESSING',locationId:omaha.id}),201);
+      expectStatus(await req(`/parcels/${outboundParcel.id}/events`, staff, 'POST', {status:'READY_FOR_LOADING',locationId:omaha.id}),201);
       const path = `/warehouse/containers/${container.id}/parcels`;
-      const results = await Promise.all([req(path, staff, 'POST', { trackingId: outboundParcel.trackingId }), req(path, staff, 'POST', { trackingId: outboundParcel.trackingId.toLowerCase() })]);
+      const results = await Promise.all([req(path, staff, 'POST', { loadingConfirmed: true, trackingId: outboundParcel.trackingId }), req(path, staff, 'POST', { loadingConfirmed: true, trackingId: outboundParcel.trackingId.toLowerCase() })]);
       assert.deepEqual(results.map(r => r.status).sort(), [200, 201]);
-      expectStatus(await req(`/warehouse/containers/${competing.id}/parcels`, staff, 'POST', { trackingId: outboundParcel.trackingId }), 409);
-      expectStatus(await req(path, staff, 'POST', { trackingId: otherParcel.trackingId }), 409);
-      expectStatus(await req(path, staff, 'POST', { trackingId: returnParcel.trackingId }), 409);
-      expectStatus(await req(path, foreignAdmin, 'POST', { trackingId: outboundParcel.trackingId }), 404);
-      expectStatus(await req(`/parcels/${outboundParcel.id}/events`, staff, 'POST', { status: 'IN_TRANSIT' }), 409);
+      expectStatus(await req(`/warehouse/containers/${competing.id}/parcels`, staff, 'POST', { loadingConfirmed: true, trackingId: outboundParcel.trackingId }), 409);
+      expectStatus(await req(path, staff, 'POST', { loadingConfirmed: true, trackingId: otherParcel.trackingId }), 409);
+      expectStatus(await req(path, staff, 'POST', { loadingConfirmed: true, trackingId: returnParcel.trackingId }), 409);
+      expectStatus(await req(path, foreignAdmin, 'POST', { loadingConfirmed: true, trackingId: outboundParcel.trackingId }), 404);
+      expectStatus(await req(`/parcels/${outboundParcel.id}/events`, staff, 'POST', { status: 'IN_TRANSIT', locationId: omaha.id, confirmed: true }), 409);
       let detail = expectStatus(await req(`/warehouse/containers/${container.id}`, staff), 200);
       assert.equal(detail.parcels.length, 1); assert.equal(detail.events.filter(e => e.action === 'PARCEL_LOADED').length, 1);
       expectStatus(await req(`${path}/${outboundParcel.id}`, staff, 'DELETE'), 200);
-      expectStatus(await req(path, staff, 'POST', { trackingId: outboundParcel.trackingId }), 201);
+      expectStatus(await req(path, staff, 'POST', { loadingConfirmed: true, trackingId: outboundParcel.trackingId }), 201);
       detail = expectStatus(await req(`/parcels/${outboundParcel.id}`, staff), 200);
       assert.equal(detail.container.code, container.code);
       assert.ok(detail.events.some(e => e.note.startsWith('Removed from container')));
+    });
+    await t.test('board counters come from the same snapshot and note corrections preserve history', async () => {
+      const board = expectStatus(await req('/parcels/board?status=RECEIVED&limit=1', staff), 200);
+      assert.equal(board.total, 2);
+      assert.equal(board.counts.RECEIVED, 2);
+      assert.equal(board.parcels.length, 1);
+      assert.equal(board.parcels[0].status, 'RECEIVED');
+      const all = expectStatus(await req('/parcels/board?limit=1', staff), 200);
+      assert.equal(all.total, 3);
+      assert.equal(Object.values(all.counts).reduce((sum, count) => sum + count, 0), all.total);
+
+      const detail = expectStatus(await req(`/parcels/${outboundParcel.id}`, staff), 200);
+      const event = detail.events.find((entry) => entry.status === 'LOADED_IN_CONTAINER' && entry.note?.includes('Loaded into container'));
+      assert.ok(event);
+      expectStatus(await req(`/parcels/${outboundParcel.id}/events/${event.id}/note`, lomeStaff, 'PATCH', { note: 'Not my event' }), 403);
+      const corrected = expectStatus(await req(`/parcels/${outboundParcel.id}/events/${event.id}/note`, staff, 'PATCH', { note: 'Corrected loading note' }), 200);
+      assert.equal(corrected.internalNote, 'Corrected loading note');
+      assert.match(corrected.originalNote,/Loaded into container/);
+      assert.equal(corrected.actorId, staff.id);
+      const audit = await prisma.auditLog.findFirstOrThrow({ where: { entityId: outboundParcel.id, action: 'PARCEL_EVENT_NOTE_EDIT' } });
+      assert.equal(audit.actorId, staff.id);
+      assert.match(audit.detail, /Loaded into container/);
+      expectStatus(await req(`/parcels/${outboundParcel.id}/events/${event.id}/note`, admin, 'PATCH', { note: 'Administrator correction' }), 200);
+      const saved = expectStatus(await req(`/parcels/${outboundParcel.id}`, staff), 200);
+      assert.equal(saved.events.find((entry) => entry.id === event.id).internalNote, 'Administrator correction');
     });
     let finalManifest;
     await t.test('departure is atomic, concurrent-safe and freezes the printable manifest', async () => {
       const draft = expectStatus(await req(`/warehouse/containers/${container.id}/manifest`, staff), 200);
       assert.equal(draft.provisional, true); assert.equal(draft.parcelCount, 1); assert.equal(draft.totalWeightKg, 2.5);
-      const results = await Promise.all([req(`/warehouse/containers/${container.id}/events`, staff, 'POST', { action: 'DEPARTED' }), req(`/warehouse/containers/${container.id}/events`, admin, 'POST', { action: 'DEPARTED' })]);
+      const results = await Promise.all([req(`/warehouse/containers/${container.id}/events`, staff, 'POST', { action: 'DEPARTED', confirmed: true }), req(`/warehouse/containers/${container.id}/events`, admin, 'POST', { action: 'DEPARTED', confirmed: true })]);
       assert.deepEqual(results.map(r => r.status).sort(), [201, 409]);
       const p = expectStatus(await req(`/parcels/${outboundParcel.id}`, staff), 200);
       assert.equal(p.status, 'IN_TRANSIT'); assert.equal(p.events.filter(e => e.status === 'IN_TRANSIT').length, 1);
-      assert.ok(p.events.at(-1).note.includes('Departed Omaha'));
+      assert.ok(p.events.at(-1).note.includes('Departure confirmed'));
       finalManifest = expectStatus(await req(`/warehouse/containers/${container.id}/manifest`, staff), 200);
       assert.equal(finalManifest.provisional, false);
-      expectStatus(await req(`/warehouse/containers/${container.id}/parcels`, staff, 'POST', { trackingId: returnParcel.trackingId }), 409);
+      expectStatus(await req(`/warehouse/containers/${container.id}/parcels`, staff, 'POST', { loadingConfirmed: true, trackingId: returnParcel.trackingId }), 409);
       expectStatus(await req(`/warehouse/containers/${container.id}/parcels/${outboundParcel.id}`, staff, 'DELETE'), 409);
     });
     await t.test('Lomé arrival, ready, released and delivered preserve actor/time history and frozen manifest', async () => {
-      expectStatus(await req(`/warehouse/containers/${container.id}/events`, staff, 'POST', { action: 'ARRIVED' }), 201);
+      // Only staff at the receiving facility (or an administrator) can confirm arrival.
+      expectStatus(await req(`/warehouse/containers/${container.id}/events`, staff, 'POST', { action: 'ARRIVED_PORT', confirmed: true }), 403);
+      expectStatus(await req(`/warehouse/containers/${container.id}/events`, lomeStaff, 'POST', { action: 'ARRIVED_PORT', confirmed: true }), 201);
+      for(const action of ['CUSTOMS_CLEARANCE','CUSTOMS_CLEARED','ARRIVED']) expectStatus(await req(`/warehouse/containers/${container.id}/events`,lomeStaff,'POST',{action,confirmed:true}),201);
       const p = expectStatus(await req(`/parcels/${outboundParcel.id}`, staff), 200);
-      assert.equal(p.status, 'ARRIVED_LOME'); assert.equal(p.locationId, lome.id);
-      for (const status of ['READY_FOR_PICKUP', 'RELEASED', 'DELIVERED']) expectStatus(await req(`/parcels/${p.id}/events`, staff, 'POST', { status, location: 'Lomé, Togo' }), 201);
+      assert.equal(p.status, 'RECEIVED_DESTINATION'); assert.equal(p.locationId, lome.id);
+      // Physical statuses require an explicit facility confirmation.
+      expectStatus(await req(`/parcels/${p.id}/events`, lomeStaff, 'POST', { status: 'READY_FOR_PICKUP', locationId: lome.id }), 400);
+      // Staff assigned elsewhere cannot confirm work at Lomé.
+      expectStatus(await req(`/parcels/${p.id}/events`, staff, 'POST', { status: 'READY_FOR_PICKUP', locationId: lome.id, confirmed: true }), 403);
+      expectStatus(await req(`/parcels/${p.id}/events`, lomeStaff, 'POST', { status: 'READY_FOR_PICKUP', locationId: lome.id, confirmed: true }), 201);
+      expectStatus(await req(`/parcels/${p.id}/events`, lomeStaff, 'POST', { status: 'RELEASED', locationId: lome.id, confirmed: true }), 400);
+      expectStatus(await req(`/parcels/${p.id}/events`, lomeStaff, 'POST', {
+        status: 'RELEASED', locationId: lome.id, confirmed: true,
+        releasedToName: 'Aïcha Tetteh', releasedToIdNumber: 'TG-99887766',
+        releasedAt: new Date(Date.now() - 60000).toISOString(),
+      }), 201);
+      expectStatus(await req(`/parcels/${p.id}/events`, lomeStaff, 'POST', {
+        status: 'DELIVERED', locationId: lome.id, confirmed: true,
+        deliveredAt: new Date().toISOString(),
+      }), 400);
+      expectStatus(await req(`/parcels/${p.id}/events`, lomeStaff, 'POST', {
+        status: 'DELIVERED', locationId: lome.id, confirmed: true,
+        deliveredToName: 'Aïcha Tetteh', deliveredToIdNumber: 'TG-99887766',
+        deliveredAt: new Date().toISOString(),
+        deliveryProofType: 'SIGNATURE', deliveryProofReference: 'Signed handover slip #441',
+      }), 201);
       const saved = expectStatus(await req(`/parcels/${p.id}`, staff), 200);
       assert.equal(saved.status, 'DELIVERED');
+      assert.equal(saved.releasedToName, 'Aïcha Tetteh');
+      assert.equal(saved.releasedToIdNumber, 'TG-99887766');
+      assert.ok(saved.releasedAt && saved.deliveredAt);
+      assert.equal(saved.deliveredToName, 'Aïcha Tetteh');
+      assert.equal(saved.deliveryProofType, 'SIGNATURE');
+      assert.equal(saved.deliveryProofReference, 'Signed handover slip #441');
       assert.ok(saved.events.every((e, i, all) => e.actor?.fullName && e.createdAt && (!i || new Date(e.createdAt) >= new Date(all[i-1].createdAt))));
       assert.deepEqual(expectStatus(await req(`/warehouse/containers/${container.id}/manifest`, admin), 200), finalManifest);
       expectStatus(await req(`/parcels/${p.id}/events`, staff, 'POST', { status: 'RECEIVED' }), 400);
     });
+    await t.test('facility transfers require current-facility authority and destination checks', async () => {
+      expectStatus(await req(`/parcels/${otherParcel.id}/transfers`, lomeStaff, 'POST', { toLocationId: lome.id }), 409);
+      expectStatus(await req(`/parcels/${otherParcel.id}/events`, staff, 'POST', { status: 'PROCESSING', locationId: omaha.id }), 201);
+      expectStatus(await req(`/parcels/${otherParcel.id}/events`, staff, 'POST', { status: 'IN_TRANSIT', locationId: omaha.id, confirmed: true }), 201);
+      expectStatus(await req(`/parcels/${otherParcel.id}/events`, staff, 'POST', { status: 'ARRIVED_LOME', locationId: lome.id, confirmed: true }), 403);
+      expectStatus(await req(`/parcels/${otherParcel.id}/events`, lomeStaff, 'POST', { status: 'ARRIVED_LOME', locationId: lome.id, confirmed: true }), 201);
+      const annex = expectStatus(await req('/warehouse/locations', admin, 'POST', { name: 'Lomé Annex', code: 'LOM-ANNEX', city: 'Lomé', country: 'Togo' }), 201);
+      const annexStaff = await prisma.user.create({ data: {
+        email: `annex-staff-${suffix}@example.test`, fullName: 'M2 Annex Staff',
+        passwordHash: 'unused', role: 'STAFF', organizationId: org.id, locationId: annex.id,
+      } });
+      users.push(annexStaff);
+      expectStatus(await req(`/parcels/${otherParcel.id}/transfers`, staff, 'POST', { toLocationId: annex.id }), 403);
+      const transferred = expectStatus(await req(`/parcels/${otherParcel.id}/transfers`, lomeStaff, 'POST', { toLocationId: annex.id, note: 'Moved by road' }), 201);
+      assert.equal(transferred.status, 'ARRIVED_DESTINATION');
+      assert.equal(transferred.locationId, annex.id);
+      expectStatus(await req(`/parcels/${otherParcel.id}/transfers`, lomeStaff, 'POST', { toLocationId: annex.id }), 409);
+      expectStatus(await req(`/parcels/${otherParcel.id}/events`, lomeStaff, 'POST', { status: 'READY_FOR_PICKUP', locationId: annex.id, confirmed: true }), 403);
+      expectStatus(await req(`/parcels/${otherParcel.id}/events`, annexStaff, 'POST', { status: 'READY_FOR_PICKUP', locationId: annex.id, confirmed: true }), 201);
+      expectStatus(await req(`/parcels/${otherParcel.id}/events`, annexStaff, 'POST', { status: 'RELEASED', locationId: annex.id, confirmed: true, releasedToName: 'Annex Receiver', releasedToIdNumber: 'TG-ANNEX-1', releasedAt: new Date(Date.now() - 20000).toISOString() }), 201);
+      expectStatus(await req(`/parcels/${otherParcel.id}/events`, annexStaff, 'POST', { status: 'DELIVERED', locationId: annex.id, confirmed: true, deliveredAt: new Date().toISOString(), deliveryProofType: 'ID_CONFIRMATION', deliveredToIdNumber: 'TG-ANNEX-1', deliveryProofReference: 'ID checked at counter' }), 201);
+      const detail = expectStatus(await req(`/parcels/${otherParcel.id}`, admin), 200);
+      assert.equal(detail.transfers.length, 1);
+      assert.equal(detail.transfers[0].toLocation.id, annex.id);
+      assert.equal(detail.transfers[0].actor.fullName, 'M2 Lomé Staff');
+      assert.ok(detail.events.some((entry) => entry.status === 'TRANSFERRED' && entry.location.includes('Lomé')));
+    });
     await t.test('West Africa to EU freight arrives at its actual destination and can complete normally', async () => {
-      const c = expectStatus(await req('/warehouse/containers', staff, 'POST', { code: `RETURN-${suffix.slice(0, 8)}`, originId: lome.id, destinationId: brussels.id, method: 'SEA' }), 201);
-      expectStatus(await req(`/warehouse/containers/${c.id}/parcels`, staff, 'POST', { trackingId: returnParcel.trackingId }), 201);
-      for (const action of ['DEPARTED', 'ARRIVED']) expectStatus(await req(`/warehouse/containers/${c.id}/events`, staff, 'POST', { action }), 201);
+      expectStatus(await req('/warehouse/containers', staff, 'POST', { code: `RETURN-DENIED-${suffix.slice(0, 8)}`, originId: lome.id, destinationId: brussels.id, method: 'SEA' }), 403);
+      const c = expectStatus(await req('/warehouse/containers', lomeStaff, 'POST', { code: `RETURN-${suffix.slice(0, 8)}`, originId: lome.id, destinationId: brussels.id, method: 'SEA' }), 201);
+      expectStatus(await req(`/parcels/${returnParcel.id}/events`, lomeStaff, 'POST', {status:'PROCESSING',locationId:lome.id}),201);
+      expectStatus(await req(`/parcels/${returnParcel.id}/events`, lomeStaff, 'POST', {status:'READY_FOR_LOADING',locationId:lome.id}),201);
+      expectStatus(await req(`/warehouse/containers/${c.id}/parcels`, lomeStaff, 'POST', { loadingConfirmed: true, trackingId: returnParcel.trackingId }), 201);
+      expectStatus(await req(`/warehouse/containers/${c.id}/events`, lomeStaff, 'POST', { action: 'DEPARTED', confirmed: true }), 201);
+      expectStatus(await req(`/warehouse/containers/${c.id}/events`, lomeStaff, 'POST', { action: 'ARRIVED_PORT', confirmed: true }), 403);
+      expectStatus(await req(`/warehouse/containers/${c.id}/events`, brusselsStaff, 'POST', { action: 'ARRIVED_PORT', confirmed: true }), 201);
+      for(const action of ['CUSTOMS_CLEARANCE','CUSTOMS_CLEARED','ARRIVED']) expectStatus(await req(`/warehouse/containers/${c.id}/events`,brusselsStaff,'POST',{action,confirmed:true}),201);
       const p = expectStatus(await req(`/parcels/${returnParcel.id}`, staff), 200);
-      assert.equal(p.status, 'ARRIVED_DESTINATION'); assert.equal(p.locationId, brussels.id);
+      assert.equal(p.status, 'RECEIVED_DESTINATION'); assert.equal(p.locationId, brussels.id);
       assert.ok(p.events.at(-1).note.includes('Brussels, Belgium'));
-      for (const status of ['READY_FOR_PICKUP', 'DELIVERED']) expectStatus(await req(`/parcels/${p.id}/events`, staff, 'POST', { status }), 201);
+      expectStatus(await req(`/parcels/${p.id}/events`, brusselsStaff, 'POST', { status: 'READY_FOR_PICKUP', locationId: brussels.id, confirmed: true }), 201);
+      expectStatus(await req(`/parcels/${p.id}/events`, brusselsStaff, 'POST', { status: 'RELEASED', locationId: brussels.id, confirmed: true, releasedToName: 'EU Receiver', releasedToIdNumber: 'BE-445566', releasedAt: new Date(Date.now() - 30000).toISOString() }), 201);
+      expectStatus(await req(`/parcels/${p.id}/events`, brusselsStaff, 'POST', { status: 'DELIVERED', locationId: brussels.id, confirmed: true, deliveredAt: new Date().toISOString(), deliveryProofType: 'PHOTO', deliveryProofReference: 'delivery-photo-7781.jpg' }), 201);
     });
     await t.test('Marketplace products, orders, price snapshots and parcel linking are tenant-safe', async () => {
       const product = expectStatus(await req('/admin/commerce/products', admin, 'POST', { title: 'QA household item', category: 'Household', priceMinor: 1250, currency: 'USD' }), 201);
@@ -165,6 +261,7 @@ test('M2: warehouse, two-way freight, permissions and selected revenue modules',
     await prisma.product.deleteMany({ where: { organizationId: { in: ids } } });
     await prisma.trackingEvent.deleteMany({ where: { parcelId: { in: parcelIds } } });
     await prisma.trackingIndex.deleteMany({ where: { parcelId: { in: parcelIds } } });
+    await prisma.parcelTransfer.deleteMany({ where: { parcelId: { in: parcelIds } } });
     await prisma.parcel.deleteMany({ where: { organizationId: { in: ids } } });
     await prisma.containerEvent.deleteMany({ where: { containerId: { in: containers.map(c => c.id) } } });
     await prisma.container.deleteMany({ where: { organizationId: { in: ids } } });

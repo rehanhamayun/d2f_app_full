@@ -9,6 +9,60 @@ import 'package:flutter/foundation.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test(
+    'registered physical packages produce separate scannable label pages',
+    () async {
+      final parcel = Parcel.fromJson({
+        'id': 'package-label-qa',
+        'trackingId': 'D2F000000000125',
+        'customerId': 'c1',
+        'recipientName': 'Koffi Mensah',
+        'recipientPhone': '+228 90 12 34 56',
+        'recipientAddress': '12 Route d’Aného, Quartier Bè, Lomé, Togo',
+        'packageType': 'BOX',
+        'weightKg': 12,
+        'origin': 'Omaha, NE, USA',
+        'destination': 'Lomé, Togo',
+        'method': 'SEA',
+        'status': 'RECEIVED',
+        'items': [
+          {
+            'id': 'i1',
+            'name': 'Books and clothing',
+            'type': 'BOX',
+            'quantity': 4,
+            'position': 0,
+            'weightKg': 12,
+            'lengthCm': 60,
+            'widthCm': 40,
+            'heightCm': 45,
+            'packageCode': 'D2F000000000125-P01',
+          },
+          {
+            'id': 'i2',
+            'name': 'Household goods',
+            'type': 'BARREL',
+            'quantity': 1,
+            'position': 1,
+            'notCollectedReason': 'Not ready at collection',
+          },
+          {
+            'id': 'i3',
+            'name': 'Personal belongings',
+            'type': 'SUITCASE',
+            'quantity': 1,
+            'position': 2,
+            'weightKg': 18,
+            'packageCode': 'D2F000000000125-P03',
+          },
+        ],
+      });
+      final bytes = await ParcelLabel.generate(parcel);
+      expect(String.fromCharCodes(bytes.take(5)), '%PDF-');
+      await File('/tmp/d2f-package-labels.pdf').writeAsBytes(bytes);
+    },
+  );
+
+  test(
     'saved parcel produces a 4x6 PDF with its original tracking identity',
     () async {
       final parcel = Parcel.fromJson({

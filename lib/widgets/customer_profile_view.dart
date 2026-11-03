@@ -10,7 +10,7 @@ import 'reference_widgets.dart';
 class CustomerProfileView extends StatelessWidget {
   final User user;
   final VoidCallback onEdit, onSupport, onSignOut, onCheckConnection;
-  final VoidCallback? onTrack, onShip;
+  final VoidCallback? onTrack, onShip, onChangePassword;
   final bool? connected;
   const CustomerProfileView({
     super.key,
@@ -21,6 +21,7 @@ class CustomerProfileView extends StatelessWidget {
     required this.onCheckConnection,
     this.onTrack,
     this.onShip,
+    this.onChangePassword,
     this.connected,
   });
   @override
@@ -184,6 +185,39 @@ class CustomerProfileView extends StatelessWidget {
               ],
             ),
           ),
+          if (onChangePassword != null) ...[
+            const SizedBox(height: 24),
+            const Text('Account security', style: AppTheme.sectionTitle),
+            const SizedBox(height: 12),
+            SectionCard(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                onTap: onChangePassword,
+                leading: Container(
+                  padding: const EdgeInsets.all(9),
+                  decoration: BoxDecoration(
+                    color: AppColors.blueSoft,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.lock_outline_rounded,
+                    size: 22,
+                    color: AppColors.blue,
+                  ),
+                ),
+                title: const Text(
+                  'Change password',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                ),
+                subtitle: const Text(
+                  'Sign out other devices and keep your account secure.',
+                  style: TextStyle(fontSize: 10, color: AppColors.textGrey),
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded, size: 20),
+              ),
+            ),
+          ],
           if (onTrack != null || onShip != null) ...[
             const SizedBox(height: 24),
             const Text('Your shipping tools', style: AppTheme.sectionTitle),

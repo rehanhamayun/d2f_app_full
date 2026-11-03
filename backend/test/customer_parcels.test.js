@@ -5,8 +5,9 @@ import jwt from 'jsonwebtoken';
 import app from '../src/app.js';
 import { prisma } from '../src/db.js';
 import { JWT_SECRET } from '../src/config.js';
+import { generateTrackingId } from '../src/tracking.js';
 
-test('customer parcel requests are linked to and isolated by the signed-in customer', async () => {
+test('customer parcel requests are linked to and isolated by the signed-in customer', async t => {
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -26,7 +27,10 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
   };
 
   try {
-    const organization = await prisma.organization.findFirstOrThrow();
+    const organization = await prisma.organization.findUniqueOrThrow({where:{id:'org-d2f'}});
+    const omaha = await prisma.location.findFirstOrThrow({
+      where: { organizationId: organization.id, code: 'OMA-1' },
+    });
     const customer = await prisma.user.create({
       data: {
         email: `customer-${suffix}@example.com`,
@@ -42,6 +46,7 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
       data: {
         email: `other-${suffix}@example.com`,
         fullName: 'Other Customer',
+        phone: '+22890432109',
         passwordHash: 'unused',
         role: 'CUSTOMER',
         organizationId: organization.id,
@@ -55,6 +60,7 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
         passwordHash: 'unused',
         role: 'STAFF',
         organizationId: organization.id,
+        locationId: omaha.id,
       },
     });
     createdUsers.push(staff.id);
@@ -77,6 +83,7 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
       origin: 'Omaha, NE, USA',
       destination: 'Lomé, Togo',
       method: 'AIR',
+      restrictionsAcknowledged: true,
       clientRequestId: `customer-${suffix}`,
     };
 
@@ -155,6 +162,19 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
       ).body.length,
       0,
     );
+    await t.test('individual customer shipment refresh is owner-only and preserves its packages and timeline', async () => {
+      const path = `/customer/parcels/${created.body.id}`;
+      const detail = await request(path, { token: customerToken });
+      assert.equal(detail.status, 200);
+      assert.equal(detail.body.trackingId, created.body.trackingId);
+      assert.equal(detail.body.status, 'REQUESTED');
+      assert.ok(Array.isArray(detail.body.items));
+      assert.ok(Array.isArray(detail.body.events));
+      assert.equal((await request(path, { token: otherCustomerToken })).status, 404);
+      assert.equal((await request(path, { token: staffToken })).status, 403);
+      assert.equal((await request(path)).status, 401);
+      assert.equal((await request('/customer/parcels/missing', { token: customerToken })).status, 404);
+    });
     const stolenRequestId = await request('/customer/parcels', {
       token: otherCustomerToken,
       method: 'POST',
@@ -175,10 +195,41 @@ test('customer parcel requests are linked to and isolated by the signed-in custo
       {
         token: staffToken,
         method: 'POST',
-        data: { status: 'RECEIVED', location: 'Omaha Warehouse' },
+        data: { status: 'RECEIVED', locationId: omaha.id, confirmed: true, scannedTrackingId: created.body.trackingId, note: 'Warehouse physical inspection', verifiedItemIds: [] },
       },
     );
     assert.equal(staffTransition.status, 201, JSON.stringify(staffTransition.body));
+    const receivedDetail = await request(`/customer/parcels/${created.body.id}`, { token: customerToken });
+    assert.equal(receivedDetail.status, 200);
+    assert.equal(receivedDetail.body.status, 'RECEIVED');
+    assert.ok(receivedDetail.body.events.some(event => event.status === 'RECEIVED'));
+
+
+    // Track includes every lifecycle stage and does not truncate the history
+    // at the shipping workspace's 100-record limit.
+    await prisma.$transaction(async tx => {
+      for (let i = 0; i < 101; i++) {
+        const tracking = await generateTrackingId(tx, organization.id);
+        const p = await tx.parcel.create({ data: {
+          organizationId: organization.id, customerId: linkedCustomer.id,
+          trackingId: tracking.trackingId, trackingSequence: tracking.trackingSequence,
+          recipientName: 'History recipient', packageType: 'BOX', weightKg: 1,
+          createdById: i % 2 ? staff.id : customer.id,
+          origin: input.origin, destination: input.destination, method: 'SEA',
+          serviceType: 'SEA', status: ['REQUESTED', 'PROCESSING', 'IN_TRANSIT', 'DELIVERED'][i % 4],
+        } });
+        createdParcels.push(p.id);
+      }
+    }, { timeout: 15000 });
+    const history = await request('/customer/parcels?scope=tracking', { token: customerToken });
+    assert.equal(history.status, 200);
+    assert.equal(history.body.length, 102);
+    for (const status of ['REQUESTED', 'PROCESSING', 'IN_TRANSIT', 'DELIVERED']) {
+      assert.ok(history.body.some(p => p.status === status));
+    }
+    assert.equal((await request('/customer/parcels?scope=tracking&customerId=' + linkedCustomer.id, { token: otherCustomerToken })).body.length, 0);
+    assert.equal((await request('/customer/parcels?scope=tracking')).status, 401);
+    assert.equal((await request('/customer/parcels?scope=tracking', { token: staffToken })).status, 403);
   } finally {
     await prisma.auditLog.deleteMany({
       where: { entityId: { in: createdParcels } },

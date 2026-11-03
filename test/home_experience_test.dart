@@ -245,6 +245,11 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('parcel-origin-Accra, Ghana')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(
         tester
             .widget<DropdownButtonFormField<String>>(
