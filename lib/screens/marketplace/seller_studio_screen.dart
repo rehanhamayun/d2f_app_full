@@ -25,14 +25,11 @@ class _SellerStudioScreenState extends ConsumerState<SellerStudioScreen>
   SellerMe? _me;
   bool _loading = true, _failed = false;
   late final TabController _tabs = TabController(length: 2, vsync: this);
-  bool _loadStarted = false;
   List<Map<String, dynamic>> _adminSellers = const [];
 
   void _maybeLoad() {
-    if (_loadStarted) return;
     final role = ref.read(authControllerProvider).valueOrNull?.role;
     if (role == null) return;
-    _loadStarted = true;
     if (role == UserRole.CUSTOMER) _load();
     if (role == UserRole.ADMIN) _loadAdminSellers();
   }
@@ -55,7 +52,7 @@ class _SellerStudioScreenState extends ConsumerState<SellerStudioScreen>
       final me = await Api.I.sellerMe();
       if (!mounted) return;
       setState(() { _me = me; _loading = false; });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() { _loading = false; _failed = true; });
     }
@@ -315,10 +312,12 @@ class _ApprovedStudioState extends State<_ApprovedStudio> {
 
   Future<void> _loadBranding() async {
     try {
-      final banner = await Api.I.sellerBrandingImageBytes('banner');
-      final avatar = await Api.I.sellerBrandingImageBytes('profile');
+      final results = await Future.wait([
+        Api.I.sellerBrandingImageBytes('banner'),
+        Api.I.sellerBrandingImageBytes('profile'),
+      ]);
       if (!mounted) return;
-      setState(() { _bannerBytes = banner; _avatarBytes = avatar; });
+      setState(() { _bannerBytes = results[0]; _avatarBytes = results[1]; });
     } catch (_) {}
   }
 
