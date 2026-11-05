@@ -9,11 +9,19 @@ import '../core/theme.dart';
 class ConnectPaymentEvidenceForm extends StatefulWidget {
   final String bookingId, instructions;
   final int version;
+  final Future<Uint8List?> Function(ImageSource source)? pickImage;
+  final Future<void> Function({
+    required String method,
+    required String transactionId,
+    required Uint8List bytes,
+  })? submit;
   const ConnectPaymentEvidenceForm({
     super.key,
     required this.bookingId,
     required this.instructions,
     required this.version,
+    this.pickImage,
+    this.submit,
   });
   @override
   State<ConnectPaymentEvidenceForm> createState() =>
@@ -28,6 +36,17 @@ class _ConnectPaymentEvidenceFormState
   final _transaction = TextEditingController();
   Future<void> _pick() async {
     try {
+      if (widget.pickImage != null) {
+        final result = await widget.pickImage!(ImageSource.gallery);
+        if (result == null) return;
+        if (mounted) {
+          setState(() {
+            _bytes = result;
+            _error = null;
+          });
+        }
+        return;
+      }
       final f = await ImagePicker().pickImage(
         source: ImageSource.gallery,
         maxWidth: 1800,
@@ -57,6 +76,15 @@ class _ConnectPaymentEvidenceFormState
       _error = null;
     });
     try {
+      if (widget.submit != null) {
+        await widget.submit!(
+          method: _method!,
+          transactionId: _transaction.text.trim(),
+          bytes: _bytes!,
+        );
+        if (mounted) Navigator.pop(context, true);
+        return;
+      }
       await Api.I.submitConnectPaymentEvidence(
         widget.bookingId,
         method: _method!,
@@ -123,6 +151,7 @@ class _ConnectPaymentEvidenceFormState
           ),
         ),
         OutlinedButton.icon(
+          key: const ValueKey('payment-camera'),
           onPressed: _saving ? null : _pick,
           icon: const Icon(Icons.add_photo_alternate_outlined),
           label: const Text('Attach payment screenshot or cash receipt *'),
@@ -139,6 +168,7 @@ class _ConnectPaymentEvidenceFormState
           Text(_error!, style: const TextStyle(color: AppColors.coral)),
         const SizedBox(height: 20),
         FilledButton(
+          key: const ValueKey('payment-evidence-submit'),
           onPressed: _approved && _method != null && _bytes != null && !_saving
               ? _save
               : null,
