@@ -5,6 +5,7 @@ import '../core/theme.dart';
 import '../screens/connect_screen.dart';
 import '../screens/marketplace/buy_for_me_shop.dart';
 import '../screens/marketplace/marketplace_shop.dart';
+import '../screens/marketplace/ship_for_me_shop.dart';
 import 'service_hero.dart';
 import 'service_card_art.dart';
 import 'common.dart';
@@ -29,10 +30,17 @@ enum D2FService {
   ),
   buy(
     'Buy For Me',
-    'Shop & ship',
+    'D2F purchases for you',
     Icons.shopping_bag_rounded,
     Color(0xFFDC3765),
     Color(0xFFFFEAF0),
+  ),
+  shipForMe(
+    'Ship For Me',
+    'You shop, we ship',
+    Icons.local_shipping_rounded,
+    Color(0xFF104D55),
+    Color(0xFFE4F7FC),
   ),
   marketplace(
     'Marketplace',
@@ -169,6 +177,7 @@ class D2FServiceDirectory extends StatelessWidget {
       D2FService.shipping,
       D2FService.local,
       D2FService.buy,
+      D2FService.shipForMe,
       D2FService.africa,
       D2FService.marketplace,
       D2FService.connect,
@@ -678,7 +687,7 @@ class _D2FServiceScreenState extends State<D2FServiceScreen> {
   @override
   Widget build(BuildContext context) {
     final service = widget.service;
-    final immersive = service == D2FService.buy || service == D2FService.marketplace;
+    final immersive = service == D2FService.buy || service == D2FService.shipForMe || service == D2FService.marketplace;
     if (immersive) {
       return Scaffold(
         backgroundColor: AppColors.cream,
@@ -716,7 +725,9 @@ class _D2FServiceScreenState extends State<D2FServiceScreen> {
                           const SizedBox(height: 10),
                           Text(
                             service == D2FService.buy
-                                ? 'Buy For Me / Ship For Me'
+                                ? 'Buy For Me'
+                                : service == D2FService.shipForMe
+                                ? 'Ship For Me'
                                 : service.label,
                             style: TextStyle(
                               color: service.color,
@@ -734,6 +745,8 @@ class _D2FServiceScreenState extends State<D2FServiceScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: service == D2FService.marketplace
                           ? const MarketplaceShop()
+                          : service == D2FService.shipForMe
+                          ? const ShipForMeShop()
                           : const BuyForMeShop(),
                     ),
                   ),
@@ -777,7 +790,9 @@ class _D2FServiceScreenState extends State<D2FServiceScreen> {
                   const SizedBox(height: 10),
                   Text(
                     service == D2FService.buy
-                        ? 'Buy For Me / Ship For Me'
+                        ? 'Buy For Me'
+                        : service == D2FService.shipForMe
+                        ? 'Ship For Me'
                         : service.label,
                     style: TextStyle(
                       color: service.color,
