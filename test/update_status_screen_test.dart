@@ -26,7 +26,7 @@ Parcel parcelWithStatus(
   'status': status,
   'warehouseReceivedAt': '2026-10-21T10:00:00Z',
   'items': items,
-  if (deliveryMode != null) 'deliveryMode': deliveryMode,
+  'deliveryMode': ?deliveryMode,
   'createdAt': '2026-10-18T09:00:00Z',
   'updatedAt': '2026-10-21T10:00:00Z',
   'releasedToName': 'Ama Boateng',

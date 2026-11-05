@@ -71,6 +71,7 @@ it('Marketplace records a priced product and availability without losing the exi
   }));
   const user = userEvent.setup();
   render(<Commerce kind="MARKETPLACE" token="test" notify={vi.fn()} refreshKey={0} />);
+  await user.click(screen.getByRole('tab', { name: 'Products' }));
   await screen.findByText('Build your catalog');
   await user.click(screen.getByRole('button', { name: 'Add product' }));
   const dialog = screen.getByRole('dialog', { name: 'Add a product' });
@@ -127,4 +128,65 @@ it('Staff dispatchers can use operational directories while admin management sta
   await user.click(screen.getByRole('button', { name: 'Customers', exact: true }));
   expect(await screen.findByText('No customers found')).toBeInTheDocument();
   expect(fetched.some(path => path.startsWith('/admin/'))).toBe(false);
+});
+
+it('Marketplace reviews a seller application and agrees the commission before approval', async () => {
+  const seller = { id: 's1', status: 'PENDING', displayName: 'Mama Adjoa', businessType: 'BUSINESS', businessName: 'Adjoa Spices SARL', category: 'Spices & Food', phone: '+228 90 00 00 00', email: 'adjoa@example.test', country: 'Togo', city: 'Lomé', commissionBps: 1000, createdAt: '2026-11-04T09:00:00Z', _count: { products: 0, orders: 0 } };
+  const writes = [];
+  vi.stubGlobal('fetch', vi.fn(async (url, options = {}) => {
+    const path = new URL(url).pathname;
+    if (options.method === 'PATCH' && path === '/admin/commerce/sellers/s1') { const body = JSON.parse(options.body); writes.push(body); return json({ ...seller, status: 'APPROVED', commissionBps: body.commissionBps }); }
+    if (path === '/admin/commerce/sellers') return json([seller]);
+    return json({ products: [], orders: [], total: 0, transitions: {} });
+  }));
+  const user = userEvent.setup(), notify = vi.fn();
+  render(<Commerce kind="MARKETPLACE" token="test" notify={notify} refreshKey={0} />);
+  await user.click(screen.getByRole('tab', { name: 'Sellers' }));
+  expect(await screen.findByText('Mama Adjoa')).toBeInTheDocument();
+  expect(screen.getByText('Adjoa Spices SARL')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Review & approve' }));
+  const dialog = screen.getByRole('dialog', { name: 'Approve Mama Adjoa' });
+  const commissionInput = within(dialog).getByLabelText('Commission rate (%)');
+  await user.clear(commissionInput);
+  await user.type(commissionInput, '12.5');
+  await user.click(within(dialog).getByRole('button', { name: 'Approve seller' }));
+  await waitFor(() => expect(writes.at(-1)).toMatchObject({ action: 'approve', commissionBps: 1250 }));
+  expect(notify).toHaveBeenCalledWith(expect.stringContaining('12.5%'));
+});
+
+it('Marketplace registers an existing app account as a seller from the admin side', async () => {
+  const customer = { id: 'c1', displayName: 'Ama Boateng', email: 'ama@example.test', userId: 'u1' };
+  const writes = [];
+  vi.stubGlobal('fetch', vi.fn(async (url, options = {}) => {
+    const path = new URL(url).pathname;
+    if (options.method === 'POST' && path === '/admin/commerce/sellers') { const body = JSON.parse(options.body); writes.push(body); return json({ id: 's9', status: 'APPROVED', ...body }, 201); }
+    if (path === '/admin/customers') return json({ customers: [customer], total: 1 });
+    if (path === '/admin/commerce/sellers') return json([]);
+    return json({ products: [], orders: [], total: 0, transitions: {} });
+  }));
+  const user = userEvent.setup(), notify = vi.fn();
+  render(<Commerce kind="MARKETPLACE" token="test" notify={notify} refreshKey={0} />);
+  await user.click(screen.getByRole('tab', { name: 'Sellers' }));
+  await user.click(await screen.findByRole('button', { name: 'Register seller' }));
+  const dialog = screen.getByRole('dialog', { name: 'Register a seller' });
+  await within(dialog).findByRole('option', { name: /Ama Boateng/ });
+  await user.selectOptions(within(dialog).getByLabelText('Customer profile'), 'c1');
+  await user.type(within(dialog).getByLabelText('Main category'), 'Spices & Food');
+  await user.click(within(dialog).getByRole('button', { name: 'Register seller' }));
+  await waitFor(() => expect(writes.at(-1)).toMatchObject({ customerId: 'c1', category: 'Spices & Food', commissionBps: 1000, businessType: 'INDIVIDUAL' }));
+  expect(notify).toHaveBeenCalledWith(expect.stringContaining('Seller registered'));
+});
+
+it('Marketplace commission report shows per-currency totals and per-seller rows', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url) => {
+    const path = new URL(url).pathname;
+    if (path === '/admin/commerce/commissions') return json({ from: '2026-10-06T00:00:00.000Z', to: '2026-11-05T00:00:00.000Z', currencies: [{ currency: 'USD', orders: 3, merchandiseMinor: 10500, commissionMinor: 1260 }], sellers: [{ sellerId: 's1', displayName: 'Mama Adjoa', currency: 'USD', orders: 3, merchandiseMinor: 10500, commissionMinor: 1260 }] });
+    return json({ products: [], orders: [], total: 0, transitions: {} });
+  }));
+  const user = userEvent.setup();
+  render(<Commerce kind="MARKETPLACE" token="test" notify={vi.fn()} refreshKey={0} />);
+  await user.click(screen.getByRole('tab', { name: 'Commission' }));
+  expect((await screen.findAllByText('$12.60')).length).toBeGreaterThanOrEqual(1);
+  expect(screen.getByText('Mama Adjoa')).toBeInTheDocument();
+  expect(screen.getByText(/Merchandise\s+\$105\.00/)).toBeInTheDocument();
 });

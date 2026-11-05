@@ -121,8 +121,9 @@ const Set<String> kPickupOnlyStatuses = {'PICKUP_SCHEDULED', 'PICKED_UP'};
 List<String> allowedStatusesFor(Parcel parcel) {
   if (parcel.serviceType == 'AIR_TRAVELLER') return const [];
   if (parcel.deliveryMode == DeliveryMode.PICKUP &&
-      parcel.status == 'REQUESTED')
+      parcel.status == 'REQUESTED') {
     return const ['PICKUP_SCHEDULED'];
+  }
   if (parcel.method == ShippingMethod.SEA) {
     if (parcel.status == 'PROCESSING') return const ['READY_FOR_LOADING'];
     if ([
@@ -132,8 +133,9 @@ List<String> allowedStatusesFor(Parcel parcel) {
       'ARRIVED_PORT',
       'CUSTOMS_CLEARANCE',
       'CUSTOMS_CLEARED',
-    ].contains(parcel.status))
+    ].contains(parcel.status)) {
       return const [];
+    }
   }
   final base = kAllowedTransitions[parcel.status] ?? const [];
   return base
@@ -812,6 +814,79 @@ const List<String> kShippingLocationOptions = [
   ...kDestinationOptions,
 ];
 
+/// Every country the D2F marketplace, checkout and seller studio should offer:
+/// the United States, the European Union area and West Africa. Buyer-facing
+/// country pickers autocomplete against this list; entries are plain names.
+const List<String> kCountryOptions = [
+  // United States and North America
+  'United States',
+  'Canada',
+  'Mexico',
+  // Europe
+  'United Kingdom',
+  'France',
+  'Germany',
+  'Italy',
+  'Spain',
+  'Netherlands',
+  'Belgium',
+  'Switzerland',
+  'Austria',
+  'Ireland',
+  'Portugal',
+  'Sweden',
+  'Norway',
+  'Denmark',
+  'Finland',
+  'Poland',
+  'Greece',
+  'Czechia',
+  'Hungary',
+  'Romania',
+  'Bulgaria',
+  'Serbia',
+  'Croatia',
+  'Slovenia',
+  'Slovakia',
+  'Estonia',
+  'Latvia',
+  'Lithuania',
+  'Luxembourg',
+  'Iceland',
+  'Malta',
+  'Cyprus',
+  'Albania',
+  'North Macedonia',
+  'Moldova',
+  'Ukraine',
+  'Georgia',
+  'Armenia',
+  'Azerbaijan',
+  'Turkey',
+  // West Africa and the Sahel
+  'Togo',
+  'Benin',
+  'Burkina Faso',
+  'Côte d’Ivoire',
+  'Gabon',
+  'Ghana',
+  'Senegal',
+  'Nigeria',
+  'Mali',
+  'Niger',
+  'Cape Verde',
+  'Sierra Leone',
+  'Liberia',
+  'Guinea',
+  'Guinea-Bissau',
+  'Mauritania',
+  'Gambia',
+  'Chad',
+  'Cameroon',
+  'CAR',
+  'Ethiopia',
+];
+
 class ShipmentRoute {
   final String origin;
   final String destination;
@@ -836,6 +911,10 @@ String _foldRouteText(String value) => value
     .replaceAll('ç', 'c')
     .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
     .trim();
+
+/// Accent- and separator-insensitive fold shared by country, city and route
+/// matching (e.g. “Côte d’Ivoire” == “Cote d'Ivoire”).
+String foldRouteText(String value) => _foldRouteText(value);
 
 String routeCity(String value) => _foldRouteText(value.split(',').first.trim());
 

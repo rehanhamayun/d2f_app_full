@@ -8,6 +8,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/models.dart';
+import '../models/marketplace.dart';
 import '../models/warehouse.dart';
 
 /// Thrown for any API failure with a human-friendly message.
@@ -832,6 +833,460 @@ class Api {
       );
     } on DioException catch (error) {
       throw _map(error);
+    }
+  }
+
+  // ── Marketplace (customer storefront) ─────────────────────────────────────
+
+  Future<MarketplaceBrowse> marketplaceProducts({
+    String? q,
+    String? category,
+    String? country,
+    bool featured = false,
+    int page = 1,
+  }) async {
+    try {
+      final response = await _dio!.get(
+        '/marketplace/products',
+        queryParameters: {
+          if (q != null && q.trim().isNotEmpty) 'q': q.trim(),
+          if (category != null && category.isNotEmpty) 'category': category,
+          if (country != null && country.isNotEmpty) 'country': country,
+          if (featured) 'featured': 'true',
+          'page': page,
+        },
+      );
+      return MarketplaceBrowse.fromJson(
+        Map<String, dynamic>.from(response.data as Map),
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<MarketplaceProduct> marketplaceProduct(String id) async {
+    try {
+      final response = await _dio!.get('/marketplace/products/$id');
+      return MarketplaceProduct.fromJson(
+        Map<String, dynamic>.from(response.data as Map),
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Uint8List> marketplaceProductImage(String productId, String imageId) =>
+      _imageBytes('/marketplace/products/$productId/images/$imageId/raw');
+
+  Future<List<MarketplaceOrder>> marketplaceOrders() async {
+    try {
+      final response = await _dio!.get('/marketplace/orders');
+      return (response.data as List)
+          .cast<Map<String, dynamic>>()
+          .map(MarketplaceOrder.fromJson)
+          .toList();
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<MarketplaceOrder> createMarketplaceOrder({
+    required String productId,
+    required int quantity,
+    required String deliveryPreference,
+    String? recipientName,
+    required String recipientPhone,
+    required String deliveryAddress,
+    required String deliveryCity,
+    required String deliveryCountry,
+    String? notes,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/marketplace/orders',
+        data: {
+          'productId': productId,
+          'quantity': quantity,
+          'deliveryPreference': deliveryPreference,
+          if (recipientName != null && recipientName.trim().isNotEmpty)
+            'recipientName': recipientName.trim(),
+          'recipientPhone': recipientPhone.trim(),
+          'deliveryAddress': deliveryAddress.trim(),
+          'deliveryCity': deliveryCity.trim(),
+          'deliveryCountry': deliveryCountry.trim(),
+          if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+        },
+      );
+      return MarketplaceOrder.fromJson(
+        Map<String, dynamic>.from(response.data as Map),
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<MarketplaceOrder> cancelMarketplaceOrder(String id) async {
+    try {
+      final response = await _dio!.post('/marketplace/orders/$id/cancel');
+      return MarketplaceOrder.fromJson(
+        Map<String, dynamic>.from(response.data as Map),
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  // ── Buy For Me (customer purchase requests) ───────────────────────────────
+
+  Future<List<MarketplaceOrder>> buyForMeRequests() async {
+    try {
+      final response = await _dio!.get('/buy-for-me/requests');
+      return (response.data as List)
+          .cast<Map<String, dynamic>>()
+          .map(MarketplaceOrder.fromJson)
+          .toList();
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<MarketplaceOrder> createBuyForMeRequest({
+    required String title,
+    String? sourceUrl,
+    required int quantity,
+    int? budgetMinor,
+    required String currency,
+    String? notes,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/buy-for-me/requests',
+        data: {
+          'title': title.trim(),
+          if (sourceUrl != null && sourceUrl.trim().isNotEmpty)
+            'sourceUrl': sourceUrl.trim(),
+          'quantity': quantity,
+          if (budgetMinor != null) 'budgetMinor': budgetMinor,
+          'currency': currency,
+          if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+        },
+      );
+      return MarketplaceOrder.fromJson(
+        Map<String, dynamic>.from(response.data as Map),
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  /// decision: accept | decline | cancel
+  Future<MarketplaceOrder> buyForMeDecision(String id, String decision) async {
+    try {
+      final response = await _dio!.post('/buy-for-me/requests/$id/$decision');
+      return MarketplaceOrder.fromJson(
+        Map<String, dynamic>.from(response.data as Map),
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  // ── Seller Studio ─────────────────────────────────────────────────────────
+
+  Future<SellerMe> sellerMe() async {
+    try {
+      final response = await _dio!.get('/seller/me');
+      return SellerMe.fromJson(Map<String, dynamic>.from(response.data as Map));
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  /// Shop branding bytes for the signed-in seller (profile photo | banner).
+  Future<Uint8List> sellerBrandingImageBytes(String slot) =>
+      _imageBytes('/seller/me/$slot');
+
+  Future<Map<String, dynamic>> uploadSellerBrandingImage(
+    String slot,
+    Uint8List bytes, {
+    required String fileName,
+    required String contentType,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/seller/me/$slot',
+        queryParameters: {'name': fileName},
+        data: bytes,
+        options: Options(
+          contentType: contentType,
+          headers: {'Content-Length': bytes.length},
+        ),
+      );
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<SellerProfileInfo> submitSellerApplication({
+    required String displayName,
+    required String businessType,
+    String? businessName,
+    String? headline,
+    String? bio,
+    required String category,
+    required String country,
+    String? city,
+    String? address,
+    required String phone,
+    required bool terms,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/seller/application',
+        data: {
+          'displayName': displayName.trim(),
+          'businessType': businessType,
+          if (businessName != null && businessName.trim().isNotEmpty)
+            'businessName': businessName.trim(),
+          if (headline != null && headline.trim().isNotEmpty)
+            'headline': headline.trim(),
+          if (bio != null && bio.trim().isNotEmpty) 'bio': bio.trim(),
+          'category': category.trim(),
+          'country': country.trim(),
+          if (city != null && city.trim().isNotEmpty) 'city': city.trim(),
+          if (address != null && address.trim().isNotEmpty) 'address': address.trim(),
+          'phone': phone.trim(),
+          'terms': terms,
+        },
+      );
+      return SellerProfileInfo.fromJson(
+        Map<String, dynamic>.from(response.data as Map),
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<List<MarketplaceProduct>> sellerProducts() async {
+    try {
+      final response = await _dio!.get('/seller/products');
+      return (response.data as List)
+          .cast<Map<String, dynamic>>()
+          .map(MarketplaceProduct.fromJson)
+          .toList();
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<MarketplaceProduct> createSellerProduct({
+    required String title,
+    required String category,
+    String? description,
+    required int priceMinor,
+    required String currency,
+    required String fulfillment,
+    int? stockCount,
+    String? locationCity,
+    String? locationCountry,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/seller/products',
+        data: {
+          'title': title.trim(),
+          'category': category.trim(),
+          if (description != null && description.trim().isNotEmpty)
+            'description': description.trim(),
+          'priceMinor': priceMinor,
+          'currency': currency,
+          'fulfillment': fulfillment,
+          'stockCount': ?stockCount,
+          if (locationCity != null && locationCity.trim().isNotEmpty)
+            'locationCity': locationCity.trim(),
+          if (locationCountry != null && locationCountry.trim().isNotEmpty)
+            'locationCountry': locationCountry.trim(),
+        },
+      );
+      return MarketplaceProduct.fromJson(
+        Map<String, dynamic>.from(response.data as Map),
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<MarketplaceProduct> updateSellerProduct(
+    String id, {
+    String? title,
+    String? category,
+    String? description,
+    int? priceMinor,
+    String? currency,
+    String? fulfillment,
+    int? stockCount,
+    bool clearStock = false,
+    bool? isActive,
+    String? locationCity,
+    String? locationCountry,
+  }) async {
+    try {
+      final response = await _dio!.patch(
+        '/seller/products/$id',
+        data: {
+          if (title != null) 'title': title.trim(),
+          if (category != null) 'category': category.trim(),
+          if (description != null) 'description': description.trim(),
+          if (priceMinor != null) 'priceMinor': priceMinor,
+          if (currency != null) 'currency': currency,
+          if (fulfillment != null) 'fulfillment': fulfillment,
+          if (clearStock)
+            'stockCount': null
+          else if (stockCount != null)
+            'stockCount': stockCount,
+          if (isActive != null) 'isActive': isActive,
+          if (locationCity != null) 'locationCity': locationCity.trim(),
+          if (locationCountry != null) 'locationCountry': locationCountry.trim(),
+        },
+      );
+      return MarketplaceProduct.fromJson(
+        Map<String, dynamic>.from(response.data as Map),
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  /// Removes a listing. Listings with orders are paused, not erased.
+  Future<bool> deleteSellerProduct(String id) async {
+    try {
+      final response = await _dio!.delete('/seller/products/$id');
+      return (response.data as Map?)?['archived'] as bool? ?? false;
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<ProductImageMeta> uploadSellerProductImage(
+    String productId,
+    Uint8List bytes, {
+    required String fileName,
+    required String contentType,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/seller/products/$productId/images',
+        queryParameters: {'name': fileName},
+        data: bytes,
+        options: Options(
+          contentType: contentType,
+          headers: {'Content-Length': bytes.length},
+        ),
+      );
+      return ProductImageMeta.fromJson(
+        Map<String, dynamic>.from(response.data as Map),
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<void> deleteSellerProductImage(String productId, String imageId) async {
+    try {
+      await _dio!.delete('/seller/products/$productId/images/$imageId');
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<List<MarketplaceOrder>> sellerOrders({String? status}) async {
+    try {
+      final response = await _dio!.get(
+        '/seller/orders',
+        queryParameters: status == null ? null : {'status': status},
+      );
+      return (response.data as List)
+          .cast<Map<String, dynamic>>()
+          .map(MarketplaceOrder.fromJson)
+          .toList();
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  /// action: accept | decline | cancel | advance | ship | complete
+  Future<MarketplaceOrder> sellerOrderAction(
+    String id,
+    String action, {
+    String? reason,
+    String? trackingRef,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/seller/orders/$id/$action',
+        data: {
+          if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+          if (trackingRef != null && trackingRef.trim().isNotEmpty)
+            'trackingRef': trackingRef.trim(),
+        },
+      );
+      return MarketplaceOrder.fromJson(
+        Map<String, dynamic>.from(response.data as Map),
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  // ── Notifications ─────────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> notifications({int? limit}) async {
+    try {
+      final response = await _dio!.get(
+        '/notifications',
+        queryParameters: limit == null ? null : {'limit': limit},
+      );
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<int> notificationUnreadCount() async {
+    try {
+      final response = await _dio!.get('/notifications/unread-count');
+      return (Map<String, dynamic>.from(response.data as Map)['unread'] as num)
+          .toInt();
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> markNotificationRead(String id) async {
+    try {
+      final response = await _dio!.post('/notifications/$id/read');
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<int> markAllNotificationsRead() async {
+    try {
+      final response = await _dio!.post('/notifications/read-all');
+      return (Map<String, dynamic>.from(response.data as Map)['count'] as num)
+          .toInt();
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<void> deleteNotification(String id) async {
+    try {
+      await _dio!.delete('/notifications/$id');
+    } on DioException catch (e) {
+      throw _map(e);
     }
   }
 

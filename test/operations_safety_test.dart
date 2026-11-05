@@ -61,11 +61,12 @@ void main() {
           find.text('This parcel is delivered — lifecycle complete.'),
           status == 'DELIVERED' ? findsOneWidget : findsNothing,
         );
-        if (status == 'READY_FOR_LOADING')
+        if (status == 'READY_FOR_LOADING') {
           expect(
             find.textContaining('Awaiting physical loading'),
             findsOneWidget,
           );
+        }
         expect(tester.takeException(), isNull);
       }
     },
@@ -135,7 +136,7 @@ void main() {
           theme: AppTheme.build(),
           home: ConnectDeclarationForm(
             bookingId: 'b',
-            contents: '1 Laptop',
+            contents: '3 shirts; 2 pairs of shoes.',
             request: (path, {method = 'GET', data}) async {
               if (method == 'POST') {
                 sent = data;
@@ -161,13 +162,16 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.byKey(const ValueKey('declaration-confirm')),
+            )
+            .onPressed,
+        isNull,
+      );
       Future<void> show(Finder f) async {
         FocusManager.instance.primaryFocus?.unfocus();
-        await tester.pumpAndSettle();
-        tester
-            .state<ScrollableState>(find.byType(Scrollable).first)
-            .position
-            .jumpTo(0);
         await tester.pumpAndSettle();
         await tester.scrollUntilVisible(
           f,
@@ -178,16 +182,6 @@ void main() {
         await tester.pumpAndSettle();
       }
 
-      await show(find.byKey(const ValueKey('declaration-confirm')));
-      await show(find.byKey(const ValueKey('declaration-confirm')));
-      expect(
-        tester
-            .widget<FilledButton>(
-              find.byKey(const ValueKey('declaration-confirm')),
-            )
-            .onPressed,
-        isNull,
-      );
       for (var i = 0; i < 5; i++) {
         final f = find.byKey(ValueKey('declaration-check-$i'));
         await show(f);
@@ -197,13 +191,12 @@ void main() {
       }
       final name = find.byKey(const ValueKey('declaration-legal-name'));
       await show(name);
-      await tester.enterText(name, 'Kassoum');
+      await tester.enterText(name, 'Alex Morgan');
       await tester.pumpAndSettle();
       final electronic = find.byKey(const ValueKey('declaration-electronic'));
       await show(electronic);
       await tester.tap(electronic);
       await tester.pumpAndSettle();
-      await show(find.byKey(const ValueKey('declaration-confirm')));
       expect(
         tester
             .widget<FilledButton>(
@@ -216,7 +209,6 @@ void main() {
       await show(contents);
       await tester.enterText(contents, '4 shirts; 2 pairs of shoes.');
       await tester.pumpAndSettle();
-      await show(find.byKey(const ValueKey('declaration-check-0')));
       expect(
         tester
             .widget<CheckboxListTile>(
@@ -225,7 +217,6 @@ void main() {
             .value,
         false,
       );
-      await show(find.byKey(const ValueKey('declaration-confirm')));
       expect(
         tester
             .widget<FilledButton>(
@@ -301,8 +292,9 @@ void main() {
       'ARRIVED_PORT',
       'CUSTOMS_CLEARANCE',
       'CUSTOMS_CLEARED',
-    ])
+    ]) {
       expect(staffStatusOptionsFor(p(s, ShippingMethod.SEA)), isEmpty);
+    }
     expect(staffStatusOptionsFor(p('PROCESSING', ShippingMethod.AIR)), [
       'IN_TRANSIT',
     ]);

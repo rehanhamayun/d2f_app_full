@@ -464,13 +464,23 @@ class _RoutePlannerSheetState extends State<RoutePlannerSheet> {
           textEditingController: controller,
           focusNode: focus,
           optionsBuilder: (value) {
-            final query = value.text.toLowerCase().trim();
-            return kShippingLocationOptions
+            final foldedQuery = foldRouteText(value.text).trim();
+            if (foldedQuery.isEmpty) {
+              return kShippingLocationOptions.take(5).toList();
+            }
+            final locationHits = kShippingLocationOptions
                 .where(
-                  (option) =>
-                      query.isEmpty || option.toLowerCase().contains(query),
+                  (option) => foldRouteText(option).contains(foldedQuery),
                 )
-                .take(5);
+                .take(5)
+                .toList();
+            final countryHits = kCountryOptions
+                .where(
+                  (option) => foldRouteText(option).contains(foldedQuery),
+                )
+                .take(6)
+                .toList();
+            return [...locationHits, ...countryHits];
           },
           optionsViewBuilder: (context, select, options) => Align(
             alignment: Alignment.topLeft,

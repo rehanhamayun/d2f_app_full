@@ -14,6 +14,10 @@ import recoveryRouter from './routes/auth_recovery.js';
 import socialRouter from './routes/auth_social.js';
 import adminRouter from './routes/admin.js';
 import commerceRouter from './routes/commerce.js';
+import marketplaceRouter from './routes/marketplace.js';
+import sellerRouter from './routes/seller.js';
+import buyForMeRouter from './routes/buy_for_me.js';
+import notificationsRouter from './routes/notifications.js';
 import warehouseRouter from './routes/warehouse.js';
 import { authenticate } from './middleware/auth.js';
 import { authRateLimit } from './middleware/auth_rate_limit.js';
@@ -64,6 +68,10 @@ app.use('/warehouse', warehouseRouter);
 app.use('/label-print', labelPrintRouter);
 app.use('/operational-notes', operationalNotesRouter);
 app.use('/admin/commerce', commerceRouter);
+app.use('/marketplace', marketplaceRouter);
+app.use('/seller', sellerRouter);
+app.use('/buy-for-me', buyForMeRouter);
+app.use('/notifications', notificationsRouter);
 // Tracking-number possession reveals progress only, never people, contact
 // details, internal notes, actor identity, or the staff parcel record.
 app.get('/tracking/:trackingId', authenticate, authRateLimit(60), async (req, res, next) => {

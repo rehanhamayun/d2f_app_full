@@ -6,6 +6,7 @@ import 'package:d2f_application/models/models.dart';
 import 'package:d2f_application/providers/auth_provider.dart';
 import 'package:d2f_application/screens/role_workspace_screen.dart';
 import 'package:d2f_application/screens/connect_screen.dart';
+import 'package:d2f_application/screens/marketplace/buy_for_me_request_form.dart';
 import 'package:d2f_application/widgets/service_experience.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -117,17 +118,23 @@ void main() {
               .service,
           service,
         );
-        expect(
-          find
-                  .textContaining('Coming soon', findRichText: true)
-                  .evaluate()
-                  .isNotEmpty ||
-              find.textContaining('coming soon').evaluate().isNotEmpty,
-          isTrue,
-        );
         if (service == D2FService.buy || service == D2FService.marketplace) {
+          expect(
+            find.textContaining(
+              service == D2FService.buy ? 'See it. Send it.' : 'Global favourites.',
+            ),
+            findsOneWidget,
+          );
           await tester.tap(find.byKey(const ValueKey('nav-home')));
         } else {
+          expect(
+            find
+                    .textContaining('Coming soon', findRichText: true)
+                    .evaluate()
+                    .isNotEmpty ||
+                find.textContaining('coming soon').evaluate().isNotEmpty,
+            isTrue,
+          );
           await tester.pageBack();
         }
         await tester.pumpAndSettle();
@@ -138,53 +145,53 @@ void main() {
   );
 
   testWidgets(
-    'shopping modes, category search, country selection and enquiry actions work',
+    'shopping screens render their live storefront and forms validate offline',
     (tester) async {
       viewport(tester, 390);
-      var enquiries = 0;
+
+      // Buy For Me: hero, request CTA and request form validation.
       await tester.pumpWidget(
         wrap(
-          D2FServiceScreen(
+          const D2FServiceScreen(
+            key: ValueKey('buy'),
             service: D2FService.buy,
-            onContact: () => enquiries++,
           ),
         ),
       );
       await tester.pumpAndSettle();
-      await reveal(tester, find.byKey(const ValueKey('buy-mode-1')));
-      await tester.tap(find.byKey(const ValueKey('buy-mode-1')));
+      expect(find.textContaining('See it. Send it.'), findsOneWidget);
+      await reveal(tester, find.textContaining('Start a purchase request'));
+      expect(find.textContaining('Start a purchase request'), findsOneWidget);
+      await tester.tap(find.textContaining('Start a purchase request'));
       await tester.pumpAndSettle();
-      expect(find.text('Your shopping. One shipment.'), findsOneWidget);
-      await reveal(tester, find.byKey(const ValueKey('service-contact')));
-      await tester.tap(find.byKey(const ValueKey('service-contact')));
-      expect(enquiries, 1);
+      expect(find.byType(BuyForMeRequestFormScreen), findsOneWidget);
+      await tester.tap(find.text('Send request'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Describe the item (at least a few words).'),
+        findsOneWidget,
+      );
+      await tester.pageBack();
 
+      // Marketplace: storefront renders, offline failure shows retry.
       await tester.pumpWidget(
         wrap(
           const D2FServiceScreen(
-            key: ValueKey('market'),
+            key: ValueKey('marketplace'),
             service: D2FService.marketplace,
           ),
         ),
       );
       await tester.pumpAndSettle();
-      await reveal(tester, find.byKey(const ValueKey('marketplace-search')));
-      await tester.enterText(
-        find.byKey(const ValueKey('marketplace-search')),
-        'beauty',
-      );
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('market-category-4')), findsOneWidget);
-      expect(find.byKey(const ValueKey('market-category-1')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('market-category-4')));
-      await tester.pumpAndSettle();
-      expect(find.text('A little everyday care'), findsOneWidget);
-      await tester.enterText(
-        find.byKey(const ValueKey('marketplace-search')),
-        'unknown',
-      );
-      await tester.pumpAndSettle();
-      expect(find.textContaining('No matching categories'), findsOneWidget);
+      expect(find.textContaining('Global favourites.'), findsOneWidget);
+      expect(find.byType(TextField), findsOneWidget);
+      await reveal(tester, find.text('My orders'));
+      expect(find.text('My orders'), findsOneWidget);
+      expect(find.text('Sell on D2F'), findsWidgets);
+      // The test environment has no network: the storefront shows its
+      // safe offline state instead of crashing.
+      await reveal(tester, find.text('We couldn’t load the marketplace'));
+      expect(find.text('We couldn’t load the marketplace'), findsOneWidget);
 
       await tester.pumpWidget(
         wrap(
@@ -222,7 +229,12 @@ void main() {
           );
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull, reason: service.name);
-          await reveal(tester, find.byKey(const ValueKey('service-contact')));
+          if (service == D2FService.buy || service == D2FService.marketplace) {
+            // Live storefronts: the contact icon lives in the app bar.
+            expect(find.byTooltip('Contact D2F'), findsOneWidget);
+          } else {
+            await reveal(tester, find.byKey(const ValueKey('service-contact')));
+          }
           expect(tester.takeException(), isNull, reason: service.name);
         }
       },

@@ -118,8 +118,9 @@ void main() {
         Map<String, dynamic>? data,
       }) async {
         if (path == '/catalog') return {'trips': [], 'rates': []};
-        if (path == '/trips' || path == '/bookings' && method == 'GET')
+        if (path == '/trips' || path == '/bookings' && method == 'GET') {
           return [];
+        }
         if (path == '/bookings' && method == 'POST') {
           submitted = data;
           saved = {

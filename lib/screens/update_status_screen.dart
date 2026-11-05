@@ -166,8 +166,9 @@ class _UpdateStatusScreenState extends State<UpdateStatusScreen> {
     if (_selected == null) return 'Select a new status first.';
     if (_operationalNote.isEmpty ||
         (_operationalNote.containsKey('customMessage') &&
-            '${_operationalNote['customMessage']}'.trim().isEmpty))
+            '${_operationalNote['customMessage']}'.trim().isEmpty)) {
       return 'Select an operational message or enter a custom message.';
+    }
     if (_needsFacility && _locationId == null) {
       return 'Select the D2F facility where this update is taking place.';
     }

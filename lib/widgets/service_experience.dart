@@ -3,12 +3,15 @@ import 'package:flutter/services.dart';
 
 import '../core/theme.dart';
 import '../screens/connect_screen.dart';
+import '../screens/marketplace/buy_for_me_shop.dart';
+import '../screens/marketplace/marketplace_shop.dart';
 import 'service_hero.dart';
 import 'service_card_art.dart';
 import 'common.dart';
 
 /// The service catalogue is shared by customer and operations workspaces.
-/// Shopping services are previews until their APIs are available.
+/// Marketplace and Buy For Me are live against the D2F API; business and
+/// load boards remain previews.
 enum D2FService {
   shipping(
     'International\nShipping',
@@ -638,8 +641,8 @@ class _SectionHeading extends StatelessWidget {
   );
 }
 
-/// Dedicated, navigable service previews. No inventory, prices, orders or
-/// delivery coverage are invented when a service has no connected backend.
+/// Dedicated, navigable service views. Marketplace and Buy For Me run
+/// against the live API; previews never invent inventory or prices.
 class D2FServiceScreen extends StatefulWidget {
   final D2FService service;
   final VoidCallback? onContact, onProfile, onNotifications;
@@ -657,16 +660,7 @@ class D2FServiceScreen extends StatefulWidget {
 }
 
 class _D2FServiceScreenState extends State<D2FServiceScreen> {
-  int _buyMode = 0, _category = 0;
-  String _country = 'Togo', _search = '';
-  static const _categories = [
-    ('All', Icons.apps_rounded, 'Explore the planned collection'),
-    ('Electronics', Icons.headphones_rounded, 'Tech for your everyday life'),
-    ('Fashion', Icons.checkroom_rounded, 'Find your next favourite'),
-    ('Home', Icons.chair_rounded, 'Good things for your space'),
-    ('Beauty', Icons.spa_rounded, 'A little everyday care'),
-    ('African finds', Icons.public_rounded, 'Discover local creativity'),
-  ];
+  String _country = 'Togo';
 
   void _contact() {
     if (widget.onContact != null) {
@@ -684,6 +678,72 @@ class _D2FServiceScreenState extends State<D2FServiceScreen> {
   @override
   Widget build(BuildContext context) {
     final service = widget.service;
+    final immersive = service == D2FService.buy || service == D2FService.marketplace;
+    if (immersive) {
+      return Scaffold(
+        backgroundColor: AppColors.cream,
+        appBar: widget.embedded
+            ? null
+            : AppBar(
+                title: Text(service.label),
+                actions: [
+                  IconButton(
+                    onPressed: _contact,
+                    tooltip: 'Contact D2F',
+                    icon: const Icon(Icons.support_agent_rounded),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+              ),
+        body: SafeArea(
+          top: widget.embedded,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 600),
+              child: Column(
+                children: [
+                  if (widget.embedded)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 6, 18, 0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          D2FHomeHeader(
+                            onBell: widget.onNotifications,
+                            onProfile: widget.onProfile,
+                            dense: true,
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            service == D2FService.buy
+                                ? 'Buy For Me / Ship For Me'
+                                : service.label,
+                            style: TextStyle(
+                              color: service.color,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -.8,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                      ),
+                    ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: service == D2FService.marketplace
+                          ? const MarketplaceShop()
+                          : const BuyForMeShop(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: AppColors.cream,
       appBar: widget.embedded
@@ -730,10 +790,6 @@ class _D2FServiceScreenState extends State<D2FServiceScreen> {
                 ],
                 if (service == D2FService.local)
                   ..._local()
-                else if (service == D2FService.buy)
-                  ..._buy()
-                else if (service == D2FService.marketplace)
-                  ..._marketplace()
                 else if (service == D2FService.africa)
                   ..._africa()
                 else if (service.isComingSoon)
@@ -823,250 +879,6 @@ class _D2FServiceScreenState extends State<D2FServiceScreen> {
     ),
     _contactButton('Enquire about Omaha delivery'),
   ];
-
-  List<Widget> _buy() => [
-    const ServiceHero(
-      image: 'buy',
-      eyebrow: '02 / SHOP & SHIP',
-      title: 'You find it.\nWe bring it closer.',
-      description: 'Your favourite U.S. stores, with a little help\nfrom D2F. Shopping across borders, simplified.',
-      color: Color(0xFF821D40),
-    ),
-    _notice(
-      'Coming soon · Buy For Me and Ship For Me are being prepared. Contact our team for current shopping and forwarding options.',
-    ),
-    const SizedBox(height: 24),
-    const _SectionHeading(
-      title: 'Two ways to make it yours',
-      subtitle: 'Choose the service you want to explore.',
-    ),
-    const SizedBox(height: 14),
-    LayoutBuilder(
-      builder: (context, c) => Wrap(
-        spacing: 10,
-        runSpacing: 10,
-        children: [
-          for (final entry in [
-            (Icons.shopping_bag_rounded, 'Buy For Me', 'We help you buy.'),
-            (Icons.inventory_2_rounded, 'Ship For Me', 'You buy. We forward.'),
-          ].asMap().entries)
-            SizedBox(
-              width: (c.maxWidth - 10) / 2,
-              child: _ChoicePanel(
-                key: ValueKey('buy-mode-${entry.key}'),
-                selected: _buyMode == entry.key,
-                color: widget.service.color,
-                tint: widget.service.tint,
-                icon: entry.value.$1,
-                title: entry.value.$2,
-                subtitle: entry.value.$3,
-                onTap: () => setState(() => _buyMode = entry.key),
-              ),
-            ),
-        ],
-      ),
-    ),
-    const SizedBox(height: 24),
-    _SectionHeading(
-      title: _buyMode == 0
-          ? 'Your wish list. Our next steps.'
-          : 'Your shopping. One shipment.',
-    ),
-    const SizedBox(height: 8),
-    for (final entry
-        in (_buyMode == 0
-                ? [
-                    (
-                      'Share what you love',
-                      'Send the product link, size, colour and quantity to our team.',
-                    ),
-                    (
-                      'Review your quotation',
-                      'D2F confirms purchasing options, costs and availability.',
-                    ),
-                    (
-                      'Bring it all together',
-                      'Once arranged, your items are received and prepared for shipping.',
-                    ),
-                    (
-                      'Send it closer to home',
-                      'The team confirms your destination and shipping arrangements.',
-                    ),
-                  ]
-                : [
-                    (
-                      'Talk to D2F first',
-                      'Confirm warehouse instructions and item restrictions before buying.',
-                    ),
-                    (
-                      'Shop your favourite stores',
-                      'Buy directly using the receiving details confirmed by D2F.',
-                    ),
-                    (
-                      'Consolidate your purchases',
-                      'Ask our team about combining items into one shipment.',
-                    ),
-                    (
-                      'Arrange the journey',
-                      'Confirm shipping costs and destination with the D2F team.',
-                    ),
-                  ])
-            .asMap()
-            .entries)
-      _StepTile(
-        number: entry.key + 1,
-        title: entry.value.$1,
-        description: entry.value.$2,
-        color: widget.service.color,
-      ),
-    const SizedBox(height: 20),
-    Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Have a store in mind?',
-            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-          ),
-          SizedBox(height: 8),
-          Text(
-            'Share a link from Amazon, Walmart, eBay or another U.S. store. Our team can confirm what is possible.',
-            style: TextStyle(
-              fontSize: 12,
-              height: 1.6,
-              color: AppColors.textGrey,
-            ),
-          ),
-        ],
-      ),
-    ),
-    _contactButton('Ask about ${_buyMode == 0 ? 'Buy For Me' : 'Ship For Me'}'),
-  ];
-
-  List<Widget> _marketplace() {
-    final matches = _categories
-        .asMap()
-        .entries
-        .where((e) => e.value.$1.toLowerCase().contains(_search.toLowerCase()))
-        .toList();
-    return [
-      const ServiceHero(
-        image: 'marketplace',
-        eyebrow: '03 / D2F MARKETPLACE',
-        title: 'Local treasures.\nGlobal favourites.',
-        description: 'A new way to discover, shop and connect.\nFrom your community to the world.',
-        color: Color(0xFF74400D),
-      ),
-      _notice(
-        'Coming soon · The D2F Marketplace is taking shape. Product listings, sellers and checkout are not available yet.',
-      ),
-      const SizedBox(height: 22),
-      TextField(
-        key: const ValueKey('marketplace-search'),
-        onChanged: (value) => setState(() => _search = value.trim()),
-        decoration: const InputDecoration(
-          hintText: 'Explore planned categories',
-          prefixIcon: Icon(Icons.search_rounded),
-        ),
-      ),
-      const SizedBox(height: 22),
-      const _SectionHeading(
-        title: 'Find your kind of good',
-        subtitle: 'A first look at the categories we are planning.',
-      ),
-      const SizedBox(height: 14),
-      if (matches.isEmpty)
-        const Padding(
-          padding: EdgeInsets.all(16),
-          child: Text(
-            'No matching categories. Try fashion, home or beauty.',
-            style: AppTheme.caption,
-          ),
-        ),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final e in matches)
-            ChoiceChip(
-              key: ValueKey('market-category-${e.key}'),
-              selected: _category == e.key,
-              onSelected: (_) => setState(() => _category = e.key),
-              avatar: Icon(e.value.$2, size: 17, color: widget.service.color),
-              label: Text(e.value.$1),
-              selectedColor: widget.service.tint,
-              backgroundColor: Colors.white,
-              side: BorderSide(
-                color: _category == e.key
-                    ? widget.service.color
-                    : AppColors.border,
-              ),
-              labelStyle: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
-              showCheckmark: false,
-            ),
-        ],
-      ),
-      const SizedBox(height: 20),
-      Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(
-          children: [
-            ServiceIcon(service: D2FService.marketplace, size: 64),
-            const SizedBox(height: 18),
-            Text(
-              _categories[_category].$3,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -.6,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              _category == 0
-                  ? 'We’re making room for local sellers and international discoveries. Come back for the launch.'
-                  : '${_categories[_category].$1} listings will appear here when Marketplace launches.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 12,
-                height: 1.7,
-                color: AppColors.textGrey,
-              ),
-            ),
-          ],
-        ),
-      ),
-      const SizedBox(height: 22),
-      const _SectionHeading(title: 'Built for a connected community'),
-      const SizedBox(height: 12),
-      _feature(
-        Icons.storefront_outlined,
-        'For local businesses',
-        'Bring your products to a wider community.',
-      ),
-      _feature(
-        Icons.public_rounded,
-        'For shoppers everywhere',
-        'Discover products from Africa and beyond.',
-      ),
-      _contactButton('Enquire about selling with D2F'),
-    ];
-  }
 
   List<Widget> _africa() => [
     const ServiceHero(
@@ -1228,140 +1040,3 @@ class _D2FServiceScreenState extends State<D2FServiceScreen> {
   );
 }
 
-class _ChoicePanel extends StatelessWidget {
-  final bool selected;
-  final Color color, tint;
-  final IconData icon;
-  final String title, subtitle;
-  final VoidCallback onTap;
-  const _ChoicePanel({
-    super.key,
-    required this.selected,
-    required this.color,
-    required this.tint,
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-  @override
-  Widget build(BuildContext context) => Semantics(
-    selected: selected,
-    button: true,
-    child: Material(
-      color: selected ? tint : Colors.white,
-      borderRadius: BorderRadius.circular(20),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: selected ? color : AppColors.border,
-              width: selected ? 1.5 : 1,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(icon, color: color, size: 28),
-                  const Spacer(),
-                  Icon(
-                    selected
-                        ? Icons.check_circle_rounded
-                        : Icons.circle_outlined,
-                    size: 18,
-                    color: selected ? color : AppColors.border,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 15),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                subtitle,
-                style: const TextStyle(
-                  fontSize: 11,
-                  height: 1.5,
-                  color: AppColors.textGrey,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    ),
-  );
-}
-
-class _StepTile extends StatelessWidget {
-  final int number;
-  final String title, description;
-  final Color color;
-  const _StepTile({
-    required this.number,
-    required this.title,
-    required this.description,
-    required this.color,
-  });
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 12),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 32,
-          height: 32,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: .1),
-            shape: BoxShape.circle,
-          ),
-          child: Text(
-            '$number'.padLeft(2, '0'),
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 11,
-              color: color,
-            ),
-          ),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                description,
-                style: const TextStyle(
-                  fontSize: 11,
-                  height: 1.65,
-                  color: AppColors.textGrey,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    ),
-  );
-}

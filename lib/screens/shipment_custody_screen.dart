@@ -1,4 +1,3 @@
-import 'direct_label_print_screen.dart';
 import '../widgets/operational_note_field.dart';
 import 'scan_screen.dart';
 
@@ -39,8 +38,9 @@ class ShipmentCustodyCard extends StatelessWidget {
         !intake &&
         !dispatch &&
         parcel.status != 'OUT_FOR_DELIVERY' &&
-        !legacyPickup)
+        !legacyPickup) {
       return const SizedBox.shrink();
+    }
     Future<void> open(String mode) async {
       await Navigator.push(
         context,
@@ -175,15 +175,17 @@ class _ShipmentCustodyScreenState extends State<ShipmentCustodyScreen> {
         request('/warehouse/locations'),
         if (_schedule || _dispatch) request('/parcels/drivers/active'),
       ]);
-      if (mounted)
+      if (mounted) {
         setState(() {
           _locations = r[0];
           _drivers = r.length > 1 ? r[1] : [];
           if (!_drivers.any((d) => d['id'] == _driverId)) _driverId = null;
           if (_locations.length == 1) _locationId = _locations.first['id'];
-          if (!_locations.any((l) => l['id'] == _locationId))
+          if (!_locations.any((l) => l['id'] == _locationId)) {
             _locationId = null;
+          }
         });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     } finally {
@@ -202,18 +204,18 @@ class _ShipmentCustodyScreenState extends State<ShipmentCustodyScreen> {
     FocusScope.of(context).unfocus();
     final expected = widget.parcel.items.where((i) => !i.missed).toList();
     String? invalid;
-    if (_locationId == null)
+    if (_locationId == null) {
       invalid = 'Select the actual receiving facility.';
-    else if ((_schedule || _dispatch) && _driverId == null)
+    } else if ((_schedule || _dispatch) && _driverId == null)
       invalid = 'Select an active D2F driver.';
     else if (_schedule && _appointment == null)
       invalid = 'Choose the confirmed pickup appointment.';
     else if (!_schedule && !_dispatch) {
       final scan = _scan.text.trim().toUpperCase();
       if (scan != widget.parcel.trackingId &&
-          !widget.parcel.items.any((i) => i.packageCode == scan))
+          !widget.parcel.items.any((i) => i.packageCode == scan)) {
         invalid = 'Scan or enter this shipment’s tracking number.';
-      else if (_verified.length != expected.length)
+      } else if (_verified.length != expected.length)
         invalid = 'Check every physical package received.';
       else if (_operationalNote.isEmpty ||
           (_operationalNote.containsKey('customMessage') &&
@@ -221,8 +223,9 @@ class _ShipmentCustodyScreenState extends State<ShipmentCustodyScreen> {
         invalid =
             'Select an inspection message or enter Other - Custom Message.';
     }
-    if (invalid == null && !_confirmed)
+    if (invalid == null && !_confirmed) {
       invalid = 'Confirm that you physically verified this handover.';
+    }
     if (invalid != null) {
       setState(() => _error = invalid);
       return;
@@ -333,17 +336,6 @@ class _ShipmentCustodyScreenState extends State<ShipmentCustodyScreen> {
                   ],
                 ),
               ),
-              TextButton.icon(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        DirectLabelPrintScreen(parcel: widget.parcel),
-                  ),
-                ),
-                icon: const Icon(Icons.print_outlined),
-                label: const Text('Print Label'),
-              ),
               const SizedBox(height: 8),
               Text(
                 _schedule
@@ -421,7 +413,7 @@ class _ShipmentCustodyScreenState extends State<ShipmentCustodyScreen> {
                       context: context,
                       initialTime: TimeOfDay.fromDateTime(initial),
                     );
-                    if (t != null && mounted)
+                    if (t != null && mounted) {
                       setState(
                         () => _appointment = DateTime(
                           d.year,
@@ -431,6 +423,7 @@ class _ShipmentCustodyScreenState extends State<ShipmentCustodyScreen> {
                           t.minute,
                         ),
                       );
+                    }
                   },
                   icon: const Icon(Icons.calendar_month),
                   label: Text(
@@ -449,8 +442,9 @@ class _ShipmentCustodyScreenState extends State<ShipmentCustodyScreen> {
                         builder: (_) => const ScanScreen(returnTracking: true),
                       ),
                     );
-                    if (code != null && mounted)
+                    if (code != null && mounted) {
                       setState(() => _scan.text = code);
+                    }
                   },
                   icon: const Icon(Icons.qr_code_scanner),
                   label: const Text('Scan physical parcel label'),
@@ -572,11 +566,12 @@ class _DriverTasksScreenState extends State<DriverTasksScreen> {
   Future<void> _load() async {
     try {
       final rows = await _request('/driver/tasks');
-      if (mounted)
+      if (mounted) {
         setState(() {
           _tasks = rows;
           _error = null;
         });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     } finally {
@@ -614,8 +609,9 @@ class _DriverTasksScreenState extends State<DriverTasksScreen> {
                               const ScanScreen(returnTracking: true),
                         ),
                       );
-                      if (code != null && context.mounted)
+                      if (code != null && context.mounted) {
                         setDialog(() => scan.text = code);
+                      }
                     },
                     icon: const Icon(Icons.qr_code_scanner),
                     label: const Text('Scan physical label'),
@@ -802,19 +798,6 @@ class _DriverTasksScreenState extends State<DriverTasksScreen> {
                         'Confirmed appointment: ${DateFormat('MMM d · h:mm a').format(DateTime.parse(raw['pickupScheduledAt']).toLocal())}',
                       ),
                     const SizedBox(height: 14),
-                    OutlinedButton.icon(
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => DirectLabelPrintScreen(
-                            parcelId: raw['id'],
-                            trackingId: raw['trackingId'],
-                          ),
-                        ),
-                      ),
-                      icon: const Icon(Icons.print_outlined),
-                      label: const Text('Print Label'),
-                    ),
                     FilledButton.icon(
                       onPressed: _busy
                           ? null

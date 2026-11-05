@@ -177,11 +177,13 @@ void main() {
       );
       await capture('02b-future-services');
       await tapText('Marketplace');
-      await capture('02c-marketplace-coming-soon');
-      await tapText('Got it');
+      await waitFor(find.textContaining('Global favourites'));
+      await capture('02c-marketplace');
+      await tester.pageBack();
       await tapText('Buy For Me');
-      expect(find.textContaining('Buy For Me is coming'), findsOneWidget);
-      await tapText('Got it');
+      await waitFor(find.textContaining('See it. Send it.'));
+      await capture('02d-buy-for-me');
+      await tester.pageBack();
 
       await tapText('Sea');
       await waitFor(find.text('Customer Information'));

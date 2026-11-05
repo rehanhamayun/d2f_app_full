@@ -80,8 +80,9 @@ class ShipScreenState extends State<ShipScreen> {
     if (_saving) return;
     setState(() {
       if (isUsRoute(_origin) != isUsRoute(route.origin)) _pickupAddress.clear();
-      if (isUsRoute(_destination) != isUsRoute(route.destination))
+      if (isUsRoute(_destination) != isUsRoute(route.destination)) {
         _recipientAddress.clear();
+      }
       _origin = route.origin;
       _destination = route.destination;
       _method = route.method;
@@ -548,8 +549,9 @@ class ShipScreenState extends State<ShipScreen> {
                                     ),
                                 ],
                                 onChanged: (v) => setState(() {
-                                  if (isUsRoute(_origin) != isUsRoute(v))
+                                  if (isUsRoute(_origin) != isUsRoute(v)) {
                                     _pickupAddress.clear();
+                                  }
                                   _origin = v;
                                 }),
                                 decoration: const InputDecoration(
@@ -599,8 +601,9 @@ class ShipScreenState extends State<ShipScreen> {
                                     ),
                                 ],
                                 onChanged: (v) => setState(() {
-                                  if (isUsRoute(_destination) != isUsRoute(v))
+                                  if (isUsRoute(_destination) != isUsRoute(v)) {
                                     _recipientAddress.clear();
+                                  }
                                   _destination = v;
                                 }),
                                 decoration: const InputDecoration(

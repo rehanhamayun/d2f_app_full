@@ -3,6 +3,8 @@ import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { resolveOrganizationId } from '../tracking.js';
 import { fail, warehouseLock } from '../warehouse.js';
+import { commissionFor, releaseStock } from '../shopfront.js';
+import { createNotification } from '../notifications.js';
 const router = Router();
 router.use(authenticate, requireRole('ADMIN'), async (req, res, next) => {
   try { req.organizationId = await resolveOrganizationId(prisma, req.user); next(); } catch (e) { next(e); }
@@ -10,7 +12,7 @@ router.use(authenticate, requireRole('ADMIN'), async (req, res, next) => {
 const validText = (v, max = 200) => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
 const validAmount = v => Number.isSafeInteger(v) && v >= 0 && v <= 1000000000;
 const currencies = ['USD', 'EUR', 'XOF'];
-const orderInclude = { customer: { select: { id: true, displayName: true } }, product: { select: { title: true } }, parcel: { select: { trackingId: true, id: true } } };
+const orderInclude = { customer: { select: { id: true, displayName: true } }, product: { select: { title: true } }, parcel: { select: { trackingId: true, id: true } }, seller: { select: { id: true, displayName: true } } };
 const transitions = {
   MARKETPLACE: { REQUESTED: ['ACCEPTED', 'CANCELLED'], ACCEPTED: ['PROCESSING', 'CANCELLED'], PROCESSING: ['SHIPPED', 'CANCELLED'], SHIPPED: ['COMPLETED'], COMPLETED: [], CANCELLED: [] },
   BUY_FOR_ME: { REQUESTED: ['QUOTED', 'CANCELLED'], QUOTED: ['ACCEPTED', 'CANCELLED'], ACCEPTED: ['PURCHASED', 'CANCELLED'], PURCHASED: ['RECEIVED'], RECEIVED: ['SHIPPED'], SHIPPED: ['COMPLETED'], COMPLETED: [], CANCELLED: [] },
@@ -18,6 +20,183 @@ const transitions = {
 async function audit(tx, req, entity, id, action, detail) {
   await tx.auditLog.create({ data: { actorId: req.user.id, action, entity, entityId: id, detail } });
 }
+// ── Marketplace sellers ──────────────────────────────────────────────────────
+// Self-serve applicants and D2F-onboarded sellers share one review flow. The
+// commission rate is agreed in this step — before any sale can take place.
+
+const sellerStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED'];
+const validBps = (v) => Number.isSafeInteger(v) && v >= 0 && v <= 5000;
+
+const sellerInclude = {
+  user: { select: { id: true, fullName: true, email: true, phone: true, createdAt: true } },
+  _count: { select: { products: true, orders: true } },
+};
+
+router.get('/sellers', async (req, res, next) => {
+  try {
+    const status = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : null;
+    if (status && !sellerStatuses.includes(status)) fail(400, 'Choose a valid seller status.');
+    const sellers = await prisma.sellerProfile.findMany({
+      where: { organizationId: req.organizationId, ...(status ? { status } : {}) },
+      include: sellerInclude,
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      take: 200,
+    });
+    res.json(sellers);
+  } catch (e) { next(e); }
+});
+
+// Admin onboarding: register an app account as an approved seller without the
+// in-app application. The person must already have a D2F account (a customer
+// profile linked to the app); D2F agrees the commission rate here.
+router.post('/sellers', async (req, res, next) => {
+  try {
+    const { customerId, displayName, businessType = 'INDIVIDUAL', businessName, category, country, city, phone, commissionBps = 1000, headline, bio } = req.body || {};
+    if (typeof customerId !== 'string') fail(400, 'Choose the customer account to register as a seller.');
+    if (!validBps(commissionBps)) fail(400, 'Commission must be between 0% and 50%.');
+    if (businessType !== 'INDIVIDUAL' && businessType !== 'BUSINESS') fail(400, 'Choose individual or business.');
+    const result = await prisma.$transaction(async (tx) => {
+      await warehouseLock(tx, req.organizationId);
+      const customer = await tx.customer.findFirst({ where: { id: customerId, organizationId: req.organizationId }, include: { user: { select: { id: true, fullName: true, email: true, phone: true } } } });
+      if (!customer) fail(404, 'Customer not found.');
+      if (!customer.userId || !customer.user) fail(400, 'This customer profile has no app account yet. Ask them to register in the app, then register them as a seller.');
+      if (!validText(displayName ?? customer.displayName, 120)) fail(400, 'Enter a seller name.');
+      if (!validText(category, 80)) fail(400, 'Enter the seller’s main category.');
+      const effectiveCountry = typeof country === 'string' && country.trim() ? country.trim() : customer.country;
+      if (!validText(effectiveCountry, 80)) fail(400, 'Enter the seller’s country.');
+      const effectivePhone = typeof phone === 'string' && phone.trim() ? phone.trim() : customer.phone || customer.user.phone;
+      if (!validText(effectivePhone, 40)) fail(400, 'Enter a contact phone.');
+      if (businessType === 'BUSINESS' && !validText(businessName, 160)) fail(400, 'Enter the business name.');
+      const created = await tx.sellerProfile.create({
+        data: {
+          organizationId: req.organizationId,
+          userId: customer.userId,
+          status: 'APPROVED',
+          displayName: (displayName?.trim() || customer.displayName).trim(),
+          businessType,
+          businessName: businessType === 'BUSINESS' ? businessName.trim() : null,
+          headline: headline?.trim() || null,
+          bio: bio?.trim() || null,
+          category: category.trim(),
+          phone: effectivePhone.trim(),
+          email: customer.user.email,
+          country: effectiveCountry,
+          city: (typeof city === 'string' && city.trim()) || customer.city,
+          commissionBps,
+          reviewedAt: new Date(),
+          reviewedById: req.user.id,
+          reviewNote: 'Registered by D2F administrator',
+        },
+        include: sellerInclude,
+      });
+      await audit(tx, req, 'SellerProfile', created.id, 'SELLER_ADMIN_REGISTER', created.displayName);
+      return created;
+    });
+    res.status(201).json(result);
+  } catch (e) {
+    if (e?.code === 'P2002') return next(Object.assign(new Error('This account already has a seller profile.'), { status: 409 }));
+    next(e);
+  }
+});
+
+const sellerActions = {
+  approve: { from: ['PENDING', 'REJECTED'], to: 'APPROVED', requireNote: false, label: 'SELLER_APPROVE' },
+  reject: { from: ['PENDING'], to: 'REJECTED', requireNote: true, label: 'SELLER_REJECT' },
+  suspend: { from: ['APPROVED'], to: 'SUSPENDED', requireNote: true, label: 'SELLER_SUSPEND' },
+  reinstate: { from: ['SUSPENDED'], to: 'APPROVED', requireNote: false, label: 'SELLER_REINSTATE' },
+};
+
+router.patch('/sellers/:id', async (req, res, next) => {
+  try {
+    const { action, commissionBps, reviewNote } = req.body || {};
+    const rule = sellerActions[action];
+    if (!rule) fail(400, 'Choose approve, reject, suspend or reinstate.');
+    const note = typeof reviewNote === 'string' ? reviewNote.trim() : '';
+    if (rule.requireNote && !validText(note, 500)) fail(400, 'Add a short note the seller will see.');
+    if (commissionBps !== undefined && !validBps(commissionBps)) fail(400, 'Commission must be between 0% and 50%.');
+    const result = await prisma.$transaction(async (tx) => {
+      await warehouseLock(tx, req.organizationId);
+      const existing = await tx.sellerProfile.findFirst({ where: { id: req.params.id, organizationId: req.organizationId } });
+      if (!existing) fail(404, 'Seller not found.');
+      if (!rule.from.includes(existing.status)) fail(409, `This seller is ${existing.status.toLowerCase()} — refresh and try again.`);
+      const data = {
+        status: rule.to,
+        reviewNote: note || null,
+        reviewedAt: new Date(),
+        reviewedById: req.user.id,
+      };
+      // The commission rate is agreed at approval — before the first sale.
+      if (action === 'approve' && commissionBps !== undefined) data.commissionBps = commissionBps;
+      const updated = await tx.sellerProfile.update({ where: { id: existing.id }, data, include: sellerInclude });
+      await audit(tx, req, 'SellerProfile', existing.id, rule.label, note || `${existing.status} → ${rule.to}${data.commissionBps != null ? ` · commission ${data.commissionBps}bps` : ''}`);
+      if (rule.to === 'APPROVED') {
+        const sellerUser = await tx.user.findUnique({ where: { id: existing.userId }, select: { id: true, fullName: true } });
+        if (sellerUser) {
+          await createNotification({
+            userId: sellerUser.id,
+            type: 'SELLER_APPROVED',
+            title: 'Your D2F seller account is approved',
+            body: data.commissionBps != null ? `Commission agreed at ${(data.commissionBps / 100).toFixed(2)}%. You can now publish your listings.` : 'You can now publish your listings.',
+          });
+        }
+      }
+      return updated;
+    });
+    res.json(result);
+  } catch (e) { next(e); }
+});
+
+// Commission report: merchandise volume and D2F earnings per seller for a
+// period. D2F catalog sales carry no commission; cancelled orders are excluded.
+router.get('/commissions', async (req, res, next) => {
+  try {
+    const now = new Date();
+    const from = req.query.from ? new Date(req.query.from) : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const to = req.query.to ? new Date(req.query.to) : now;
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) fail(400, 'Choose a valid date range.');
+    const baseWhere = { organizationId: req.organizationId, kind: 'MARKETPLACE', createdAt: { gte: from, lte: to }, status: { not: 'CANCELLED' } };
+    // Money never sums across currencies; report each currency separately.
+    const [byCurrency, bySeller] = await prisma.$transaction([
+      prisma.serviceOrder.groupBy({
+        by: ['currency'],
+        where: { ...baseWhere, commissionBps: { not: null } },
+        _count: { _all: true },
+        _sum: { amountMinor: true, commissionMinor: true },
+        orderBy: { currency: 'asc' },
+      }),
+      prisma.serviceOrder.groupBy({
+        by: ['sellerId', 'currency'],
+        where: { ...baseWhere, sellerId: { not: null } },
+        _count: { _all: true },
+        _sum: { amountMinor: true, commissionMinor: true },
+        orderBy: [{ sellerId: 'asc' }, { currency: 'asc' }],
+      }),
+    ]);
+    const sellers = bySeller.length
+      ? await prisma.sellerProfile.findMany({ where: { id: { in: [...new Set(bySeller.map((row) => row.sellerId))] } }, select: { id: true, displayName: true } })
+      : [];
+    const nameById = new Map(sellers.map((seller) => [seller.id, seller.displayName]));
+    res.json({
+      from,
+      to,
+      currencies: byCurrency.map((row) => ({
+        currency: row.currency,
+        orders: row._count._all,
+        merchandiseMinor: row._sum.amountMinor ?? 0,
+        commissionMinor: row._sum.commissionMinor ?? 0,
+      })),
+      sellers: bySeller.map((row) => ({
+        sellerId: row.sellerId,
+        displayName: nameById.get(row.sellerId) ?? 'Former seller',
+        currency: row.currency,
+        orders: row._count._all,
+        merchandiseMinor: row._sum.amountMinor ?? 0,
+        commissionMinor: row._sum.commissionMinor ?? 0,
+      })),
+    });
+  } catch (e) { next(e); }
+});
+
 router.get('/:kind', async (req, res, next) => {
   try {
     const kind = req.params.kind.toUpperCase();
@@ -28,7 +207,7 @@ router.get('/:kind', async (req, res, next) => {
     const [orders, total, products] = await prisma.$transaction([
       prisma.serviceOrder.findMany({ where, include: orderInclude, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], take: limit, skip: offset }),
       prisma.serviceOrder.count({ where }),
-      prisma.product.findMany({ where: { organizationId: req.organizationId }, orderBy: { title: 'asc' } }),
+      prisma.product.findMany({ where: { organizationId: req.organizationId }, orderBy: { title: 'asc' }, include: { seller: { select: { id: true, displayName: true } } } }),
     ]);
     res.json({ orders, total, products, limit, offset, transitions: transitions[kind] });
   } catch (e) { next(e); }
@@ -47,9 +226,10 @@ router.post('/products', async (req, res, next) => {
 });
 router.patch('/products/:id', async (req, res, next) => {
   try {
-    const { isActive, title, category, description, priceMinor, currency } = req.body || {};
+    const { isActive, title, category, description, priceMinor, currency, featured } = req.body || {};
     const data = {};
     if (isActive !== undefined) { if (typeof isActive !== 'boolean') fail(400, 'Availability must be true or false.'); data.isActive = isActive; }
+    if (featured !== undefined) { if (typeof featured !== 'boolean') fail(400, 'Featured must be true or false.'); data.featured = featured; }
     for (const [key, value, max] of [['title', title, 200], ['category', category, 80]]) if (value !== undefined) { if (!validText(value, max)) fail(400, `Enter a valid ${key}.`); data[key] = value.trim(); }
     if (description !== undefined) { if (typeof description !== 'string' || description.length > 2000) fail(400, 'Enter a valid description.'); data.description = description.trim() || null; }
     if (priceMinor !== undefined) { if (!validAmount(priceMinor)) fail(400, 'Enter a valid price.'); data.priceMinor = priceMinor; }
@@ -79,13 +259,15 @@ router.post('/orders', async (req, res, next) => {
       let product;
       if (kind === 'MARKETPLACE') {
         if (typeof productId !== 'string') fail(400, 'Choose an available product.');
-        product = await tx.product.findFirst({ where: { id: productId, organizationId: req.organizationId, isActive: true } });
+        product = await tx.product.findFirst({ where: { id: productId, organizationId: req.organizationId, isActive: true }, include: { seller: { select: { id: true, commissionBps: true } } } });
         if (!product) fail(400, 'Choose an available product.');
         if (!validAmount(product.priceMinor * quantity)) fail(400, 'Order total is too large.');
       }
       const created = await tx.serviceOrder.create({ data: { organizationId: req.organizationId, kind, customerId,
-        productId: product?.id, title: product?.title || title.trim(), sourceUrl: sourceUrl || null,
-        quantity, currency: product?.currency || currency, amountMinor: product ? product.priceMinor * quantity : null, notes: notes?.trim() || null }, include: orderInclude });
+        productId: product?.id, sellerId: product?.sellerId ?? null, title: product?.title || title.trim(), sourceUrl: sourceUrl || null,
+        quantity, currency: product?.currency || currency, amountMinor: product ? product.priceMinor * quantity : null, notes: notes?.trim() || null,
+        source: 'ADMIN',
+        ...(product ? commissionFor(product.priceMinor * quantity, product.seller) : {}) }, include: orderInclude });
       await audit(tx, req, 'ServiceOrder', created.id, 'SERVICE_ORDER_CREATE', `${kind}: ${created.title}`);
       return created;
     });
@@ -94,9 +276,10 @@ router.post('/orders', async (req, res, next) => {
 });
 router.patch('/orders/:id', async (req, res, next) => {
   try {
-    const { status, amountMinor, trackingId, notes } = req.body || {};
+    const { status, amountMinor, trackingId, notes, trackingRef } = req.body || {};
     if (amountMinor !== undefined && !validAmount(amountMinor)) fail(400, 'Enter a valid quote total.');
     if (notes !== undefined && (typeof notes !== 'string' || notes.length > 2000)) fail(400, 'Enter a valid note.');
+    if (trackingRef !== undefined && (typeof trackingRef !== 'string' || trackingRef.length > 120)) fail(400, 'Carrier reference is too long.');
     if (trackingId !== undefined && !validText(trackingId, 80)) fail(400, 'Enter a tracking number.');
     const result = await prisma.$transaction(async tx => {
       await warehouseLock(tx, req.organizationId);
@@ -117,9 +300,18 @@ router.patch('/orders/:id', async (req, res, next) => {
         if (!parcel) fail(400, 'Choose a parcel belonging to this customer and organization.');
         data.parcelId = parcel.id;
       }
-      if (status === 'SHIPPED' && !(data.parcelId || existing.parcelId)) fail(400, 'Link the customer’s parcel before marking it shipped.');
+      if (trackingRef !== undefined) data.trackingRef = trackingRef.trim() || null;
+      const effectiveTrackingRef = data.trackingRef !== undefined ? data.trackingRef : existing.trackingRef;
+      if (status === 'SHIPPED') {
+        const appOrder = existing.kind === 'MARKETPLACE' && existing.source === 'APP';
+        // D2F-fulfilled orders link a parcel; seller-shipped app orders may
+        // carry the seller's carrier reference instead.
+        const hasProof = data.parcelId || existing.parcelId || (appOrder && effectiveTrackingRef);
+        if (!hasProof) fail(400, appOrder ? 'Link a parcel or record the carrier reference before marking this order shipped.' : 'Link the customer’s parcel before marking it shipped.');
+      }
       if (notes !== undefined) data.notes = notes.trim() || null;
       if (!Object.keys(data).length) fail(400, 'No changes provided.');
+      if (status === 'CANCELLED' && existing.status !== 'CANCELLED') await releaseStock(tx, existing.productId, existing.quantity);
       const updated = await tx.serviceOrder.update({ where: { id: existing.id }, data, include: orderInclude });
       await audit(tx, req, 'ServiceOrder', existing.id, 'SERVICE_ORDER_UPDATE', JSON.stringify({ from: existing.status, ...data }));
       return updated;

@@ -2,6 +2,8 @@ import 'connect_screen.dart';
 import 'account_screen.dart';
 import '../widgets/shipment_updates.dart';
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -18,6 +20,7 @@ import 'ship_screen.dart';
 import 'parcel_detail_screen.dart';
 import 'scan_screen.dart';
 import 'warehouse_screen.dart';
+import 'marketplace/notifications_screen.dart';
 
 /// Staff and admin dashboard. Counts and recents come from the existing API.
 class HomeScreen extends ConsumerStatefulWidget {
@@ -45,10 +48,34 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
   Map<String, int>? _stats;
   List<Parcel>? _recent;
   bool _failed = false;
+  int _notificationCount = 0;
+  Timer? _poll;
   @override
   void initState() {
     super.initState();
     _refresh();
+    _startPoll();
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  void _startPoll() {
+    _poll?.cancel();
+    _poll = Timer.periodic(const Duration(seconds: 20), (_) => _refreshCount());
+  }
+
+  Future<void> _refreshCount() async {
+    try {
+      final unread = await Api.I.notificationUnreadCount();
+      if (!mounted) return;
+      setState(() => _notificationCount = unread);
+    } catch (_) {
+      // Silently ignore poll failures.
+    }
   }
 
   Future<void> _refresh() async {
@@ -114,6 +141,13 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                       builder: (_) => const Scaffold(body: AccountScreen()),
                     ),
                   ),
+              onNotifications: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const NotificationsScreen(),
+                ),
+              ),
+              notificationCount: _notificationCount,
             ),
             const SizedBox(height: 19),
             Row(

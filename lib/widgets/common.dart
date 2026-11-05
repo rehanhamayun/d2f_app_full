@@ -477,14 +477,17 @@ void copyToClipboard(
 
 /// Compact D2F header with the account and shipment-update actions.
 class D2FHomeHeader extends StatelessWidget {
-  final VoidCallback? onBell, onProfile;
+  final VoidCallback? onBell, onProfile, onNotifications;
   final String actionTooltip;
   final bool dense;
+  final int notificationCount;
   const D2FHomeHeader({
     super.key,
     this.onBell,
     this.onProfile,
+    this.onNotifications,
     this.actionTooltip = 'Shipment updates',
+    this.notificationCount = 0,
     this.dense = false,
   });
   @override
@@ -511,6 +514,12 @@ class D2FHomeHeader extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+        if (onNotifications != null)
+          _NotificationBell(
+            onPressed: onNotifications!,
+            count: notificationCount,
+            tooltip: 'Notifications',
           ),
         IconButton(
           key: const ValueKey('header-notifications'),
@@ -559,6 +568,48 @@ class D2FHomeHeader extends StatelessWidget {
           ),
       ],
     ),
+  );
+}
+
+class _NotificationBell extends StatelessWidget {
+  final VoidCallback onPressed;
+  final int count;
+  final String tooltip;
+  const _NotificationBell({
+    required this.onPressed,
+    required this.count,
+    required this.tooltip,
+  });
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    clipBehavior: Clip.none,
+    children: [
+      IconButton(
+        key: const ValueKey('header-notifications'),
+        tooltip: tooltip,
+        onPressed: onPressed,
+        style: IconButton.styleFrom(
+          minimumSize: const Size(44, 44),
+          padding: const EdgeInsets.all(9),
+        ),
+        icon: const Icon(Icons.notifications_none_rounded, size: 26, color: AppColors.navy),
+      ),
+      if (count > 0)
+        Positioned(
+          top: 6,
+          right: 6,
+          child: Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: AppColors.coral,
+              shape: BoxShape.circle,
+              border: Border.all(color: AppColors.cream, width: 2),
+            ),
+          ),
+        ),
+    ],
   );
 }
 

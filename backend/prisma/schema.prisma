@@ -28,6 +28,7 @@ model Organization {
   connectTrips    ConnectTrip[]
   connectRates    ConnectRate[]
   connectBookings ConnectBooking[]
+  sellerProfiles  SellerProfile[]
 }
 
 // These identity reservations intentionally outlive deleted organizations/parcels.
@@ -107,6 +108,23 @@ model User {
   socialIdentities SocialIdentity[]
   passwordResets   PasswordReset[]
   connectTrips     ConnectTrip[]
+  sellerProfile    SellerProfile?
+  notifications    Notification[]
+}
+
+// Marketplace / Buy For Me updates that reach a user inside the app (and, when
+// push credentials are configured, as a real device notification).
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
 
 model SocialIdentity {
@@ -384,7 +402,52 @@ model ContainerEvent {
   @@index([containerId, createdAt])
 }
 
+// D2F Marketplace sellers. One profile per account; customers apply in the
+// app, administrators approve and agree the commission rate BEFORE the first
+// sale. Commission is snapshotted on every order from the agreed profile rate.
+model SellerProfile {
+  id              String    @id @default(uuid())
+  organizationId  String
+  userId          String    @unique
+  status          String    @default("PENDING") // PENDING | APPROVED | REJECTED | SUSPENDED
+  displayName     String
+  businessType    String    @default("INDIVIDUAL") // INDIVIDUAL | BUSINESS
+  businessName    String?
+  headline        String?
+  bio             String?
+  category        String
+  phone           String
+  email           String?
+  country         String
+  city            String?
+  address         String?
+  // Agreed before the first sale; basis points (1000 = 10.00%).
+  commissionBps   Int       @default(1000)
+  termsAcceptedAt DateTime?
+  reviewNote      String?
+  reviewedAt      DateTime?
+  reviewedById    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  // Shop branding: profile photo + cover banner, stored like product photos.
+  profilePicture  Bytes?
+  profilePictureName String? @default("")
+  banner          Bytes?
+  bannerName      String? @default("")
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products     Product[]
+  orders       ServiceOrder[]
+
+  @@index([organizationId, status, createdAt])
+}
+
 // Administrative records for the selected Marketplace and Buy For Me modules.
+// D2F catalog products have no seller; third-party listings belong to an
+// approved SellerProfile. Stock stays null/uncounted until the Fulfillment
+// phase, but the columns exist so warehouse counts can land without a
+// destructive migration.
 model Product {
   id             String         @id @default(uuid())
   organizationId String
@@ -394,12 +457,39 @@ model Product {
   priceMinor     Int
   currency       String         @default("USD")
   isActive       Boolean        @default(false)
+  sellerId       String?
+  fulfillment    String         @default("D2F") // SELLER | D2F
+  stockCount     Int? // null = stock not tracked yet (Fulfillment phase)
+  locationCity   String?
+  locationCountry String?
+  featured       Boolean        @default(false)
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  seller         SellerProfile? @relation(fields: [sellerId], references: [id], onDelete: SetNull)
   orders         ServiceOrder[]
+  images         ProductImage[]
 
   @@index([organizationId, createdAt])
+  @@index([organizationId, isActive, category])
+  @@index([organizationId, isActive, featured])
+  @@index([sellerId])
+}
+
+// Product photos ride in the database as bytes (same policy as goods photos)
+// so listings survive redeploys without external object storage.
+model ProductImage {
+  id          String   @id @default(uuid())
+  productId   String
+  fileName    String
+  contentType String
+  sizeBytes   Int
+  bytes       Bytes
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, position])
 }
 
 model ServiceOrder {
@@ -408,6 +498,7 @@ model ServiceOrder {
   kind           String
   customerId     String
   productId      String?
+  sellerId       String?
   parcelId       String?
   title          String
   sourceUrl      String?
@@ -416,14 +507,30 @@ model ServiceOrder {
   currency       String       @default("USD")
   status         String       @default("REQUESTED")
   notes          String?
+  source         String       @default("ADMIN") // ADMIN | APP
+  // Commission snapshot taken from the agreed seller rate at order time.
+  commissionBps  Int?
+  commissionMinor Int?
+  // Delivery choice + recipient details captured at app checkout.
+  deliveryPreference String?  // SELLER | D2F
+  recipientName      String?
+  recipientPhone     String?
+  deliveryAddress    String?
+  deliveryCity       String?
+  deliveryCountry    String?
+  // Buy For Me: buyer's target budget and the seller's carrier reference.
+  budgetMinor    Int?
+  trackingRef    String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Restrict)
   product        Product?     @relation(fields: [productId], references: [id], onDelete: Restrict)
+  seller         SellerProfile? @relation(fields: [sellerId], references: [id], onDelete: SetNull)
   parcel         Parcel?      @relation(fields: [parcelId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, kind, createdAt])
+  @@index([organizationId, sellerId, createdAt])
 }
 
 // D2F Connect has its own commercial and custody workflow. Traveller access is

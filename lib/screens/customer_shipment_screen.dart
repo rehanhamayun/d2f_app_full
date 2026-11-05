@@ -285,10 +285,12 @@ class _CustomerShipmentScreenState
     final route = await showRoutePlanner(context, _route);
     if (route == null || !mounted) return;
     setState(() {
-      if (isUsRoute(_route.origin) != isUsRoute(route.origin))
+      if (isUsRoute(_route.origin) != isUsRoute(route.origin)) {
         _pickupAddress.clear();
-      if (isUsRoute(_route.destination) != isUsRoute(route.destination))
+      }
+      if (isUsRoute(_route.destination) != isUsRoute(route.destination)) {
         _recipientAddress.clear();
+      }
       _route = route;
       _invalidateRequest();
     });
