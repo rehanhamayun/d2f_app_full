@@ -1239,6 +1239,109 @@ class Api {
     }
   }
 
+  // ── Admin Commerce (seller & order management) ─────────────────────────
+
+  Future<List<Map<String, dynamic>>> adminSellers({String? status}) async {
+    try {
+      final response = await _dio!.get(
+        '/admin/commerce/sellers',
+        queryParameters: status == null ? null : {'status': status},
+      );
+      return (response.data as List).cast<Map<String, dynamic>>();
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> adminRegisterSeller({
+    required String customerId,
+    required String displayName,
+    required String businessType,
+    String? businessName,
+    required String category,
+    String? country,
+    String? city,
+    String? phone,
+    int commissionBps = 1000,
+    String? headline,
+    String? bio,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/admin/commerce/sellers',
+        data: {
+          'customerId': customerId,
+          'displayName': displayName.trim(),
+          'businessType': businessType,
+          if (businessName != null && businessName.trim().isNotEmpty)
+            'businessName': businessName.trim(),
+          'category': category.trim(),
+          if (country != null && country.trim().isNotEmpty)
+            'country': country.trim(),
+          if (city != null && city.trim().isNotEmpty) 'city': city.trim(),
+          if (phone != null && phone.trim().isNotEmpty)
+            'phone': phone.trim(),
+          'commissionBps': commissionBps,
+          if (headline != null && headline.trim().isNotEmpty)
+            'headline': headline.trim(),
+          if (bio != null && bio.trim().isNotEmpty) 'bio': bio.trim(),
+        },
+      );
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> adminUpdateSeller(
+    String id, {
+    required String action,
+    String? reviewNote,
+    int? commissionBps,
+  }) async {
+    try {
+      final response = await _dio!.patch(
+        '/admin/commerce/sellers/$id',
+        data: {
+          'action': action,
+          if (reviewNote != null && reviewNote.trim().isNotEmpty)
+            'reviewNote': reviewNote.trim(),
+          if (commissionBps != null) 'commissionBps': commissionBps,
+        },
+      );
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> adminCommissions({String? from, String? to}) async {
+    try {
+      final response = await _dio!.get(
+        '/admin/commerce/commissions',
+        queryParameters: {
+          if (from != null && from.isNotEmpty) 'from': from,
+          if (to != null && to.isNotEmpty) 'to': to,
+        },
+      );
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> adminOrders({String? kind, String? status}) async {
+    try {
+      final response = await _dio!.get(
+        '/admin/commerce/${kind ?? 'marketplace'}',
+        queryParameters: status == null ? null : {'status': status},
+      );
+      return (response.data as List).cast<Map<String, dynamic>>();
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
   // ── Notifications ─────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> notifications({int? limit}) async {
