@@ -17,6 +17,9 @@ import commerceRouter from './routes/commerce.js';
 import marketplaceRouter from './routes/marketplace.js';
 import sellerRouter from './routes/seller.js';
 import buyForMeRouter from './routes/buy_for_me.js';
+import shipForMeRouter from './routes/ship_for_me.js';
+import paymentsRouter from './routes/payments.js';
+import adminServicesRouter from './routes/admin_services.js';
 import notificationsRouter from './routes/notifications.js';
 import warehouseRouter from './routes/warehouse.js';
 import { authenticate } from './middleware/auth.js';
@@ -71,6 +74,9 @@ app.use('/admin/commerce', commerceRouter);
 app.use('/marketplace', marketplaceRouter);
 app.use('/seller', sellerRouter);
 app.use('/buy-for-me', buyForMeRouter);
+app.use('/ship-for-me', shipForMeRouter);
+app.use('/payments', paymentsRouter);
+app.use('/admin/commerce/services', adminServicesRouter);
 app.use('/notifications', notificationsRouter);
 // Tracking-number possession reveals progress only, never people, contact
 // details, internal notes, actor identity, or the staff parcel record.

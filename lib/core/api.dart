@@ -1448,4 +1448,320 @@ class Api {
       e.response?.statusCode,
     );
   }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // SHIP FOR ME
+  // ═════════════════════════════════════════════════════════════════════════════
+
+  Future<List<Map<String, dynamic>>> shipForMeRequests() async {
+    try {
+      final response = await _dio!.get('/ship-for-me/requests');
+      return (response.data as List).cast<Map<String, dynamic>>();
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> createShipForMeRequest({
+    required String retailerName,
+    required String itemDescription,
+    String? retailerOrderId,
+    String? retailerTrackingId,
+    int? declaredValueMinor,
+    String declaredCurrency = 'USD',
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/ship-for-me/requests',
+        data: {
+          'retailerName': retailerName.trim(),
+          'itemDescription': itemDescription.trim(),
+          if (retailerOrderId != null && retailerOrderId.trim().isNotEmpty)
+            'retailerOrderId': retailerOrderId.trim(),
+          if (retailerTrackingId != null && retailerTrackingId.trim().isNotEmpty)
+            'retailerTrackingId': retailerTrackingId.trim(),
+          if (declaredValueMinor != null)
+            'declaredValueMinor': declaredValueMinor,
+          'declaredCurrency': declaredCurrency,
+        },
+      );
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> submitShipForMeRequest(
+    String id, {
+    String? retailerOrderId,
+    String? retailerTrackingId,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/ship-for-me/requests/$id/submit',
+        data: {
+          if (retailerOrderId != null && retailerOrderId.trim().isNotEmpty)
+            'retailerOrderId': retailerOrderId.trim(),
+          if (retailerTrackingId != null && retailerTrackingId.trim().isNotEmpty)
+            'retailerTrackingId': retailerTrackingId.trim(),
+        },
+      );
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> getShipForMeWarehouseAddress() async {
+    try {
+      final response = await _dio!.get('/ship-for-me/warehouse-address');
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> getShipForMeTerms() async {
+    try {
+      final response = await _dio!.get('/ship-for-me/terms');
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> acceptShipForMeTerms({
+    required String agreementId,
+    required String version,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/ship-for-me/terms/accept',
+        data: { 'agreementId': agreementId, 'version': version },
+      );
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> cancelShipForMeRequest(String id) async {
+    try {
+      final response = await _dio!.post('/ship-for-me/requests/$id/cancel');
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // PAYMENTS
+  // ═════════════════════════════════════════════════════════════════════════════
+
+  Future<List<Map<String, dynamic>>> payments() async {
+    try {
+      final response = await _dio!.get('/payments');
+      return (response.data as List).cast<Map<String, dynamic>>();
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> createPayment({
+    String? buyForMeRequestId,
+    String? shipForMeRequestId,
+    required int amountMinor,
+    String currency = 'USD',
+    required String paymentMethod,
+    String? paymentProvider,
+    String purpose = 'QUOTE_PAYMENT',
+    String? verificationImage,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/payments',
+        data: {
+          if (buyForMeRequestId != null) 'buyForMeRequestId': buyForMeRequestId,
+          if (shipForMeRequestId != null)
+            'shipForMeRequestId': shipForMeRequestId,
+          'amountMinor': amountMinor,
+          'currency': currency,
+          'paymentMethod': paymentMethod,
+          if (paymentProvider != null)
+            'paymentProvider': paymentProvider,
+          'purpose': purpose,
+          if (verificationImage != null)
+            'verificationImage': verificationImage,
+        },
+      );
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> verifyPayment(
+    String id, {
+    required String status,
+    String? notes,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/payments/$id/verify',
+        data: { 'status': status, if (notes != null) 'notes': notes },
+      );
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> refundPayment(
+    String id, {
+    required int amountMinor,
+    String? reason,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/payments/$id/refund',
+        data: { 'amountMinor': amountMinor, if (reason != null) 'reason': reason },
+      );
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // ADMIN SERVICES (agreements, warehouse addresses, payment methods, returns)
+  // ═════════════════════════════════════════════════════════════════════════════
+
+  Future<List<Map<String, dynamic>>> adminAgreements({String? serviceType}) async {
+    try {
+      final response = await _dio!.get(
+        '/admin/commerce/services/agreements',
+        queryParameters: serviceType == null ? null : { 'serviceType': serviceType },
+      );
+      return (response.data as List).cast<Map<String, dynamic>>();
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> createAdminAgreement({
+    required String version,
+    required String title,
+    required String content,
+    required String serviceType,
+    bool isActive = true,
+    String? effectiveFrom,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/admin/commerce/services/agreements',
+        data: {
+          'version': version,
+          'title': title,
+          'content': content,
+          'serviceType': serviceType,
+          'isActive': isActive,
+          if (effectiveFrom != null) 'effectiveFrom': effectiveFrom,
+        },
+      );
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> adminWarehouseAddresses() async {
+    try {
+      final response = await _dio!.get('/admin/commerce/services/warehouse-addresses');
+      return (response.data as List).cast<Map<String, dynamic>>();
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> createAdminWarehouseAddress({
+    required String label,
+    required String addressLine1,
+    String? addressLine2,
+    required String city,
+    String? stateProvince,
+    required String postalCode,
+    required String country,
+    String? phone,
+    String? email,
+    bool isActive = true,
+    bool isDefault = false,
+  }) async {
+    try {
+      final response = await _dio!.post(
+        '/admin/commerce/services/warehouse-addresses',
+        data: {
+          'label': label,
+          'addressLine1': addressLine1,
+          if (addressLine2 != null) 'addressLine2': addressLine2,
+          'city': city,
+          if (stateProvince != null) 'stateProvince': stateProvince,
+          'postalCode': postalCode,
+          'country': country,
+          if (phone != null) 'phone': phone,
+          if (email != null) 'email': email,
+          'isActive': isActive,
+          'isDefault': isDefault,
+        },
+      );
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> adminPaymentMethods({
+    String? serviceType,
+    String? countryCode,
+  }) async {
+    try {
+      final response = await _dio!.get(
+        '/admin/commerce/services/payment-methods',
+        queryParameters: {
+          if (serviceType != null) 'serviceType': serviceType,
+          if (countryCode != null) 'countryCode': countryCode,
+        },
+      );
+      return (response.data as List).cast<Map<String, dynamic>>();
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> adminReturns({String? status}) async {
+    try {
+      final response = await _dio!.get(
+        '/admin/commerce/services/returns',
+        queryParameters: status == null ? null : { 'status': status },
+      );
+      return (response.data as List).cast<Map<String, dynamic>>();
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // BUY FOR ME — enhanced with payment support
+  // ═════════════════════════════════════════════════════════════════════════════
+
+  Future<MarketplaceOrder> acceptBuyForMeQuote(String id) async {
+    return buyForMeDecision(id, 'accept');
+  }
+
+  Future<MarketplaceOrder> declineBuyForMeQuote(String id) async {
+    return buyForMeDecision(id, 'decline');
+  }
+
+  Future<MarketplaceOrder> cancelBuyForMeRequest(String id) async {
+    return buyForMeDecision(id, 'cancel');
+  }
 }

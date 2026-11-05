@@ -12,23 +12,26 @@ datasource db {
 
 // Organizations: D2F and permitted partner orgs (future SaaS-ready)
 model Organization {
-  id              String           @id @default(uuid())
-  name            String
-  trackingPrefix  String           @unique
-  trackingCounter BigInt           @default(1)
-  isActive        Boolean          @default(true)
-  createdAt       DateTime         @default(now())
-  users           User[]
-  locations       Location[]
-  customers       Customer[]
-  parcels         Parcel[]
-  containers      Container[]
-  products        Product[]
-  serviceOrders   ServiceOrder[]
-  connectTrips    ConnectTrip[]
-  connectRates    ConnectRate[]
-  connectBookings ConnectBooking[]
-  sellerProfiles  SellerProfile[]
+  id                 String             @id @default(uuid())
+  name               String
+  trackingPrefix     String             @unique
+  trackingCounter    BigInt             @default(1)
+  isActive           Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  users              User[]
+  locations          Location[]
+  customers          Customer[]
+  parcels            Parcel[]
+  containers         Container[]
+  products           Product[]
+  serviceOrders      ServiceOrder[]
+  connectTrips       ConnectTrip[]
+  connectRates       ConnectRate[]
+  connectBookings    ConnectBooking[]
+  sellerProfiles     SellerProfile[]
+  buyForMeRequests   BuyForMeRequest[]
+  shipForMeRequests  ShipForMeRequest[]
+  warehouseAddresses WarehouseAddress[]
 }
 
 // These identity reservations intentionally outlive deleted organizations/parcels.
@@ -178,10 +181,15 @@ model Customer {
   country        String?
   createdAt      DateTime @default(now())
 
-  user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
-  organization  Organization?  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  parcels       Parcel[]
-  serviceOrders ServiceOrder[]
+  user                 User?                         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organization         Organization?                 @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  parcels              Parcel[]
+  serviceOrders        ServiceOrder[]
+  buyForMeRequests     BuyForMeRequest[]
+  shipForMeRequests    ShipForMeRequest[]
+  payments             Payment[]
+  returnRequests       ReturnRequest[]
+  agreementAcceptances CustomerAgreementAcceptance[]
 }
 
 // Parcels: permanent UUID + public tracking ID
@@ -242,15 +250,17 @@ model Parcel {
   createdAt                  DateTime        @default(now())
   updatedAt                  DateTime        @updatedAt
 
-  organization  Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  customer      Customer         @relation(fields: [customerId], references: [id])
-  createdBy     User             @relation("parcelsCreatedBy", fields: [createdById], references: [id])
-  location      Location?        @relation(fields: [locationId], references: [id])
-  events        TrackingEvent[]  @relation("parcelEvents")
-  transfers     ParcelTransfer[]
-  trackingIndex TrackingIndex?
-  serviceOrders ServiceOrder[]
-  container     Container?       @relation(fields: [containerId], references: [id], onDelete: Restrict)
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer          Customer           @relation(fields: [customerId], references: [id])
+  createdBy         User               @relation("parcelsCreatedBy", fields: [createdById], references: [id])
+  location          Location?          @relation(fields: [locationId], references: [id])
+  events            TrackingEvent[]    @relation("parcelEvents")
+  transfers         ParcelTransfer[]
+  trackingIndex     TrackingIndex?
+  serviceOrders     ServiceOrder[]
+  container         Container?         @relation(fields: [containerId], references: [id], onDelete: Restrict)
+  buyForMeRequests  BuyForMeRequest[]
+  shipForMeRequests ShipForMeRequest[]
 
   @@unique([organizationId, trackingSequence])
   @@unique([organizationId, clientRequestId])
@@ -316,17 +326,17 @@ model ParcelImage {
 
 // Timestamped, traceable event history
 model TrackingEvent {
-  id        String   @id @default(uuid())
-  parcelId  String
-  status    String
-  note      String?
+  id           String   @id @default(uuid())
+  parcelId     String
+  status       String
+  note         String?
   originalNote String?
   internalNote String?
-  templateId String?
-  facilityId String?
-  location  String?
-  actorId   String?
-  createdAt DateTime @default(now())
+  templateId   String?
+  facilityId   String?
+  location     String?
+  actorId      String?
+  createdAt    DateTime @default(now())
 
   parcel Parcel @relation("parcelEvents", fields: [parcelId], references: [id])
   actor  User?  @relation(fields: [actorId], references: [id])
@@ -406,39 +416,39 @@ model ContainerEvent {
 // app, administrators approve and agree the commission rate BEFORE the first
 // sale. Commission is snapshotted on every order from the agreed profile rate.
 model SellerProfile {
-  id              String    @id @default(uuid())
-  organizationId  String
-  userId          String    @unique
-  status          String    @default("PENDING") // PENDING | APPROVED | REJECTED | SUSPENDED
-  displayName     String
-  businessType    String    @default("INDIVIDUAL") // INDIVIDUAL | BUSINESS
-  businessName    String?
-  headline        String?
-  bio             String?
-  category        String
-  phone           String
-  email           String?
-  country         String
-  city            String?
-  address         String?
+  id                 String    @id @default(uuid())
+  organizationId     String
+  userId             String    @unique
+  status             String    @default("PENDING") // PENDING | APPROVED | REJECTED | SUSPENDED
+  displayName        String
+  businessType       String    @default("INDIVIDUAL") // INDIVIDUAL | BUSINESS
+  businessName       String?
+  headline           String?
+  bio                String?
+  category           String
+  phone              String
+  email              String?
+  country            String
+  city               String?
+  address            String?
   // Agreed before the first sale; basis points (1000 = 10.00%).
-  commissionBps   Int       @default(1000)
-  termsAcceptedAt DateTime?
-  termsAccepted   Boolean   @default(false)
-  verificationStatus String  @default("UNVERIFIED") // UNVERIFIED | PENDING | VERIFIED | REJECTED
-  reviewNote      String?
-  reviewedAt      DateTime?
-  reviewedById    String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  commissionBps      Int       @default(1000)
+  termsAcceptedAt    DateTime?
+  termsAccepted      Boolean   @default(false)
+  verificationStatus String    @default("UNVERIFIED") // UNVERIFIED | PENDING | VERIFIED | REJECTED
+  reviewNote         String?
+  reviewedAt         DateTime?
+  reviewedById       String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
   // Shop branding: profile photo + cover banner, stored like product photos.
-  profilePicture  Bytes?
-  profilePictureName String? @default("")
-  banner          Bytes?
-  bannerName      String? @default("")
+  profilePicture     Bytes?
+  profilePictureName String?   @default("")
+  banner             Bytes?
+  bannerName         String?   @default("")
 
-  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   products     Product[]
   orders       ServiceOrder[]
   verification SellerVerification?
@@ -450,68 +460,68 @@ model SellerProfile {
 
 // Seller identity/business verification documents submitted during onboarding.
 model SellerVerification {
-  id             String   @id @default(uuid())
-  sellerId       String   @unique
-  seller         SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
-  idDocumentType String?   // passport | national_id | business_license
-  idDocumentName String?
-  idDocumentBytes Bytes?
-  businessDocName String?
+  id               String        @id @default(uuid())
+  sellerId         String        @unique
+  seller           SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  idDocumentType   String? // passport | national_id | business_license
+  idDocumentName   String?
+  idDocumentBytes  Bytes?
+  businessDocName  String?
   businessDocBytes Bytes?
-  selfieBytes    Bytes?
-  status         String    @default("PENDING") // PENDING | VERIFIED | REJECTED
-  reviewNote     String?
-  reviewedAt     DateTime?
-  reviewedById   String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  selfieBytes      Bytes?
+  status           String        @default("PENDING") // PENDING | VERIFIED | REJECTED
+  reviewNote       String?
+  reviewedAt       DateTime?
+  reviewedById     String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 }
 
 // Global D2F commission / fee configuration (configurable, not hardcoded).
 model CommissionSettings {
-  id             String   @id @default(uuid())
+  id                       String   @id @default(uuid())
   // Platform commission on marketplace sales (basis points, 1000 = 10%).
-  platformCommissionBps Int   @default(1000)
+  platformCommissionBps    Int      @default(1000)
   // Default fulfillment fee (basis points of order amount) when D2F fulfils.
-  defaultFulfillmentFeeBps Int @default(500)
+  defaultFulfillmentFeeBps Int      @default(500)
   // Default delivery fee (basis points) for D2F delivery.
-  defaultDeliveryFeeBps  Int   @default(300)
-  updatedAt      DateTime  @updatedAt
-  updatedById    String?
+  defaultDeliveryFeeBps    Int      @default(300)
+  updatedAt                DateTime @updatedAt
+  updatedById              String?
 }
 
 // Seller earnings accumulator (commission + fulfillment + delivery fees tracked separately).
 model SellerEarnings {
-  id              String   @id @default(uuid())
-  sellerId        String   @unique
-  seller          SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  id                        String        @id @default(uuid())
+  sellerId                  String        @unique
+  seller                    SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
   // Gross merchandise value sold (before fees).
-  grossMerchandiseMinor Int   @default(0)
+  grossMerchandiseMinor     Int           @default(0)
   // Commission earned by D2F from this seller.
-  commissionEarnedMinor   Int   @default(0)
+  commissionEarnedMinor     Int           @default(0)
   // Fulfillment fees earned by D2F.
-  fulfillmentFeeEarnedMinor Int @default(0)
+  fulfillmentFeeEarnedMinor Int           @default(0)
   // Delivery fees earned by D2F.
-  deliveryFeeEarnedMinor    Int @default(0)
+  deliveryFeeEarnedMinor    Int           @default(0)
   // Net payable to seller.
-  netPayableMinor           Int   @default(0)
+  netPayableMinor           Int           @default(0)
   // Amount already paid out.
-  paidOutMinor              Int   @default(0)
-  updatedAt             DateTime  @updatedAt
+  paidOutMinor              Int           @default(0)
+  updatedAt                 DateTime      @updatedAt
 }
 
 // Payouts to sellers (admin-triggered).
 model SellerPayout {
-  id             String   @id @default(uuid())
-  sellerId       String
-  seller         SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
-  amountMinor    Int
-  currency       String   @default("USD")
-  status         String   @default("PENDING") // PENDING | PAID | CANCELLED
-  paidAt         DateTime?
-  reference      String?  // bank transfer ref, etc.
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id          String        @id @default(uuid())
+  sellerId    String
+  seller      SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  amountMinor Int
+  currency    String        @default("USD")
+  status      String        @default("PENDING") // PENDING | PAID | CANCELLED
+  paidAt      DateTime?
+  reference   String? // bank transfer ref, etc.
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 }
 
 // Administrative records for the selected Marketplace and Buy For Me modules.
@@ -520,27 +530,27 @@ model SellerPayout {
 // phase, but the columns exist so warehouse counts can land without a
 // destructive migration.
 model Product {
-  id             String         @id @default(uuid())
-  organizationId String
-  title          String
-  category       String
-  description    String?
-  priceMinor     Int
-  currency       String         @default("USD")
-  status         String         @default("PENDING_REVIEW") // PENDING_REVIEW | APPROVED | REJECTED | SUSPENDED
-  isActive       Boolean        @default(false)
-  sellerId       String?
-  fulfillment    String         @default("D2F") // SELLER | D2F
-  stockCount     Int? // null = stock not tracked yet (Fulfillment phase)
-  locationCity   String?
+  id              String         @id @default(uuid())
+  organizationId  String
+  title           String
+  category        String
+  description     String?
+  priceMinor      Int
+  currency        String         @default("USD")
+  status          String         @default("PENDING_REVIEW") // PENDING_REVIEW | APPROVED | REJECTED | SUSPENDED
+  isActive        Boolean        @default(false)
+  sellerId        String?
+  fulfillment     String         @default("D2F") // SELLER | D2F
+  stockCount      Int? // null = stock not tracked yet (Fulfillment phase)
+  locationCity    String?
   locationCountry String?
-  featured       Boolean        @default(false)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  seller         SellerProfile? @relation(fields: [sellerId], references: [id], onDelete: SetNull)
-  orders         ServiceOrder[]
-  images         ProductImage[]
+  featured        Boolean        @default(false)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  organization    Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  seller          SellerProfile? @relation(fields: [sellerId], references: [id], onDelete: SetNull)
+  orders          ServiceOrder[]
+  images          ProductImage[]
 
   @@index([organizationId, createdAt])
   @@index([organizationId, isActive, category])
@@ -565,49 +575,49 @@ model ProductImage {
 }
 
 model ServiceOrder {
-  id             String       @id @default(uuid())
-  organizationId String
-  kind           String
-  customerId     String
-  productId      String?
-  sellerId       String?
-  parcelId       String?
-  title          String
-  sourceUrl      String?
-  quantity       Int          @default(1)
-  amountMinor    Int?
-  currency       String       @default("USD")
-  status         String       @default("REQUESTED")
-  notes          String?
-  source         String       @default("ADMIN") // ADMIN | APP
+  id                  String         @id @default(uuid())
+  organizationId      String
+  kind                String
+  customerId          String
+  productId           String?
+  sellerId            String?
+  parcelId            String?
+  title               String
+  sourceUrl           String?
+  quantity            Int            @default(1)
+  amountMinor         Int?
+  currency            String         @default("USD")
+  status              String         @default("REQUESTED")
+  notes               String?
+  source              String         @default("ADMIN") // ADMIN | APP
   // Commission snapshot taken from the agreed seller rate at order time.
-  commissionBps  Int?
-  commissionMinor Int?
+  commissionBps       Int?
+  commissionMinor     Int?
   // Fulfillment fee charged by D2F (when D2F fulfils).
-  fulfillmentFeeBps Int?
+  fulfillmentFeeBps   Int?
   fulfillmentFeeMinor Int?
   // Delivery fee charged by D2F (when D2F delivers).
-  deliveryFeeBps Int?
-  deliveryFeeMinor Int?
+  deliveryFeeBps      Int?
+  deliveryFeeMinor    Int?
   // Net amount payable to seller after all fees.
-  sellerNetMinor Int?
+  sellerNetMinor      Int?
   // Delivery choice + recipient details captured at app checkout.
-  deliveryPreference String?  // SELLER | D2F
-  recipientName      String?
-  recipientPhone     String?
-  deliveryAddress    String?
-  deliveryCity       String?
-  deliveryCountry    String?
+  deliveryPreference  String? // SELLER | D2F
+  recipientName       String?
+  recipientPhone      String?
+  deliveryAddress     String?
+  deliveryCity        String?
+  deliveryCountry     String?
   // Buy For Me: buyer's target budget and the seller's carrier reference.
-  budgetMinor    Int?
-  trackingRef    String?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  product        Product?     @relation(fields: [productId], references: [id], onDelete: Restrict)
-  seller         SellerProfile? @relation(fields: [sellerId], references: [id], onDelete: SetNull)
-  parcel         Parcel?      @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  budgetMinor         Int?
+  trackingRef         String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  organization        Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer            Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  product             Product?       @relation(fields: [productId], references: [id], onDelete: Restrict)
+  seller              SellerProfile? @relation(fields: [sellerId], references: [id], onDelete: SetNull)
+  parcel              Parcel?        @relation(fields: [parcelId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, kind, createdAt])
   @@index([organizationId, sellerId, createdAt])
@@ -661,69 +671,69 @@ model ConnectRate {
 }
 
 model ConnectBooking {
-  id                       String              @id @default(uuid())
-  organizationId           String
-  parcelId                 String              @unique
-  category                 String
-  quantity                 Int
-  declaredValueMinor       Int
-  preferredDate            DateTime
-  requestedTripId          String?
-  verifiedWeightKg         Float?
-  contentsVerifiedAt       DateTime?
-  contentsVerificationNote String?
-  internationalFeeMinor    Int?
-  domesticCostMinor        Int?
-  currency                 String              @default("USD")
-  paymentInstructions      String?
-  pricingSnapshot          Json?
-  quoteAcceptedAt          DateTime?
-  handoverMode             String // DOMESTIC_SHIPPING | DROP_OFF | PICKUP
-  senderCity               String
-  senderAddress            String?
-  deliveryPreference       String              @default("D2F_PICKUP")
-  domesticCarrier          String?
-  domesticTrackingNumber   String?
-  domesticLabelUrl         String?
-  domesticStatus           String              @default("NOT_REQUIRED")
-  receivingLocationId      String?
-  originReceivedAt         DateTime?
-  handoverCodeHash         String?
-  handoverCodeExpiresAt    DateTime?
-  handoverAttempts         Int                 @default(0)
-  collectedAt              DateTime?
-  destinationReceivedAt    DateTime?
-  deliveredAt              DateTime?
-  deliveryEvidence         String?
-  createdAt                DateTime            @default(now())
-  updatedAt                DateTime            @updatedAt
-  organization             Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  parcel                   Parcel              @relation(fields: [parcelId], references: [id], onDelete: Restrict)
-  requestedTrip            ConnectTrip?        @relation("requestedTrip", fields: [requestedTripId], references: [id], onDelete: Restrict)
-  receivingLocation        Location?           @relation(fields: [receivingLocationId], references: [id], onDelete: Restrict)
-  assignments              ConnectAssignment[]
-  payment                  ConnectPayment?
-  declarations             ConnectDeclaration[]
-  paymentSubmissions       ConnectPaymentSubmission[]
-  reviewedDeclarationId    String?
-  complianceReviewedById   String?
-  paymentInstructionsVersion Int @default(0)
+  id                         String                     @id @default(uuid())
+  organizationId             String
+  parcelId                   String                     @unique
+  category                   String
+  quantity                   Int
+  declaredValueMinor         Int
+  preferredDate              DateTime
+  requestedTripId            String?
+  verifiedWeightKg           Float?
+  contentsVerifiedAt         DateTime?
+  contentsVerificationNote   String?
+  internationalFeeMinor      Int?
+  domesticCostMinor          Int?
+  currency                   String                     @default("USD")
+  paymentInstructions        String?
+  pricingSnapshot            Json?
+  quoteAcceptedAt            DateTime?
+  handoverMode               String // DOMESTIC_SHIPPING | DROP_OFF | PICKUP
+  senderCity                 String
+  senderAddress              String?
+  deliveryPreference         String                     @default("D2F_PICKUP")
+  domesticCarrier            String?
+  domesticTrackingNumber     String?
+  domesticLabelUrl           String?
+  domesticStatus             String                     @default("NOT_REQUIRED")
+  receivingLocationId        String?
+  originReceivedAt           DateTime?
+  handoverCodeHash           String?
+  handoverCodeExpiresAt      DateTime?
+  handoverAttempts           Int                        @default(0)
+  collectedAt                DateTime?
+  destinationReceivedAt      DateTime?
+  deliveredAt                DateTime?
+  deliveryEvidence           String?
+  createdAt                  DateTime                   @default(now())
+  updatedAt                  DateTime                   @updatedAt
+  organization               Organization               @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  parcel                     Parcel                     @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  requestedTrip              ConnectTrip?               @relation("requestedTrip", fields: [requestedTripId], references: [id], onDelete: Restrict)
+  receivingLocation          Location?                  @relation(fields: [receivingLocationId], references: [id], onDelete: Restrict)
+  assignments                ConnectAssignment[]
+  payment                    ConnectPayment?
+  declarations               ConnectDeclaration[]
+  paymentSubmissions         ConnectPaymentSubmission[]
+  reviewedDeclarationId      String?
+  complianceReviewedById     String?
+  paymentInstructionsVersion Int                        @default(0)
 
   @@index([organizationId, createdAt])
 }
 
 model ConnectAssignment {
-  id           String         @id @default(uuid())
+  id           String                        @id @default(uuid())
   bookingId    String
   tripId       String
-  status       String         @default("PROPOSED")
+  status       String                        @default("PROPOSED")
   responseNote String?
-  createdAt    DateTime       @default(now())
+  createdAt    DateTime                      @default(now())
   acceptedAt   DateTime?
   confirmedAt  DateTime?
   declarations ConnectTravellerDeclaration[]
-  booking      ConnectBooking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
-  trip         ConnectTrip    @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  booking      ConnectBooking                @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  trip         ConnectTrip                   @relation(fields: [tripId], references: [id], onDelete: Restrict)
 
   @@index([tripId, status])
   @@index([bookingId, status])
@@ -743,95 +753,388 @@ model ConnectPayment {
   @@unique([organizationId, reference])
 }
 
-
 // Append-only customer acknowledgments. Contents changes create a new revision.
 model ConnectDeclaration {
-  id String @id @default(uuid())
-  bookingId String
-  customerId String
-  userId String
-  legalName String
-  contents String
-  contentsHash String
-  termsVersion String
+  id             String         @id @default(uuid())
+  bookingId      String
+  customerId     String
+  userId         String
+  legalName      String
+  contents       String
+  contentsHash   String
+  termsVersion   String
   acknowledgment String
-  checks Json
-  guidance Json
-  audit Json
-  createdAt DateTime @default(now())
-  booking ConnectBooking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  checks         Json
+  guidance       Json
+  audit          Json
+  createdAt      DateTime       @default(now())
+  booking        ConnectBooking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+
   @@index([bookingId, createdAt])
 }
 
 // Submission is evidence awaiting admin verification; it never confirms payment.
 model ConnectPaymentSubmission {
-  id String @id @default(uuid())
-  bookingId String
-  userId String
-  method String
-  transactionId String?
-  instructionsVersion Int
+  id                   String         @id @default(uuid())
+  bookingId            String
+  userId               String
+  method               String
+  transactionId        String?
+  instructionsVersion  Int
   instructionsSnapshot String
-  fileName String?
-  contentType String?
-  bytes Bytes?
-  status String @default("PENDING")
-  reviewNote String?
-  reviewedById String?
-  reviewedAt DateTime?
-  createdAt DateTime @default(now())
-  booking ConnectBooking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  fileName             String?
+  contentType          String?
+  bytes                Bytes?
+  status               String         @default("PENDING")
+  reviewNote           String?
+  reviewedById         String?
+  reviewedAt           DateTime?
+  createdAt            DateTime       @default(now())
+  booking              ConnectBooking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+
   @@index([bookingId, createdAt])
 }
 
 model OperationalNoteTemplate {
-  id String @id @default(uuid())
-  organizationId String
-  status String
-  serviceType String @default("ALL")
-  message String
+  id              String   @id @default(uuid())
+  organizationId  String
+  status          String
+  serviceType     String   @default("ALL")
+  message         String
   customerMessage String
-  isActive Boolean @default(true)
-  position Int @default(0)
-  updatedAt DateTime @updatedAt
-  createdAt DateTime @default(now())
+  isActive        Boolean  @default(true)
+  position        Int      @default(0)
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
   @@index([organizationId, status, isActive])
 }
 
-
 model ConnectTravellerDeclaration {
-  id String @id @default(uuid())
-  assignmentId String
-  userId String
-  legalName String
-  contentsHash String
-  termsVersion String
-  contents String
-  checks Json
+  id             String            @id @default(uuid())
+  assignmentId   String
+  userId         String
+  legalName      String
+  contentsHash   String
+  termsVersion   String
+  contents       String
+  checks         Json
   acknowledgment String
-  audit Json
-  createdAt DateTime @default(now())
-  assignment ConnectAssignment @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  audit          Json
+  createdAt      DateTime          @default(now())
+  assignment     ConnectAssignment @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+
   @@index([assignmentId, createdAt])
 }
 
 // Device-reported print audit. These records do not change physical custody.
 model LabelPrintJob {
-  id String @id @default(uuid())
+  id             String   @id @default(uuid())
   organizationId String
-  parcelId String
-  actorId String
-  clientJobId String
-  printerName String
+  parcelId       String
+  actorId        String
+  clientJobId    String
+  printerName    String
   printerAddress String?
-  labelHash String
-  pages Int
-  status String
-  message String?
-  source String
-  reason String?
-  deviceAt DateTime
-  createdAt DateTime @default(now())
+  labelHash      String
+  pages          Int
+  status         String
+  message        String?
+  source         String
+  reason         String?
+  deviceAt       DateTime
+  createdAt      DateTime @default(now())
+
   @@unique([organizationId, actorId, clientJobId])
   @@index([organizationId, parcelId, createdAt])
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BUY FOR ME — D2F purchases items on behalf of the customer
+// ══════════════════════════════════════════════════════════════════════════════
+model BuyForMeRequest {
+  id             String       @id @default(uuid())
+  customerId     String
+  customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  // What the customer wants
+  title       String // Product description
+  sourceUrl   String? // Product link (Amazon, eBay, etc.)
+  sourceSite  String? // amazon, ebay, walmart, other
+  quantity    Int     @default(1)
+  currency    String  @default("USD")
+  budgetMinor Int? // Customer's target budget (cents/XOF)
+  notes       String?
+
+  // D2F's quote (filled by admin)
+  productCostMinor   Int? // Cost of the item itself
+  taxMinor           Int? // Applicable taxes
+  purchasingFeeMinor Int? // D2F purchasing service fee
+  shippingFeeMinor   Int? // International shipping to customer
+  otherChargesMinor  Int? // Insurance, handling, etc.
+  totalQuoteMinor    Int? // Grand total customer must pay
+  quoteValidUntil    DateTime? // Quote expiration
+  quoteNotes         String? // Admin notes on the quote
+
+  // Status workflow
+  status        String @default("REQUESTED") // REQUESTED | QUOTED | ACCEPTED | PURCHASED | RECEIVED | SHIPPED | COMPLETED | CANCELLED | DECLINED
+  paymentStatus String @default("UNPAID") // UNPAID | PARTIAL | PAID | REFUNDED
+
+  // Purchase tracking (D2F fills after buying)
+  purchaseDate    DateTime? // When D2F bought the item
+  purchaseReceipt String? // Receipt URL/reference
+  supplierOrderId String? // Supplier's order number
+
+  // Receiver details
+  recipientName    String?
+  recipientPhone   String?
+  recipientAddress String?
+  recipientCity    String?
+  recipientCountry String?
+
+  // Timestamps
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  acceptedAt  DateTime? // When customer accepted the quote
+  paidAt      DateTime? // When payment was received
+  shippedAt   DateTime? // When D2F shipped to customer
+  completedAt DateTime? // When customer confirmed receipt
+
+  // Relations
+  parcel         Parcel?         @relation(fields: [parcelId], references: [id], onDelete: SetNull)
+  parcelId       String?
+  payments       Payment[]
+  returnRequests ReturnRequest[]
+
+  @@index([customerId, status, createdAt])
+  @@index([organizationId, status, createdAt])
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SHIP FOR ME — Customer purchases themselves, D2F receives & ships
+// ══════════════════════════════════════════════════════════════════════════════
+model ShipForMeRequest {
+  id             String       @id @default(uuid())
+  customerId     String
+  customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  // Customer's warehouse assignment
+  warehouseAddressId  String? // Which D2F warehouse address
+  customerWarehouseId String? // Unique customer ID at warehouse (e.g., D2F-12345)
+
+  // What the customer bought (their own purchase)
+  retailerName       String? // Amazon, Walmart, eBay, etc.
+  retailerOrderId    String? // Customer's order number at retailer
+  retailerTrackingId String? // Tracking from retailer to D2F warehouse
+  itemDescription    String? // What was purchased
+  declaredValueMinor Int? // Customer's declared value for customs
+  declaredCurrency   String? @default("USD")
+
+  // Package details (filled when D2F receives at warehouse)
+  packageWeightKg  Float? // Actual weight received
+  packageLengthCm  Float?
+  packageWidthCm   Float?
+  packageHeightCm  Float?
+  packagePhotos    String? // JSON array of photo URLs/refs
+  receivedAt       DateTime? // When D2F warehouse received it
+  receivedBy       String? // Warehouse staff who received
+  packageCondition String? // Good / Damaged / Opened / etc.
+  receivingNotes   String?
+
+  // Status workflow
+  status            String    @default("DRAFT") // DRAFT | SUBMITTED | RECEIVED | QUOTED | ACCEPTED | PAID | SHIPPED | COMPLETED | CANCELLED | BLOCKED
+  agreementAccepted Boolean   @default(false) // Customer accepted Ship For Me terms
+  agreementVersion  String? // Which version of terms they accepted
+  acceptedAt        DateTime? // When they accepted terms
+
+  // Shipping quote (D2F fills after receiving package)
+  shippingFeeMinor  Int? // Cost to ship from warehouse to customer
+  insuranceFeeMinor Int? // Optional insurance
+  handlingFeeMinor  Int? // Warehouse handling fee
+  totalQuoteMinor   Int? // Grand total
+  quoteValidUntil   DateTime? // Quote expiration
+  quoteNotes        String?
+
+  // Payment
+  paymentStatus String    @default("UNPAID") // UNPAID | PARTIAL | PAID | REFUNDED
+  paidAt        DateTime?
+
+  // Shipping
+  shippingMethod    String? // AIR | SEA | ROAD
+  carrier           String? // DHL, FedEx, etc.
+  carrierTrackingId String? // Tracking from D2F to customer
+  shippedAt         DateTime?
+  deliveredAt       DateTime?
+
+  // Timestamps
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  submittedAt DateTime? // When customer submitted retailer details
+
+  // Relations
+  parcel         Parcel?         @relation(fields: [parcelId], references: [id], onDelete: SetNull)
+  parcelId       String?
+  payments       Payment[]
+  returnRequests ReturnRequest[]
+
+  @@index([customerId, status, createdAt])
+  @@index([organizationId, status, createdAt])
+  @@index([customerWarehouseId])
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// WAREHOUSE ADDRESSES — D2F receiving addresses for Ship For Me
+// ══════════════════════════════════════════════════════════════════════════════
+model WarehouseAddress {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  label          String // e.g. "D2F US Warehouse - Delaware"
+  addressLine1   String
+  addressLine2   String?
+  city           String
+  stateProvince  String?
+  postalCode     String
+  country        String
+  phone          String?
+  email          String?
+  isActive       Boolean      @default(true)
+  isDefault      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, isActive])
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CUSTOMER AGREEMENT — Terms acceptance with versioning
+// ══════════════════════════════════════════════════════════════════════════════
+model CustomerAgreement {
+  id            String   @id @default(uuid())
+  version       String   @unique // e.g. "ship-for-me-v1.0"
+  title         String
+  content       String // Full terms text
+  serviceType   String // "SHIP_FOR_ME" | "BUY_FOR_ME" | "GENERAL"
+  isActive      Boolean  @default(true)
+  effectiveFrom DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  acceptances CustomerAgreementAcceptance[]
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CUSTOMER AGREEMENT ACCEPTANCE — Who accepted which version
+// ══════════════════════════════════════════════════════════════════════════════
+model CustomerAgreementAcceptance {
+  id          String            @id @default(uuid())
+  customerId  String
+  customer    Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  agreementId String
+  agreement   CustomerAgreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  version     String // Denormalized for quick lookup
+  acceptedAt  DateTime          @default(now())
+  acceptedVia String? // "APP" | "WEB" | "ADMIN"
+  ipAddress   String?
+
+  @@unique([customerId, agreementId])
+  @@index([customerId, acceptedAt])
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PAYMENTS — Tracks all payments for both services
+// ══════════════════════════════════════════════════════════════════════════════
+model Payment {
+  id String @id @default(uuid())
+
+  // Polymorphic: which service this payment belongs to
+  buyForMeRequestId  String?
+  buyForMeRequest    BuyForMeRequest?  @relation(fields: [buyForMeRequestId], references: [id], onDelete: Cascade)
+  shipForMeRequestId String?
+  shipForMeRequest   ShipForMeRequest? @relation(fields: [shipForMeRequestId], references: [id], onDelete: Cascade)
+
+  customerId     String
+  customer       Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  organizationId String
+
+  amountMinor       Int // Amount in minor currency unit
+  currency          String  @default("USD")
+  paymentMethod     String // CARD | BANK_TRANSFER | MOBILE_MONEY | MANUAL | WALLET
+  paymentProvider   String? // stripe, paypal, flooz, t-money, etc.
+  providerReference String? // External transaction ID
+
+  status  String @default("PENDING") // PENDING | COMPLETED | FAILED | REFUNDED | CANCELLED
+  purpose String // QUOTE_PAYMENT | DEPOSIT | FULL_PAYMENT | REFUND
+
+  // Manual verification fields
+  verificationNotes String?
+  verifiedBy        String? // Admin who verified
+  verifiedAt        DateTime?
+  verificationImage String? // Photo of bank transfer receipt, etc.
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([customerId, status, createdAt])
+  @@index([organizationId, status, createdAt])
+  @@index([buyForMeRequestId])
+  @@index([shipForMeRequestId])
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PAYMENT METHODS CONFIG — Configurable by country and service
+// ══════════════════════════════════════════════════════════════════════════════
+model PaymentMethodConfig {
+  id             String   @id @default(uuid())
+  organizationId String
+  serviceType    String // "BUY_FOR_ME" | "SHIP_FOR_ME" | "MARKETPLACE" | "ALL"
+  countryCode    String // "US", "TG", "ALL"
+  method         String // "CARD", "BANK_TRANSFER", "MOBILE_MONEY", "MANUAL"
+  provider       String? // "stripe", "flooz", "t-money", etc.
+  isActive       Boolean  @default(true)
+  minAmountMinor Int? // Minimum amount for this method
+  maxAmountMinor Int? // Maximum amount for this method
+  feePercent     Int?     @default(0) // Additional fee in bps
+  feeFixedMinor  Int?     @default(0) // Fixed fee in minor units
+  config         String? // JSON for provider-specific config
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId, serviceType, countryCode, isActive])
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RETURN REQUESTS — Customer returns for both services
+// ══════════════════════════════════════════════════════════════════════════════
+model ReturnRequest {
+  id String @id @default(uuid())
+
+  buyForMeRequestId  String?
+  buyForMeRequest    BuyForMeRequest?  @relation(fields: [buyForMeRequestId], references: [id], onDelete: Cascade)
+  shipForMeRequestId String?
+  shipForMeRequest   ShipForMeRequest? @relation(fields: [shipForMeRequestId], references: [id], onDelete: Cascade)
+
+  customerId     String
+  customer       Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  organizationId String
+
+  reason               String // Damaged, Wrong item, Not as described, etc.
+  description          String?
+  requestedAmountMinor Int? // Refund amount customer wants
+
+  status        String    @default("PENDING") // PENDING | APPROVED | REJECTED | COMPLETED
+  adminDecision String? // Admin notes
+  decidedAt     DateTime?
+  decidedBy     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId, status, createdAt])
+  @@index([organizationId, status, createdAt])
 }
