@@ -424,6 +424,8 @@ model SellerProfile {
   // Agreed before the first sale; basis points (1000 = 10.00%).
   commissionBps   Int       @default(1000)
   termsAcceptedAt DateTime?
+  termsAccepted   Boolean   @default(false)
+  verificationStatus String  @default("UNVERIFIED") // UNVERIFIED | PENDING | VERIFIED | REJECTED
   reviewNote      String?
   reviewedAt      DateTime?
   reviewedById    String?
@@ -439,8 +441,77 @@ model SellerProfile {
   user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   products     Product[]
   orders       ServiceOrder[]
+  verification SellerVerification?
+  earnings     SellerEarnings?
+  payouts      SellerPayout[]
 
   @@index([organizationId, status, createdAt])
+}
+
+// Seller identity/business verification documents submitted during onboarding.
+model SellerVerification {
+  id             String   @id @default(uuid())
+  sellerId       String   @unique
+  seller         SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  idDocumentType String?   // passport | national_id | business_license
+  idDocumentName String?
+  idDocumentBytes Bytes?
+  businessDocName String?
+  businessDocBytes Bytes?
+  selfieBytes    Bytes?
+  status         String    @default("PENDING") // PENDING | VERIFIED | REJECTED
+  reviewNote     String?
+  reviewedAt     DateTime?
+  reviewedById   String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+// Global D2F commission / fee configuration (configurable, not hardcoded).
+model CommissionSettings {
+  id             String   @id @default(uuid())
+  // Platform commission on marketplace sales (basis points, 1000 = 10%).
+  platformCommissionBps Int   @default(1000)
+  // Default fulfillment fee (basis points of order amount) when D2F fulfils.
+  defaultFulfillmentFeeBps Int @default(500)
+  // Default delivery fee (basis points) for D2F delivery.
+  defaultDeliveryFeeBps  Int   @default(300)
+  updatedAt      DateTime  @updatedAt
+  updatedById    String?
+}
+
+// Seller earnings accumulator (commission + fulfillment + delivery fees tracked separately).
+model SellerEarnings {
+  id              String   @id @default(uuid())
+  sellerId        String   @unique
+  seller          SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  // Gross merchandise value sold (before fees).
+  grossMerchandiseMinor Int   @default(0)
+  // Commission earned by D2F from this seller.
+  commissionEarnedMinor   Int   @default(0)
+  // Fulfillment fees earned by D2F.
+  fulfillmentFeeEarnedMinor Int @default(0)
+  // Delivery fees earned by D2F.
+  deliveryFeeEarnedMinor    Int @default(0)
+  // Net payable to seller.
+  netPayableMinor           Int   @default(0)
+  // Amount already paid out.
+  paidOutMinor              Int   @default(0)
+  updatedAt             DateTime  @updatedAt
+}
+
+// Payouts to sellers (admin-triggered).
+model SellerPayout {
+  id             String   @id @default(uuid())
+  sellerId       String
+  seller         SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  amountMinor    Int
+  currency       String   @default("USD")
+  status         String   @default("PENDING") // PENDING | PAID | CANCELLED
+  paidAt         DateTime?
+  reference      String?  // bank transfer ref, etc.
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
 // Administrative records for the selected Marketplace and Buy For Me modules.
@@ -456,6 +527,7 @@ model Product {
   description    String?
   priceMinor     Int
   currency       String         @default("USD")
+  status         String         @default("PENDING_REVIEW") // PENDING_REVIEW | APPROVED | REJECTED | SUSPENDED
   isActive       Boolean        @default(false)
   sellerId       String?
   fulfillment    String         @default("D2F") // SELLER | D2F
@@ -511,6 +583,14 @@ model ServiceOrder {
   // Commission snapshot taken from the agreed seller rate at order time.
   commissionBps  Int?
   commissionMinor Int?
+  // Fulfillment fee charged by D2F (when D2F fulfils).
+  fulfillmentFeeBps Int?
+  fulfillmentFeeMinor Int?
+  // Delivery fee charged by D2F (when D2F delivers).
+  deliveryFeeBps Int?
+  deliveryFeeMinor Int?
+  // Net amount payable to seller after all fees.
+  sellerNetMinor Int?
   // Delivery choice + recipient details captured at app checkout.
   deliveryPreference String?  // SELLER | D2F
   recipientName      String?

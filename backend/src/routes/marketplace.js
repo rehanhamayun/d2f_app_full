@@ -11,6 +11,7 @@ import { resolveOrganizationId } from '../tracking.js';
 import {
   audit,
   commissionFor,
+  calculateFees,
   customerOrderSelect,
   currencies,
   deliveryPreferences,
@@ -248,7 +249,13 @@ router.post('/orders', requireRole('CUSTOMER'), async (req, res, next) => {
       if (!(await reserveStock(tx, product.id, quantity))) {
         fail(409, 'That product sold out. Reduce the quantity or try another listing.');
       }
-      const { commissionBps, commissionMinor } = commissionFor(amountMinor, product.seller);
+      const settings = await prisma.commissionSettings.findFirst();
+      const { commissionBps, commissionMinor, fulfillmentFeeBps, fulfillmentFeeMinor, deliveryFeeBps, deliveryFeeMinor, sellerNetMinor } = calculateFees(amountMinor, {
+        seller: product.seller,
+        deliveryPreference,
+        fulfillment: product.fulfillment,
+        settings,
+      });
       const created = await tx.serviceOrder.create({
         data: {
           organizationId,
@@ -271,6 +278,11 @@ router.post('/orders', requireRole('CUSTOMER'), async (req, res, next) => {
           notes: notes?.trim() || null,
           commissionBps,
           commissionMinor,
+          fulfillmentFeeBps,
+          fulfillmentFeeMinor,
+          deliveryFeeBps,
+          deliveryFeeMinor,
+          sellerNetMinor,
         },
         select: customerOrderSelect,
       });

@@ -39,6 +39,11 @@ export const customerOrderSelect = {
   trackingRef: true,
   createdAt: true,
   updatedAt: true,
+  // D2F service fees are visible to buyers; commission is seller-only.
+  fulfillmentFeeBps: true,
+  fulfillmentFeeMinor: true,
+  deliveryFeeBps: true,
+  deliveryFeeMinor: true,
   parcel: { select: { trackingId: true } },
   product: {
     select: {
@@ -58,6 +63,7 @@ export const sellerOrderSelect = {
   ...customerOrderSelect,
   commissionBps: true,
   commissionMinor: true,
+  sellerNetMinor: true,
   recipientName: true,
   recipientPhone: true,
   deliveryAddress: true,
@@ -106,6 +112,27 @@ export function commissionFor(amountMinor, seller) {
   return {
     commissionBps: bps,
     commissionMinor: Math.round((amountMinor * bps) / 10000),
+  };
+}
+
+/** Calculate all fees for an order: commission, fulfillment, delivery, net to seller. */
+export function calculateFees(amountMinor, { seller, deliveryPreference = 'D2F', fulfillment = 'D2F', settings } = {}) {
+  const commission = seller ? commissionFor(amountMinor, seller) : { commissionBps: 0, commissionMinor: 0 };
+  const fulfillmentBps = fulfillment === 'D2F' ? (settings?.defaultFulfillmentFeeBps ?? 500) : 0;
+  const deliveryBps = deliveryPreference === 'D2F' ? (settings?.defaultDeliveryFeeBps ?? 300) : 0;
+  const fulfillmentFeeMinor = Math.round((amountMinor * fulfillmentBps) / 10000);
+  const deliveryFeeMinor = Math.round((amountMinor * deliveryBps) / 10000);
+  const totalFees = commission.commissionMinor + fulfillmentFeeMinor + deliveryFeeMinor;
+  const sellerNetMinor = Math.max(0, amountMinor - totalFees);
+  return {
+    commissionBps: commission.commissionBps,
+    commissionMinor: commission.commissionMinor,
+    fulfillmentFeeBps: fulfillmentBps,
+    fulfillmentFeeMinor,
+    deliveryFeeBps: deliveryBps,
+    deliveryFeeMinor,
+    sellerNetMinor,
+    totalFees,
   };
 }
 

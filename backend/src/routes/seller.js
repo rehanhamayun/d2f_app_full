@@ -49,6 +49,8 @@ const profileSelect = {
   address: true,
   commissionBps: true,
   termsAcceptedAt: true,
+  termsAccepted: true,
+  verificationStatus: true,
   reviewNote: true,
   reviewedAt: true,
   createdAt: true,
@@ -159,11 +161,82 @@ router.get('/me', async (req, res, next) => {
   try {
     const profile = await prisma.sellerProfile.findUnique({ where: { userId: req.user.id }, select: profileSelect });
     if (!profile) return res.json({ profile: null });
-    const [productCount, openOrders] = await Promise.all([
+    const [productCount, openOrders, verification] = await Promise.all([
       prisma.product.count({ where: { sellerId: profile.id } }),
       prisma.serviceOrder.count({ where: { sellerId: profile.id, status: { notIn: ['COMPLETED', 'CANCELLED'] } } }),
+      prisma.sellerVerification.findUnique({ where: { sellerId: profile.id } }),
     ]);
-    res.json({ profile, productCount, openOrders });
+    res.json({ profile, productCount, openOrders, verification });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Seller terms acceptance ─────────────────────────────────────────────
+
+router.post('/terms', async (req, res, next) => {
+  try {
+    const { accepted } = req.body || {};
+    if (accepted !== true) fail(400, 'You must accept the marketplace terms.');
+    const profile = await prisma.sellerProfile.update({
+      where: { userId: req.user.id },
+      data: { termsAccepted: true, termsAcceptedAt: new Date() },
+      select: { id: true, termsAccepted: true, termsAcceptedAt: true, status: true },
+    });
+    await audit(prisma, req, 'SellerProfile', profile.id, 'SELLER_TERMS_ACCEPTED', 'accepted marketplace terms');
+    res.json({ ok: true, termsAccepted: profile.termsAccepted, termsAcceptedAt: profile.termsAcceptedAt });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Seller verification documents ───────────────────────────────────────
+
+router.post('/verification', raw({ type: Object.keys(IMAGE_CONTENT_TYPES), limit: MAX_IMAGE_BYTES }), async (req, res, next) => {
+  try {
+    const { idDocumentType } = req.body || {};
+    const extension = IMAGE_CONTENT_TYPES[req.headers['content-type']];
+    if (!extension || !Buffer.isBuffer(req.body) || req.body.length < 16) {
+      return res.status(415).json({ error: 'Attach a valid JPEG, PNG or WebP document.' });
+    }
+    const profile = await prisma.sellerProfile.findUnique({ where: { userId: req.user.id } });
+    if (!profile) return res.status(404).json({ error: 'Seller profile not found.' });
+    const existing = await prisma.sellerVerification.findUnique({ where: { sellerId: profile.id } });
+    const data = {
+      idDocumentType: idDocumentType || null,
+      idDocumentName: req.query?.name || `verification-${Date.now()}.${extension}`,
+      idDocumentBytes: req.body,
+      status: 'PENDING',
+    };
+    const verification = existing
+      ? await prisma.sellerVerification.update({ where: { sellerId: profile.id }, data })
+      : await prisma.sellerVerification.create({ data: { ...data, sellerId: profile.id } });
+    await audit(prisma, req, 'SellerVerification', verification.id, 'SELLER_VERIFICATION_SUBMITTED', `type=${idDocumentType}`);
+    res.status(201).json({ ok: true, status: verification.status, id: verification.id });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/verification', async (req, res, next) => {
+  try {
+    const profile = await prisma.sellerProfile.findUnique({ where: { userId: req.user.id } });
+    if (!profile) return res.status(404).json({ error: 'Seller profile not found.' });
+    const verification = await prisma.sellerVerification.findUnique({ where: { sellerId: profile.id } });
+    res.json({ verification });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/verification/document', async (req, res, next) => {
+  try {
+    const profile = await prisma.sellerProfile.findUnique({ where: { userId: req.user.id } });
+    if (!profile) return res.status(404).json({ error: 'Seller profile not found.' });
+    const verification = await prisma.sellerVerification.findUnique({ where: { sellerId: profile.id } });
+    if (!verification?.idDocumentBytes) return res.status(404).json({ error: 'No document on file.' });
+    res.set('Content-Type', 'image/jpeg');
+    res.send(Buffer.from(verification.idDocumentBytes));
   } catch (error) {
     next(error);
   }

@@ -319,4 +319,158 @@ router.patch('/orders/:id', async (req, res, next) => {
     res.json(result);
   } catch (e) { next(e); }
 });
+
+// ── Product approval workflow ───────────────────────────────────────────
+
+router.get('/products/pending', async (req, res, next) => {
+  try {
+    const products = await prisma.product.findMany({
+      where: { organizationId: req.organizationId, status: 'PENDING_REVIEW' },
+      include: { seller: { select: { id: true, displayName: true, status: true } } },
+      orderBy: { createdAt: 'asc' },
+      take: 200,
+    });
+    res.json(products);
+  } catch (e) { next(e); }
+});
+
+router.post('/products/:id/approve', async (req, res, next) => {
+  try {
+    const { action, reviewNote } = req.body || {};
+    if (!['APPROVE', 'REJECT'].includes(action)) fail(400, 'Choose approve or reject.');
+    const product = await prisma.product.findFirst({ where: { id: req.params.id, organizationId: req.organizationId } });
+    if (!product) fail(404, 'Product not found.');
+    if (product.status !== 'PENDING_REVIEW') fail(409, `Product is already ${product.status.toLowerCase()}.`);
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.product.update({
+        where: { id: product.id },
+        data: { status: action === 'APPROVE' ? 'APPROVED' : 'REJECTED', isActive: action === 'APPROVE', reviewNote: reviewNote?.trim() || null },
+        include: { seller: { select: { id: true, displayName: true, userId: true } } },
+      });
+      await audit(tx, req, 'Product', product.id, action === 'APPROVE' ? 'PRODUCT_APPROVE' : 'PRODUCT_REJECT', reviewNote || `${product.status} → ${action}`);
+      return result;
+    });
+    // Notify the seller
+    if (updated.seller?.userId) {
+      await createNotification({
+        userId: updated.seller.userId,
+        type: action === 'APPROVE' ? 'PRODUCT_APPROVED' : 'PRODUCT_REJECTED',
+        title: action === 'APPROVE' ? 'Product approved' : 'Product rejected',
+        body: action === 'APPROVE' ? `${product.title} is now live on the marketplace.` : `Product "${product.title}" was not approved. ${reviewNote || ''}`,
+      });
+    }
+    res.json(updated);
+  } catch (e) { next(e); }
+});
+
+// ── Commission settings (global D2F config) ─────────────────────────────
+
+router.get('/commission-settings', async (req, res, next) => {
+  try {
+    let settings = await prisma.commissionSettings.findFirst();
+    if (!settings) {
+      settings = await prisma.commissionSettings.create({
+        data: { platformCommissionBps: 1000, defaultFulfillmentFeeBps: 500, defaultDeliveryFeeBps: 300 },
+      });
+    }
+    res.json(settings);
+  } catch (e) { next(e); }
+});
+
+router.post('/commission-settings', async (req, res, next) => {
+  try {
+    const { platformCommissionBps, defaultFulfillmentFeeBps, defaultDeliveryFeeBps } = req.body || {};
+    if (platformCommissionBps !== undefined && !validBps(platformCommissionBps)) fail(400, 'Platform commission must be between 0% and 50%.');
+    if (defaultFulfillmentFeeBps !== undefined && !validBps(defaultFulfillmentFeeBps)) fail(400, 'Fulfillment fee must be between 0% and 50%.');
+    if (defaultDeliveryFeeBps !== undefined && !validBps(defaultDeliveryFeeBps)) fail(400, 'Delivery fee must be between 0% and 50%.');
+    let settings = await prisma.commissionSettings.findFirst();
+    if (!settings) {
+      settings = await prisma.commissionSettings.create({
+        data: {
+          platformCommissionBps: platformCommissionBps ?? 1000,
+          defaultFulfillmentFeeBps: defaultFulfillmentFeeBps ?? 500,
+          defaultDeliveryFeeBps: defaultDeliveryFeeBps ?? 300,
+          updatedById: req.user.id,
+        },
+      });
+    } else {
+      settings = await prisma.commissionSettings.update({
+        where: { id: settings.id },
+        data: {
+          ...(platformCommissionBps !== undefined && { platformCommissionBps }),
+          ...(defaultFulfillmentFeeBps !== undefined && { defaultFulfillmentFeeBps }),
+          ...(defaultDeliveryFeeBps !== undefined && { defaultDeliveryFeeBps }),
+          updatedById: req.user.id,
+        },
+      });
+    }
+    await audit(prisma, req, 'CommissionSettings', settings.id, 'COMMISSION_SETTINGS_UPDATE', JSON.stringify({ platformCommissionBps, defaultFulfillmentFeeBps, defaultDeliveryFeeBps }));
+    res.json(settings);
+  } catch (e) { next(e); }
+});
+
+// ── Seller earnings ─────────────────────────────────────────────────────
+
+router.get('/sellers/:id/earnings', async (req, res, next) => {
+  try {
+    const sellerId = req.params.id;
+    const profile = await prisma.sellerProfile.findFirst({ where: { id: sellerId, organizationId: req.organizationId } });
+    if (!profile) fail(404, 'Seller not found.');
+    const earnings = await prisma.sellerEarnings.findUnique({ where: { sellerId } });
+    // Recalculate from completed orders
+    const orders = await prisma.serviceOrder.findMany({
+      where: { sellerId, kind: 'MARKETPLACE', status: 'COMPLETED' },
+      select: { amountMinor: true, commissionMinor: true, fulfillmentFeeMinor: true, deliveryFeeMinor: true, sellerNetMinor: true, currency: true },
+    });
+    const totals = orders.reduce((acc, o) => {
+      acc.gross += o.amountMinor ?? 0;
+      acc.commission += o.commissionMinor ?? 0;
+      acc.fulfillment += o.fulfillmentFeeMinor ?? 0;
+      acc.delivery += o.deliveryFeeMinor ?? 0;
+      acc.net += o.sellerNetMinor ?? 0;
+      return acc;
+    }, { gross: 0, commission: 0, fulfillment: 0, delivery: 0, net: 0 });
+    res.json({ sellerId, displayName: profile.displayName, earnings, totals, orderCount: orders.length });
+  } catch (e) { next(e); }
+});
+
+// ── Payouts ─────────────────────────────────────────────────────────────
+
+router.get('/payouts', async (req, res, next) => {
+  try {
+    const status = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : null;
+    const payouts = await prisma.sellerPayout.findMany({
+      where: { ...(status ? { status } : {}), seller: { organizationId: req.organizationId } },
+      include: { seller: { select: { id: true, displayName: true, status: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    res.json(payouts);
+  } catch (e) { next(e); }
+});
+
+router.post('/payouts', async (req, res, next) => {
+  try {
+    const { sellerId, amountMinor, currency = 'USD', reference } = req.body || {};
+    if (typeof sellerId !== 'string') fail(400, 'Choose a seller.');
+    if (!validAmount(amountMinor) || amountMinor <= 0) fail(400, 'Enter a valid payout amount.');
+    const seller = await prisma.sellerProfile.findFirst({ where: { id: sellerId, organizationId: req.organizationId } });
+    if (!seller) fail(404, 'Seller not found.');
+    const earnings = await prisma.sellerEarnings.findUnique({ where: { sellerId } });
+    if (!earnings || earnings.netPayableMinor < amountMinor) fail(400, 'Insufficient payable balance.');
+    const payout = await prisma.$transaction(async (tx) => {
+      const created = await tx.sellerPayout.create({
+        data: { sellerId, amountMinor, currency, status: 'PAID', paidAt: new Date(), reference: reference?.trim() || null },
+      });
+      await tx.sellerEarnings.update({
+        where: { sellerId },
+        data: { paidOutMinor: earnings.paidOutMinor + amountMinor },
+      });
+      await audit(tx, req, 'SellerPayout', created.id, 'SELLER_PAYOUT', `paid ${amountMinor} ${currency} to ${seller.displayName}`);
+      return created;
+    });
+    res.status(201).json(payout);
+  } catch (e) { next(e); }
+});
+
 export default router;
