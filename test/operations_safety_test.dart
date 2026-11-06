@@ -170,12 +170,12 @@ void main() {
             .onPressed,
         isNull,
       );
-      Future<void> show(Finder f) async {
+      Future<void> show(Finder f, {double delta = 180}) async {
         FocusManager.instance.primaryFocus?.unfocus();
         await tester.pumpAndSettle();
         await tester.scrollUntilVisible(
           f,
-          180,
+          delta,
           scrollable: find.byType(Scrollable).first,
         );
         await tester.ensureVisible(f);
@@ -206,7 +206,7 @@ void main() {
         isNotNull,
       );
       final contents = find.byKey(const ValueKey('declaration-contents'));
-      await show(contents);
+      await show(contents, delta: -180);
       await tester.enterText(contents, '4 shirts; 2 pairs of shoes.');
       await tester.pumpAndSettle();
       expect(

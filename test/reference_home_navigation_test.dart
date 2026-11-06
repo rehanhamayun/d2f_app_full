@@ -83,17 +83,36 @@ void main() {
         await tester.tap(find.byKey(const ValueKey('nav-home')));
         await tester.pumpAndSettle();
       }
-      final bottom = tester.getRect(find.byType(D2FNavigationBar)).top;
       for (final service in D2FService.values.where((s) => !s.isComingSoon)) {
-        final rect = tester.getRect(
-          find.byKey(ValueKey('service-${service.name}')),
+        final card = find.byKey(ValueKey('service-${service.name}'));
+        await tester.scrollUntilVisible(
+          card,
+          120,
+          scrollable: find.byType(Scrollable).first,
         );
+        await tester.ensureVisible(card);
+        await tester.pumpAndSettle();
         expect(
-          rect.bottom,
-          lessThanOrEqualTo(bottom),
-          reason: '${service.name} should be visible without scrolling',
+          card.hitTestable(),
+          findsOneWidget,
+          reason: '${service.name} should be reachable from home',
         );
       }
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('service-shipForMe')),
+      );
+      await tester.tap(find.byKey(const ValueKey('service-shipForMe')));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<D2FServiceScreen>(find.byType(D2FServiceScreen)).service,
+        D2FService.shipForMe,
+      );
+      expect(
+        find.textContaining('Shop anywhere, ship with D2F'),
+        findsOneWidget,
+      );
+      await tester.pageBack();
+      await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
     },
   );

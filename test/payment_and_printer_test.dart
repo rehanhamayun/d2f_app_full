@@ -29,7 +29,7 @@ class PrintAuth extends AuthController {
 
 void main() {
   testWidgets(
-    'camera evidence activates a safe submit button and preserves transaction ID',
+    'screenshot evidence activates a safe submit button and preserves transaction ID',
     (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;
@@ -94,7 +94,7 @@ void main() {
       await tester.ensureVisible(find.byKey(const ValueKey('payment-camera')));
       await tester.tap(find.byKey(const ValueKey('payment-camera')));
       await tester.pumpAndSettle();
-      expect(picked, ImageSource.camera);
+      expect(picked, ImageSource.gallery);
       expect(tester.widget<FilledButton>(button).onPressed, isNotNull);
       expect(tester.getBottomLeft(button).dy, lessThanOrEqualTo(844 - 32));
       await tester.tap(button);
@@ -107,7 +107,7 @@ void main() {
     },
   );
   testWidgets(
-    'denied camera access shows permission instructions and keeps submit disabled',
+    'denied photo access shows permission instructions and keeps submit disabled',
     (tester) async {
       await tester.pumpWidget(
         MaterialApp(
@@ -116,7 +116,7 @@ void main() {
             instructions: 'Instructions',
             version: 1,
             pickImage: (_) async =>
-                throw PlatformException(code: 'camera_access_denied'),
+                throw PlatformException(code: 'photo_access_denied'),
           ),
         ),
       );

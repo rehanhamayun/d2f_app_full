@@ -38,7 +38,11 @@ class _BuyForMeShopState extends ConsumerState<BuyForMeShop> {
   @override
   void initState() {
     super.initState();
-    _maybeLoad();
+    ref.listenManual(
+      authControllerProvider.select((state) => state.valueOrNull?.id),
+      (_, _) => _maybeLoad(),
+      fireImmediately: true,
+    );
   }
 
   Future<void> _load() async {
@@ -73,7 +77,6 @@ class _BuyForMeShopState extends ConsumerState<BuyForMeShop> {
 
   @override
   Widget build(BuildContext context) {
-    _maybeLoad();
     final role = ref.watch(authControllerProvider).valueOrNull?.role;
     if (role != null && role != UserRole.CUSTOMER) return _staffNotice();
     final canShop = role == UserRole.CUSTOMER || role == null;

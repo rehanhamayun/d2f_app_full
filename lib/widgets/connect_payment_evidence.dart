@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../core/api.dart';
@@ -14,7 +15,8 @@ class ConnectPaymentEvidenceForm extends StatefulWidget {
     required String method,
     required String transactionId,
     required Uint8List bytes,
-  })? submit;
+  })?
+  submit;
   const ConnectPaymentEvidenceForm({
     super.key,
     required this.bookingId,
@@ -64,6 +66,13 @@ class _ConnectPaymentEvidenceFormState
           _error = null;
         });
       }
+    } on PlatformException catch (e) {
+      if (mounted)
+        setState(
+          () => _error = e.code.toLowerCase().contains('denied')
+              ? 'Photo access was denied. Enable photo access in Android Settings (or your device settings), then try again.'
+              : 'Could not open your photos. Please try again.',
+        );
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
@@ -109,6 +118,16 @@ class _ConnectPaymentEvidenceFormState
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Submit payment evidence')),
+    bottomNavigationBar: SafeArea(
+      minimum: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+      child: FilledButton(
+        key: const ValueKey('payment-evidence-submit'),
+        onPressed: _approved && _method != null && _bytes != null && !_saving
+            ? _save
+            : null,
+        child: Text(_saving ? 'Submitting…' : 'Submit for D2F verification'),
+      ),
+    ),
     body: ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -167,13 +186,6 @@ class _ConnectPaymentEvidenceFormState
         if (_error != null)
           Text(_error!, style: const TextStyle(color: AppColors.coral)),
         const SizedBox(height: 20),
-        FilledButton(
-          key: const ValueKey('payment-evidence-submit'),
-          onPressed: _approved && _method != null && _bytes != null && !_saving
-              ? _save
-              : null,
-          child: Text(_saving ? 'Submitting…' : 'Submit for D2F verification'),
-        ),
       ],
     ),
   );

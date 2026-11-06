@@ -66,7 +66,7 @@ class _MarketplaceShopState extends ConsumerState<MarketplaceShop> {
       if (!mounted) return;
       setState(() {
         _products
-          ..clear
+          ..clear()
           ..addAll(browse.products);
         _total = browse.total;
         _categories = browse.categories;

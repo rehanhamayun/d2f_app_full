@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../core/api.dart';
 import '../../core/theme.dart';
-import '../../widgets/auth_widgets.dart';
 
 /// Shows the customer's D2F warehouse address and unique customer ID
 /// for Ship For Me deliveries.

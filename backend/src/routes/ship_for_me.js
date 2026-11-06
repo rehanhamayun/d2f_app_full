@@ -232,7 +232,13 @@ router.get('/terms', async (req, res, next) => {
       orderBy: { effectiveFrom: 'desc' },
     });
     if (!agreement) return res.status(404).json({ error: 'No active terms found.' });
+    const acceptance = await prisma.customerAgreementAcceptance.findFirst({
+      where: { agreementId: agreement.id, version: agreement.version, customer: { userId: req.user.id } },
+      select: { acceptedAt: true },
+    });
     res.json({
+      accepted: Boolean(acceptance),
+
       id: agreement.id,
       version: agreement.version,
       title: agreement.title,
@@ -257,7 +263,8 @@ router.post('/terms/accept', async (req, res, next) => {
     const agreement = await prisma.customerAgreement.findUnique({
       where: { id: agreementId },
     });
-    if (!agreement || !agreement.isActive) fail(404, 'Terms not found.');
+    if (!agreement || !agreement.isActive || agreement.serviceType !== 'SHIP_FOR_ME') fail(404, 'Terms not found.');
+    if (version !== agreement.version) fail(409, 'The terms have changed. Review the current version before accepting.');
     await prisma.$transaction(async (tx) => {
       await tx.customerAgreementAcceptance.upsert({
         where: {

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../core/api.dart';
 import '../../core/theme.dart';
-import '../../widgets/auth_widgets.dart';
 
 /// Ship For Me terms & conditions acceptance screen.
 /// Customer must actively accept before registering a purchase.

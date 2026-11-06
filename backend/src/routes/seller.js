@@ -90,7 +90,7 @@ const brandingSelect = {
 const contentTypeFromName = (name) => {
   const ext = String(name || '').split('.').pop()?.toLowerCase();
   const entry = Object.entries(IMAGE_CONTENT_TYPES).find(([, value]) => value === ext);
-  return entry ? `image/${entry[0]}` : 'image/jpeg';
+  return entry ? entry[0] : 'image/jpeg';
 };
 
 async function myProfile(tx, userId) {

@@ -39,7 +39,6 @@ class _SellerProductsTabState extends State<SellerProductsTab> {
         _products = products;
         _loading = false;
       });
-      await widget.onChanged();
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -52,12 +51,18 @@ class _SellerProductsTabState extends State<SellerProductsTab> {
   Future<void> _toggleActive(MarketplaceProduct product, bool value) async {
     setState(() => _busy.add(product.id));
     try {
-      final updated = await Api.I.updateSellerProduct(product.id, isActive: value);
+      final updated = await Api.I.updateSellerProduct(
+        product.id,
+        isActive: value,
+      );
       if (!mounted) return;
       setState(() {
         _products = [
           for (final p in _products)
-            if (p.id == product.id) updated.copyWith(isActive: updated.isActive) else p,
+            if (p.id == product.id)
+              updated.copyWith(isActive: updated.isActive)
+            else
+              p,
         ];
         _busy.remove(product.id);
       });
@@ -71,22 +76,33 @@ class _SellerProductsTabState extends State<SellerProductsTab> {
   Future<void> _openForm([MarketplaceProduct? product]) async {
     final saved = await Navigator.push<bool>(
       context,
-      MaterialPageRoute<bool>(builder: (_) => SellerProductFormScreen(product: product)),
+      MaterialPageRoute<bool>(
+        builder: (_) => SellerProductFormScreen(product: product),
+      ),
     );
-    if (saved == true) _load();
+    if (mounted && saved == true) {
+      await _load();
+      await widget.onChanged();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator(color: AppColors.coral));
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.coral),
+      );
     }
     if (_failed) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off_rounded, size: 34, color: AppColors.textGrey),
+            const Icon(
+              Icons.cloud_off_rounded,
+              size: 34,
+              color: AppColors.textGrey,
+            ),
             const SizedBox(height: 8),
             const Text('Your listings could not be loaded.'),
             const SizedBox(height: 12),
@@ -98,7 +114,7 @@ class _SellerProductsTabState extends State<SellerProductsTab> {
     return Stack(
       children: [
         if (_products.isEmpty)
-          Center(
+          SingleChildScrollView(
             child: Padding(
               padding: const EdgeInsets.all(26),
               child: Column(
@@ -107,19 +123,34 @@ class _SellerProductsTabState extends State<SellerProductsTab> {
                   Container(
                     width: 80,
                     height: 80,
-                    decoration: const BoxDecoration(color: AppColors.goldSoft, shape: BoxShape.circle),
-                    child: const Icon(Icons.storefront_outlined, size: 36, color: Color(0xFF9A7100)),
+                    decoration: const BoxDecoration(
+                      color: AppColors.goldSoft,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.storefront_outlined,
+                      size: 36,
+                      color: Color(0xFF9A7100),
+                    ),
                   ),
                   const SizedBox(height: 14),
                   const Text(
                     'List your first product',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.navy),
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.navy,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   const Text(
                     'Photos, price, stock and how D2F delivers it —\nyour shopfront goes live as soon as you save.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 11, height: 1.6, color: AppColors.textGrey),
+                    style: TextStyle(
+                      fontSize: 11,
+                      height: 1.6,
+                      color: AppColors.textGrey,
+                    ),
                   ),
                 ],
               ),
@@ -145,7 +176,10 @@ class _SellerProductsTabState extends State<SellerProductsTab> {
             icon: const Icon(Icons.add_rounded, color: Colors.white),
             label: const Text(
               'New listing',
-              style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white),
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+              ),
             ),
           ),
         ),
@@ -186,7 +220,11 @@ class _SellerProductsTabState extends State<SellerProductsTab> {
                         if (p.featured)
                           const Padding(
                             padding: EdgeInsets.only(right: 5),
-                            child: Icon(Icons.auto_awesome_rounded, size: 13, color: AppColors.gold),
+                            child: Icon(
+                              Icons.auto_awesome_rounded,
+                              size: 13,
+                              color: AppColors.gold,
+                            ),
                           ),
                         Expanded(
                           child: Text(
@@ -208,22 +246,38 @@ class _SellerProductsTabState extends State<SellerProductsTab> {
                       '${p.category} · ${formatMoney(p.priceMinor, p.currency)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: AppColors.textGrey),
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textGrey,
+                      ),
                     ),
                     const SizedBox(height: 3),
                     Row(
                       children: [
                         _MiniTag(
-                          label: p.stockCount == null ? 'Stock untracked' : 'Stock ${p.stockCount}',
-                          color: p.soldOut ? AppColors.coral : AppColors.textGrey,
+                          label: p.stockCount == null
+                              ? 'Stock untracked'
+                              : 'Stock ${p.stockCount}',
+                          color: p.soldOut
+                              ? AppColors.coral
+                              : AppColors.textGrey,
                         ),
                         const SizedBox(width: 6),
-                        _MiniTag(label: '${p.ordersCount} ${p.ordersCount == 1 ? 'order' : 'orders'}', color: AppColors.blue),
+                        _MiniTag(
+                          label:
+                              '${p.ordersCount} ${p.ordersCount == 1 ? 'order' : 'orders'}',
+                          color: AppColors.blue,
+                        ),
                         if (p.fulfillment == 'D2F') ...[
                           const SizedBox(width: 6),
                           const Tooltip(
                             message: 'Fulfilled by D2F',
-                            child: Icon(Icons.warehouse_rounded, size: 13, color: AppColors.blue),
+                            child: Icon(
+                              Icons.warehouse_rounded,
+                              size: 13,
+                              color: AppColors.blue,
+                            ),
                           ),
                         ],
                       ],
@@ -239,7 +293,11 @@ class _SellerProductsTabState extends State<SellerProductsTab> {
                           width: 34,
                           height: 40,
                           child: Center(
-                            child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                            child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
                           ),
                         )
                       : Switch(
@@ -272,14 +330,18 @@ class _MiniTag extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-        decoration: BoxDecoration(
-          color: AppColors.subtle,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w800, color: color),
-        ),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    decoration: BoxDecoration(
+      color: AppColors.subtle,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Text(
+      label,
+      style: TextStyle(
+        fontSize: 8.5,
+        fontWeight: FontWeight.w800,
+        color: color,
+      ),
+    ),
+  );
 }

@@ -118,10 +118,14 @@ void main() {
               .service,
           service,
         );
-        if (service == D2FService.buy || service == D2FService.marketplace) {
+        if (service == D2FService.buy ||
+            service == D2FService.shipForMe ||
+            service == D2FService.marketplace) {
           expect(
             find.textContaining(
-              service == D2FService.buy ? 'See it. Send it.' : 'Global favourites.',
+              service == D2FService.buy
+                  ? 'See it. Send it.'
+                  : 'Global favourites.',
             ),
             findsOneWidget,
           );
@@ -152,10 +156,7 @@ void main() {
       // Buy For Me: hero, request CTA and request form validation.
       await tester.pumpWidget(
         wrap(
-          const D2FServiceScreen(
-            key: ValueKey('buy'),
-            service: D2FService.buy,
-          ),
+          const D2FServiceScreen(key: ValueKey('buy'), service: D2FService.buy),
         ),
       );
       await tester.pumpAndSettle();
@@ -229,7 +230,9 @@ void main() {
           );
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull, reason: service.name);
-          if (service == D2FService.buy || service == D2FService.marketplace) {
+          if (service == D2FService.buy ||
+              service == D2FService.shipForMe ||
+              service == D2FService.marketplace) {
             // Live storefronts: the contact icon lives in the app bar.
             expect(find.byTooltip('Contact D2F'), findsOneWidget);
           } else {
@@ -277,7 +280,9 @@ void main() {
       D2FService.business,
       D2FService.loads,
     ]) {
-      if (service == D2FService.buy || service == D2FService.marketplace) {
+      if (service == D2FService.buy ||
+          service == D2FService.shipForMe ||
+          service == D2FService.marketplace) {
         await tester.pumpWidget(
           wrap(
             RoleWorkspaceScreen(loadCustomerParcels: () async => []),

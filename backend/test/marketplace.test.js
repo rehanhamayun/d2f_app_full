@@ -61,6 +61,22 @@ test('Marketplace shopfront, seller studio, Buy For Me and commissions', async t
       expectStatus(await req('/seller/me', foreignCustomer), 200);
     });
 
+    await t.test('approved seller studio and branding return current status and valid image types', async () => {
+      const studio = expectStatus(await req('/seller/me', sellerUser), 200);
+      assert.equal(studio.profile.status, 'APPROVED');
+      assert.equal(studio.productCount, 0);
+      for (const [slot, contentType, name] of [['profile-picture', 'image/png', 'shop.png'], ['banner', 'image/jpeg', 'cover.jpg']]) {
+        expectStatus(await rawReq(`/seller/me/${slot}?name=${name}`, sellerUser, jpeg, contentType), 200);
+        const image = await rawBytes(`/seller/me/${slot}`, sellerUser);
+        assert.equal(image.status, 200);
+        assert.equal(image.contentType, contentType);
+        assert.deepEqual(image.bytes, jpeg);
+      }
+      const updated = expectStatus(await req('/seller/me', sellerUser), 200);
+      assert.equal(updated.profile.profilePictureName, 'shop.png');
+      assert.equal(updated.profile.bannerName, 'cover.jpg');
+    });
+
     let productId;
     await t.test('approved seller lists a product with photos; buyer browses it', async () => {
       const created = expectStatus(await req('/seller/products', sellerUser, 'POST', { title: 'Smoked dried pepper 500g', category: 'Spices & Food', description: 'Hand-smoked scotch bonnet, ground fresh.', priceMinor: 3500, currency: 'USD', fulfillment: 'SELLER', stockCount: 7, locationCity: 'Lomé', locationCountry: 'Togo' }), 201);

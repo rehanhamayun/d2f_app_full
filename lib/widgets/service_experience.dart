@@ -243,8 +243,6 @@ class D2FServiceDirectory extends StatelessWidget {
                                       switch (service) {
                                         D2FService.shipping =>
                                           'International\nShipping',
-                                        D2FService.buy =>
-                                          'Buy For Me /\nShip For Me',
                                         _ => service.label,
                                       },
                                       textAlign: TextAlign.center,
@@ -485,6 +483,7 @@ class D2FServiceHome extends StatelessWidget {
           D2FService.shipping,
           D2FService.local,
           D2FService.buy,
+          D2FService.shipForMe,
           D2FService.africa,
           D2FService.marketplace,
           D2FService.connect,
@@ -687,7 +686,10 @@ class _D2FServiceScreenState extends State<D2FServiceScreen> {
   @override
   Widget build(BuildContext context) {
     final service = widget.service;
-    final immersive = service == D2FService.buy || service == D2FService.shipForMe || service == D2FService.marketplace;
+    final immersive =
+        service == D2FService.buy ||
+        service == D2FService.shipForMe ||
+        service == D2FService.marketplace;
     if (immersive) {
       return Scaffold(
         backgroundColor: AppColors.cream,
@@ -1054,4 +1056,3 @@ class _D2FServiceScreenState extends State<D2FServiceScreen> {
     ),
   );
 }
-
