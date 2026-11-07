@@ -4,12 +4,20 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { Containers, Locations } from './warehouse.jsx';
 import { Commerce, money } from './commerce.jsx';
 import { SERVICE_COUNTRIES } from './service-area.js';
+import { dateTime, dateTimeFromLocalInput, dateTimeLocalInput } from './operations-ui.jsx';
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 const origin = { id: 'oma', code: 'OMA', city: 'Omaha, NE', country: 'United States', name: 'Omaha Warehouse' };
 const destination = { id: 'lom', code: 'LOM', city: 'Lomé', country: 'Togo', name: 'Lomé Facility' };
 const parcel = { id: 'p1', trackingId: 'D2F000000000001', recipientName: 'Kossi Mensah', customer: { displayName: 'Ama Boateng' }, weightKg: 12.5 };
 const baseContainer = { id: 'c1', code: 'QA-SEA-001', method: 'SEA', status: 'LOADING', origin, destination, _count: { parcels: 0 }, parcels: [], events: [] };
 beforeEach(() => { vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); });
+it('formats and converts admin timestamps in Chicago time', () => {
+  const winter = '2026-01-15T18:30:00.000Z';
+  expect(dateTimeLocalInput(winter)).toBe('2026-01-15T12:30');
+  expect(dateTimeFromLocalInput('2026-01-15T12:30')).toBe(winter);
+  expect(dateTimeFromLocalInput('2026-07-15T12:30')).toBe('2026-07-15T17:30:00.000Z');
+  expect(dateTime(winter)).toContain('12:30 PM');
+});
 it('container scan errors preserve input; loading and departure require the real API and confirmation', async () => {
   let c = structuredClone(baseContainer), failScan = true;
   const writes = [];
@@ -95,15 +103,17 @@ it('Buy For Me saves a manual quote and preserves it after an API error', async 
   render(<Commerce kind="BUY_FOR_ME" token="test" notify={vi.fn()} refreshKey={0} />);
   await user.click(await screen.findByRole('button', { name: 'Laptop request', exact: true }));
   const dialog = screen.getByRole('dialog', { name: 'Laptop request' });
-  await user.type(within(dialog).getByLabelText('Total quote (EUR)'), '150.00');
+  await user.type(within(dialog).getByLabelText('Product cost (EUR)'), '125.00');
+  await user.type(within(dialog).getByLabelText('Shipping cost (EUR)'), '25.00');
   await user.selectOptions(within(dialog).getByLabelText(/Next status/), 'QUOTED');
-  await user.click(within(dialog).getByRole('button', { name: 'Save updates' }));
+  await user.click(within(dialog).getByRole('button', { name: 'Save quote / status' }));
   expect(await within(dialog).findByRole('alert')).toHaveTextContent('Retry your quote');
-  expect(within(dialog).getByLabelText('Total quote (EUR)')).toHaveValue(150);
+  expect(within(dialog).getByLabelText('Product cost (EUR)')).toHaveValue(125);
+  expect(within(dialog).getByLabelText('Shipping cost (EUR)')).toHaveValue(25);
   failed = false;
-  await user.click(within(dialog).getByRole('button', { name: 'Save updates' }));
-  await waitFor(() => expect(writes.at(-1)).toMatchObject({ status: 'QUOTED', amountMinor: 15000 }));
-  expect(await within(dialog).findByText('Customer acceptance confirmed')).toBeInTheDocument();
+  await user.click(within(dialog).getByRole('button', { name: 'Save quote / status' }));
+  await waitFor(() => expect(writes.at(-1)).toMatchObject({ status: 'QUOTED', productCostMinor: 12500, shippingCostMinor: 2500 }));
+  expect(within(dialog).getByText('Quoted', { exact: true })).toBeInTheDocument();
 });
 
 it('Staff dispatchers can use operational directories while admin management stays hidden', async () => {

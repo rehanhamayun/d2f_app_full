@@ -251,7 +251,7 @@ test('M2: warehouse, two-way freight, permissions and selected revenue modules',
       expectStatus(await req(path, admin, 'PATCH', { status: 'ACCEPTED' }), 200);
       expectStatus(await req(path, admin, 'PATCH', { amountMinor: 1 }), 409);
       for (const status of ['PURCHASED', 'RECEIVED']) expectStatus(await req(path, admin, 'PATCH', { status }), 200);
-      expectStatus(await req(path, admin, 'PATCH', { status: 'SHIPPED', trackingId: returnParcel.trackingId }), 200);
+      expectStatus(await req(path, admin, 'PATCH', { status: 'SHIPPED', trackingId: returnParcel.trackingId, deliveryService: 'AIR_CARGO' }), 200);
       assert.ok(await prisma.auditLog.count({ where: { entityId: order.id, action: 'SERVICE_ORDER_UPDATE' } }) >= 5);
     });
   } finally {

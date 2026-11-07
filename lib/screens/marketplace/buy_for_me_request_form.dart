@@ -8,7 +8,8 @@ class BuyForMeRequestFormScreen extends StatefulWidget {
   const BuyForMeRequestFormScreen({super.key});
 
   @override
-  State<BuyForMeRequestFormScreen> createState() => _BuyForMeRequestFormScreenState();
+  State<BuyForMeRequestFormScreen> createState() =>
+      _BuyForMeRequestFormScreenState();
 }
 
 class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
@@ -17,6 +18,11 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
   final _link = TextEditingController();
   final _budget = TextEditingController();
   final _notes = TextEditingController();
+  final _address = TextEditingController();
+  final _city = TextEditingController();
+  final _stateProvince = TextEditingController();
+  final _postalCode = TextEditingController();
+  final _country = TextEditingController();
   int _quantity = 1;
   String _currency = 'USD';
   bool _busy = false;
@@ -27,6 +33,11 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
     _link.dispose();
     _budget.dispose();
     _notes.dispose();
+    _address.dispose();
+    _city.dispose();
+    _stateProvince.dispose();
+    _postalCode.dispose();
+    _country.dispose();
     super.dispose();
   }
 
@@ -37,7 +48,9 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
     final parsedBudget = budget.isEmpty ? null : double.tryParse(budget);
     final budgetMinor = parsedBudget == null
         ? null
-        : (_currency == 'XOF' ? parsedBudget.round() : (parsedBudget * 100).round());
+        : (_currency == 'XOF'
+              ? parsedBudget.round()
+              : (parsedBudget * 100).round());
     try {
       await Api.I.createBuyForMeRequest(
         title: _title.text,
@@ -46,6 +59,11 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
         budgetMinor: budgetMinor,
         currency: _currency,
         notes: _notes.text,
+        deliveryAddress: _address.text,
+        deliveryCity: _city.text,
+        deliveryStateProvince: _stateProvince.text,
+        deliveryPostalCode: _postalCode.text,
+        deliveryCountry: _country.text,
       );
       if (!mounted) return;
       Navigator.pop(context, true);
@@ -59,7 +77,8 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
   void _fail(String message) {
     if (!mounted) return;
     setState(() => _busy = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -69,190 +88,346 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
       appBar: AppBar(title: const Text('New purchase request')),
       body: Form(
         key: _formKey,
-        child: ListView(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(18, 8, 18, 28),
-          children: [
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppColors.coralSoft,
-                borderRadius: BorderRadius.circular(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.coralSoft,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline_rounded,
+                      color: AppColors.coral,
+                      size: 20,
+                    ),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Paste a product link or just describe the item — D2F confirms what’s possible and quotes the full price before you commit.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          height: 1.55,
+                          color: Color(0xFF5A1F14),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              child: const Row(
+              const SizedBox(height: 16),
+              const Text('What do you want?', style: AppTheme.sectionTitle),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _title,
+                textCapitalization: TextCapitalization.sentences,
+                validator: (v) => (v == null || v.trim().length < 4)
+                    ? 'Describe the item (at least a few words).'
+                    : null,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+                decoration: const InputDecoration(
+                  hintText: 'e.g. Sony WH-1000XM5, black, one pair',
+                  filled: true,
+                  fillColor: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Product link (optional)',
+                style: AppTheme.sectionTitle,
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _link,
+                keyboardType: TextInputType.url,
+                autocorrect: false,
+                validator: (v) {
+                  final value = v?.trim() ?? '';
+                  if (value.isEmpty) return null;
+                  final parsed = Uri.tryParse(value);
+                  if (parsed == null ||
+                      !['http', 'https'].contains(parsed.scheme)) {
+                    return 'Enter a valid http(s) link.';
+                  }
+                  return null;
+                },
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+                decoration: const InputDecoration(
+                  hintText: 'https://www.amazon.com/…',
+                  prefixIcon: Icon(Icons.link_rounded),
+                  filled: true,
+                  fillColor: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.info_outline_rounded, color: AppColors.coral, size: 20),
-                  SizedBox(width: 10),
                   Expanded(
-                    child: Text(
-                      'Paste a product link or just describe the item — D2F confirms what’s possible and quotes the full price before you commit.',
-                      style: TextStyle(fontSize: 11, height: 1.55, color: Color(0xFF5A1F14)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Quantity', style: AppTheme.sectionTitle),
+                        const SizedBox(height: 8),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              IconButton(
+                                onPressed: _quantity > 1
+                                    ? () => setState(() => _quantity--)
+                                    : null,
+                                icon: const Icon(Icons.remove_rounded),
+                              ),
+                              Text(
+                                '$_quantity',
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              IconButton(
+                                onPressed: _quantity < 1000
+                                    ? () => setState(() => _quantity++)
+                                    : null,
+                                icon: const Icon(Icons.add_rounded),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Currency', style: AppTheme.sectionTitle),
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<String>(
+                          initialValue: _currency,
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'USD',
+                              child: Text('USD (\$)'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'EUR',
+                              child: Text('EUR (€)'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'XOF',
+                              child: Text('XOF (CFA)'),
+                            ),
+                          ],
+                          onChanged: (value) =>
+                              setState(() => _currency = value ?? 'USD'),
+                          decoration: const InputDecoration(
+                            filled: true,
+                            fillColor: Colors.white,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 16),
-            const Text('What do you want?', style: AppTheme.sectionTitle),
-            const SizedBox(height: 8),
-            TextFormField(
-              controller: _title,
-              textCapitalization: TextCapitalization.sentences,
-              validator: (v) => (v == null || v.trim().length < 4) ? 'Describe the item (at least a few words).' : null,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-              decoration: const InputDecoration(
-                hintText: 'e.g. Sony WH-1000XM5, black, one pair',
-                filled: true,
-                fillColor: Colors.white,
+              const SizedBox(height: 14),
+              const Text(
+                'Your budget (optional)',
+                style: AppTheme.sectionTitle,
               ),
-            ),
-            const SizedBox(height: 14),
-            const Text('Product link (optional)', style: AppTheme.sectionTitle),
-            const SizedBox(height: 8),
-            TextFormField(
-              controller: _link,
-              keyboardType: TextInputType.url,
-              autocorrect: false,
-              validator: (v) {
-                final value = v?.trim() ?? '';
-                if (value.isEmpty) return null;
-                final parsed = Uri.tryParse(value);
-                if (parsed == null || !['http', 'https'].contains(parsed.scheme)) {
-                  return 'Enter a valid http(s) link.';
-                }
-                return null;
-              },
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              decoration: const InputDecoration(
-                hintText: 'https://www.amazon.com/…',
-                prefixIcon: Icon(Icons.link_rounded),
-                filled: true,
-                fillColor: Colors.white,
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _budget,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                validator: (v) {
+                  final value = v?.trim() ?? '';
+                  if (value.isEmpty) return null;
+                  final parsed = double.tryParse(value);
+                  if (parsed == null || parsed < 0) {
+                    return 'Enter a valid amount.';
+                  }
+                  return null;
+                },
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+                decoration: InputDecoration(
+                  prefixText: _currency == 'XOF'
+                      ? 'CFA '
+                      : (_currency == 'EUR' ? '€ ' : '\$ '),
+                  hintText: _currency == 'XOF' ? '50 000' : '300.00',
+                  filled: true,
+                  fillColor: Colors.white,
+                ),
               ),
-            ),
-            const SizedBox(height: 14),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Quantity', style: AppTheme.sectionTitle),
-                      const SizedBox(height: 8),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: AppColors.border),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            IconButton(
-                              onPressed: _quantity > 1 ? () => setState(() => _quantity--) : null,
-                              icon: const Icon(Icons.remove_rounded),
-                            ),
-                            Text(
-                              '$_quantity',
-                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-                            ),
-                            IconButton(
-                              onPressed: _quantity < 1000 ? () => setState(() => _quantity++) : null,
-                              icon: const Icon(Icons.add_rounded),
-                            ),
-                          ],
-                        ),
+              const SizedBox(height: 14),
+              const Text(
+                'Notes for D2F (optional)',
+                style: AppTheme.sectionTitle,
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _notes,
+                maxLines: 3,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  hintText: 'Colour, size, delivery must arrive before…',
+                  filled: true,
+                  fillColor: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'Where should we ship it?',
+                style: AppTheme.sectionTitle,
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Your complete delivery address is shared only with D2F operations.',
+                style: TextStyle(
+                  fontSize: 11,
+                  height: 1.5,
+                  color: AppColors.textGrey,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _address,
+                maxLines: 2,
+                textCapitalization: TextCapitalization.sentences,
+                validator: (v) => (v == null || v.trim().isEmpty)
+                    ? 'Enter the street address.'
+                    : null,
+                decoration: const InputDecoration(
+                  labelText: 'Street address *',
+                  filled: true,
+                  fillColor: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _city,
+                      textCapitalization: TextCapitalization.words,
+                      validator: (v) => (v == null || v.trim().isEmpty)
+                          ? 'Enter a city.'
+                          : null,
+                      decoration: const InputDecoration(
+                        labelText: 'City *',
+                        filled: true,
+                        fillColor: Colors.white,
                       ),
-                    ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Currency', style: AppTheme.sectionTitle),
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<String>(
-                        initialValue: _currency,
-                        items: const [
-                          DropdownMenuItem(value: 'USD', child: Text('USD (\$)')),
-                          DropdownMenuItem(value: 'EUR', child: Text('EUR (€)')),
-                          DropdownMenuItem(value: 'XOF', child: Text('XOF (CFA)')),
-                        ],
-                        onChanged: (value) => setState(() => _currency = value ?? 'USD'),
-                        decoration: const InputDecoration(
-                          filled: true,
-                          fillColor: Colors.white,
-                        ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _stateProvince,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(
+                        labelText: 'State / region',
+                        filled: true,
+                        fillColor: Colors.white,
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            const Text('Your budget (optional)', style: AppTheme.sectionTitle),
-            const SizedBox(height: 8),
-            TextFormField(
-              controller: _budget,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              validator: (v) {
-                final value = v?.trim() ?? '';
-                if (value.isEmpty) return null;
-                final parsed = double.tryParse(value);
-                if (parsed == null || parsed < 0) return 'Enter a valid amount.';
-                return null;
-              },
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-              decoration: InputDecoration(
-                prefixText: _currency == 'XOF' ? 'CFA ' : (_currency == 'EUR' ? '€ ' : '\$ '),
-                hintText: _currency == 'XOF' ? '50 000' : '300.00',
-                filled: true,
-                fillColor: Colors.white,
+                ],
               ),
-            ),
-            const SizedBox(height: 14),
-            const Text('Notes for D2F (optional)', style: AppTheme.sectionTitle),
-            const SizedBox(height: 8),
-            TextFormField(
-              controller: _notes,
-              maxLines: 3,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                hintText: 'Colour, size, delivery must arrive before…',
-                filled: true,
-                fillColor: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 22),
-            SizedBox(
-              height: 56,
-              child: FilledButton(
-                onPressed: _busy ? null : _submit,
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.coral,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(17)),
-                ),
-                child: _busy
-                    ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
-                      )
-                    : const Text(
-                        'Send request',
-                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Colors.white),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _postalCode,
+                      validator: (v) => (v == null || v.trim().isEmpty)
+                          ? 'Enter a ZIP / postal code.'
+                          : null,
+                      decoration: const InputDecoration(
+                        labelText: 'ZIP / postal code *',
+                        filled: true,
+                        fillColor: Colors.white,
                       ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _country,
+                      textCapitalization: TextCapitalization.words,
+                      validator: (v) => (v == null || v.trim().isEmpty)
+                          ? 'Enter a country.'
+                          : null,
+                      decoration: const InputDecoration(
+                        labelText: 'Country *',
+                        filled: true,
+                        fillColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Nothing is purchased until you accept D2F’s quote in the app.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 10.5, color: AppColors.textGrey),
-            ),
-          ],
+              const SizedBox(height: 22),
+              SizedBox(
+                height: 56,
+                child: FilledButton(
+                  onPressed: _busy ? null : _submit,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.coral,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(17),
+                    ),
+                  ),
+                  child: _busy
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2.5,
+                          ),
+                        )
+                      : const Text(
+                          'Send request',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white,
+                          ),
+                        ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Nothing is purchased until you accept D2F’s quote in the app.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 10.5, color: AppColors.textGrey),
+              ),
+            ],
+          ),
         ),
       ),
     );

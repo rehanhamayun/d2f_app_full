@@ -3,7 +3,34 @@ import { X, ChevronLeft, ChevronRight, RefreshCw, PackageOpen } from 'lucide-rea
 import { request } from './api.js';
 export const human = v => (v || '').toLowerCase().replaceAll('_', ' ').replace(/^./, c => c.toUpperCase());
 export const place = l => [l?.city || l?.name, l?.country].filter(Boolean).join(', ');
-export const dateTime = v => new Date(v).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+export const ADMIN_TIME_ZONE = 'America/Chicago';
+export const dateTime = v => new Date(v).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: ADMIN_TIME_ZONE });
+export function dateTimeLocalInput(value) {
+  if (!value) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: ADMIN_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(value));
+  const part = type => parts.find(item => item.type === type)?.value;
+  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}`;
+}
+export function dateTimeFromLocalInput(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) throw new Error('Enter a valid Chicago local date and time.');
+  const target = Date.UTC(...match.slice(1).map(Number).map((part, index) => index === 1 ? part - 1 : part));
+  let timestamp = target;
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: ADMIN_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const parts = formatter.formatToParts(new Date(timestamp));
+    const part = type => Number(parts.find(item => item.type === type)?.value);
+    const represented = Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'), part('second'));
+    timestamp += target - represented;
+  }
+  return new Date(timestamp).toISOString();
+}
 export function Pill({ status }) { return <span className={`ops-pill ops-${status?.toLowerCase()}`}>{human(status)}</span>; }
 export function Heading({ label, title, text, children }) { return <div className="page-heading"><div><span className="eyebrow">{label}</span><h1>{title}</h1><p>{text}</p></div><div className="heading-actions">{children}</div></div>; }
 export function Empty({ title, text }) { return <div className="ops-empty"><PackageOpen size={30} /><h3>{title}</h3><p>{text}</p></div>; }

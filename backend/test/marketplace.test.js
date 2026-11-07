@@ -30,6 +30,27 @@ test('Marketplace shopfront, seller studio, Buy For Me and commissions', async t
   };
   const expectStatus = (result, status) => { assert.equal(result.status, status, JSON.stringify(result.body)); return result.body; };
   const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09]);
+  const deliveryAddress = {
+    deliveryAddress: '123 Main Street, Apt 4',
+    deliveryCity: 'Chicago',
+    deliveryStateProvince: 'IL',
+    deliveryPostalCode: '60601',
+    deliveryCountry: 'United States',
+  };
+  const submitPayment = async (request, buyer, admin) => {
+    const transactionId = `ZELLE-${randomUUID()}`;
+    expectStatus(await rawReq(`/buy-for-me/requests/${request.id}/payment-submissions?transactionId=${transactionId}`, buyer, jpeg), 201);
+    const mine = expectStatus(await req('/buy-for-me/requests', buyer), 200).find(r => r.id === request.id);
+    const submission = mine.paymentSubmissions[0];
+    assert.equal(submission.transactionId, transactionId);
+    const image = await rawBytes(`/buy-for-me/requests/${request.id}/payment-submissions/${submission.id}/image`, buyer);
+    assert.equal(image.status, 200);
+    assert.deepEqual(image.bytes, jpeg);
+    expectStatus(await req(`/admin/commerce/orders/${request.id}/payment-submissions/${submission.id}/review`, admin, 'POST', { accepted: true }), 200);
+    const adminImage = await rawBytes(`/admin/commerce/orders/${request.id}/payment-submissions/${submission.id}/image`, admin);
+    assert.equal(adminImage.status, 200);
+    assert.deepEqual(adminImage.bytes, jpeg);
+  };
 
   try {
     for (let i = 0; i < 2; i++) organizations.push(await prisma.organization.create({ data: { name: `QA Shop ${suffix}-${i}`, trackingPrefix: `S${randomBytes(2).toString('hex').toUpperCase()}` } }));
@@ -186,29 +207,40 @@ test('Marketplace shopfront, seller studio, Buy For Me and commissions', async t
     });
 
     await t.test('Buy For Me: full customer flow with quote and acceptance', async () => {
-      const request = expectStatus(await req('/buy-for-me/requests', buyer, 'POST', { title: 'Sony WH-1000XM5 headphones', sourceUrl: 'https://www.amazon.com/dp/B09YYZFSFC', quantity: 1, budgetMinor: 30000, currency: 'USD', notes: 'Black only' }), 201);
+      const request = expectStatus(await req('/buy-for-me/requests', buyer, 'POST', { title: 'Sony WH-1000XM5 headphones', sourceUrl: 'https://www.amazon.com/dp/B09YYZFSFC', quantity: 1, budgetMinor: 30000, currency: 'USD', notes: 'Black only', ...deliveryAddress }), 201);
       assert.equal(request.status, 'REQUESTED');
+      assert.equal(request.deliveryPostalCode, deliveryAddress.deliveryPostalCode);
       // Customer cannot accept before a quote
       expectStatus(await req(`/buy-for-me/requests/${request.id}/accept`, buyer, 'POST', {}), 409);
       // Admin records the quote
-      expectStatus(await req(`/admin/commerce/orders/${request.id}`, admin, 'PATCH', { status: 'QUOTED', amountMinor: 27900 }), 200);
+      expectStatus(await req(`/admin/commerce/orders/${request.id}`, admin, 'PATCH', { status: 'QUOTED', productCostMinor: 25000, shippingCostMinor: 2900 }), 200);
       const mine = expectStatus(await req('/buy-for-me/requests', buyer), 200).find(r => r.id === request.id);
       assert.equal(mine.amountMinor, 27900);
+      assert.equal(mine.productCostMinor, 25000);
+      assert.equal(mine.shippingCostMinor, 2900);
       // Decline path: a second request gets declined
-      const second = expectStatus(await req('/buy-for-me/requests', buyer, 'POST', { title: 'Bose soundbar', quantity: 1, currency: 'USD' }), 201);
-      expectStatus(await req(`/admin/commerce/orders/${second.id}`, admin, 'PATCH', { status: 'QUOTED', amountMinor: 50000 }), 200);
+      const second = expectStatus(await req('/buy-for-me/requests', buyer, 'POST', { title: 'Bose soundbar', quantity: 1, currency: 'USD', ...deliveryAddress }), 201);
+      expectStatus(await req(`/admin/commerce/orders/${second.id}`, admin, 'PATCH', { status: 'QUOTED', productCostMinor: 48000, shippingCostMinor: 2000 }), 200);
       expectStatus(await req(`/buy-for-me/requests/${second.id}/decline`, buyer, 'POST', {}), 200);
       // Accept the first quote and drive it to completion with a parcel
       expectStatus(await req(`/buy-for-me/requests/${request.id}/accept`, buyer, 'POST', {}), 200);
+      const accepted = expectStatus(await req('/buy-for-me/requests', buyer), 200).find(r => r.id === request.id);
+      assert.match(accepted.paymentInstructions, /contact D2F/);
       expectStatus(await req(`/buy-for-me/requests/${request.id}/cancel`, buyer, 'POST', {}), 409);
+      expectStatus(await req(`/admin/commerce/orders/${request.id}`, admin, 'PATCH', { status: 'PURCHASED' }), 409);
+      await submitPayment(request, buyer, admin);
+      const paymentConfirmed = expectStatus(await req('/buy-for-me/requests', buyer), 200).find(r => r.id === request.id);
+      assert.equal(paymentConfirmed.paymentStatus, 'VERIFIED');
+      assert.equal(paymentConfirmed.status, 'PAYMENT_CONFIRMED');
       expectStatus(await req(`/admin/commerce/orders/${request.id}`, admin, 'PATCH', { status: 'PURCHASED' }), 200);
       expectStatus(await req(`/admin/commerce/orders/${request.id}`, admin, 'PATCH', { status: 'RECEIVED' }), 200);
     });
 
     await t.test('Buy For Me completion with a linked parcel', async () => {
-      const request = expectStatus(await req('/buy-for-me/requests', buyer, 'POST', { title: 'Nintendo Switch OLED', quantity: 1, currency: 'USD' }), 201);
-      expectStatus(await req(`/admin/commerce/orders/${request.id}`, admin, 'PATCH', { status: 'QUOTED', amountMinor: 34900 }), 200);
+      const request = expectStatus(await req('/buy-for-me/requests', buyer, 'POST', { title: 'Nintendo Switch OLED', quantity: 1, currency: 'USD', ...deliveryAddress }), 201);
+      expectStatus(await req(`/admin/commerce/orders/${request.id}`, admin, 'PATCH', { status: 'QUOTED', productCostMinor: 32000, shippingCostMinor: 2900 }), 200);
       expectStatus(await req(`/buy-for-me/requests/${request.id}/accept`, buyer, 'POST', {}), 200);
+      await submitPayment(request, buyer, admin);
       // SHIPPED requires a parcel belonging to this customer
       const linked = await prisma.customer.findUnique({ where: { userId: buyer.id } });
       const parcel = await prisma.parcel.create({
@@ -232,7 +264,7 @@ test('Marketplace shopfront, seller studio, Buy For Me and commissions', async t
       expectStatus(await req(`/admin/commerce/orders/${request.id}`, admin, 'PATCH', { status: 'SHIPPED' }), 409);
       expectStatus(await req(`/admin/commerce/orders/${request.id}`, admin, 'PATCH', { status: 'RECEIVED' }), 200);
       expectStatus(await req(`/admin/commerce/orders/${request.id}`, admin, 'PATCH', { status: 'SHIPPED' }), 400);
-      expectStatus(await req(`/admin/commerce/orders/${request.id}`, admin, 'PATCH', { status: 'SHIPPED', trackingId: parcel.trackingId }), 200);
+      expectStatus(await req(`/admin/commerce/orders/${request.id}`, admin, 'PATCH', { status: 'SHIPPED', trackingId: parcel.trackingId, deliveryService: 'AIR_CARGO' }), 200);
       expectStatus(await req(`/admin/commerce/orders/${request.id}`, admin, 'PATCH', { status: 'COMPLETED' }), 200);
     });
 

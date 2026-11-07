@@ -3,7 +3,7 @@
 // D2F purchases and ships it. Payment is coordinated offline — the app
 // tracks the request and never collects card details.
 
-import { Router } from 'express';
+import { Router, raw } from 'express';
 import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { fail, warehouseLock } from '../warehouse.js';
@@ -23,7 +23,27 @@ router.use(authenticate, requireRole('CUSTOMER'));
 const requestSelect = {
   ...customerOrderSelect,
   amountMinor: true, // null until quoted — the customer only sees it here
+  paymentSubmissions: {
+    select: { id: true, method: true, transactionId: true, status: true, reviewNote: true, createdAt: true },
+    orderBy: { createdAt: 'desc' },
+    take: 25,
+  },
+  updates: {
+    select: {
+      id: true, status: true, message: true, deliveryService: true, shippingCarrier: true,
+      shippingTrackingNumber: true, shippingLabelUrl: true, fileName: true, contentType: true, createdAt: true,
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  },
 };
+const paymentInstructions = () => process.env.D2F_ZELLE_ACCOUNT
+  ? `Zelle: ${process.env.D2F_ZELLE_ACCOUNT}`
+  : 'Please contact D2F to confirm payment instructions before paying.';
+const customerOrder = order => ({
+  ...order,
+  paymentInstructions: order.status === 'ACCEPTED' ? paymentInstructions() : null,
+});
 
 router.get('/requests', async (req, res, next) => {
   try {
@@ -35,7 +55,7 @@ router.get('/requests', async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
-    res.json(requests);
+    res.json(requests.map(customerOrder));
   } catch (error) {
     next(error);
   }
@@ -43,7 +63,10 @@ router.get('/requests', async (req, res, next) => {
 
 router.post('/requests', async (req, res, next) => {
   try {
-    const { title, sourceUrl, quantity = 1, budgetMinor, currency = 'USD', notes } = req.body || {};
+    const {
+      title, sourceUrl, quantity = 1, budgetMinor, currency = 'USD', notes,
+      deliveryAddress, deliveryCity, deliveryStateProvince, deliveryPostalCode, deliveryCountry,
+    } = req.body || {};
     if (!validText(title)) fail(400, 'Describe the item you want.');
     if (sourceUrl != null && typeof sourceUrl !== 'string') fail(400, 'Enter a valid product link.');
     if (sourceUrl && sourceUrl.trim()) {
@@ -57,6 +80,11 @@ router.post('/requests', async (req, res, next) => {
     if (budgetMinor != null && !validAmount(budgetMinor)) fail(400, 'Enter a valid budget.');
     if (!currencies.includes(currency)) fail(400, 'Choose a supported currency.');
     if (!validOptionalText(notes, 2000)) fail(400, 'Notes are too long.');
+    if (!validText(deliveryAddress, 500)) fail(400, 'Enter a complete delivery address.');
+    if (!validText(deliveryCity, 100)) fail(400, 'Enter a delivery city.');
+    if (!validOptionalText(deliveryStateProvince, 100)) fail(400, 'Enter a valid state or region.');
+    if (!validText(deliveryPostalCode, 20)) fail(400, 'Enter a ZIP or postal code.');
+    if (!validText(deliveryCountry, 100)) fail(400, 'Enter a delivery country.');
 
     const result = await prisma.$transaction(async (tx) => {
       const customer = await upsertCustomer(tx, req.user);
@@ -72,6 +100,11 @@ router.post('/requests', async (req, res, next) => {
           budgetMinor: budgetMinor ?? null,
           currency,
           notes: notes?.trim() || null,
+          deliveryAddress: deliveryAddress.trim(),
+          deliveryCity: deliveryCity.trim(),
+          deliveryStateProvince: deliveryStateProvince?.trim() || null,
+          deliveryPostalCode: deliveryPostalCode.trim(),
+          deliveryCountry: deliveryCountry.trim(),
           status: 'REQUESTED',
           source: 'APP',
         },
@@ -80,7 +113,112 @@ router.post('/requests', async (req, res, next) => {
       await audit(tx, req, 'ServiceOrder', created.id, 'BUY_FOR_ME_REQUEST', created.title);
       return created;
     });
-    res.status(201).json(result);
+    res.status(201).json(customerOrder(result));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post(
+  '/requests/:id/payment-submissions',
+  raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '4mb' }),
+  async (req, res, next) => {
+    try {
+      const bytes = req.body;
+      const mime = req.headers['content-type']?.split(';')[0];
+      const valid = Buffer.isBuffer(bytes) && bytes.length > 12 && (
+        (mime === 'image/jpeg' && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) ||
+        (mime === 'image/png' && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) ||
+        (mime === 'image/webp' && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP')
+      );
+      if (!valid) fail(400, 'Upload a valid JPEG, PNG or WebP payment screenshot (up to 4 MB).');
+      const transactionId = req.query.transactionId;
+      if (!validText(transactionId, 120)) fail(400, 'Enter the payment transaction ID.');
+      const result = await prisma.$transaction(async tx => {
+        const customer = await tx.customer.findUnique({
+          where: { userId: req.user.id },
+          select: { id: true, organizationId: true },
+        });
+        if (!customer) fail(404, 'Request not found.');
+        if (customer.organizationId) await warehouseLock(tx, customer.organizationId);
+        const order = await tx.serviceOrder.findFirst({
+          where: { id: req.params.id, customerId: customer.id, kind: 'BUY_FOR_ME', source: 'APP' },
+        });
+        if (!order) fail(404, 'Request not found.');
+        if (order.status !== 'ACCEPTED' || order.paymentStatus === 'VERIFIED') {
+          fail(409, 'Accept the quote before submitting payment evidence.');
+        }
+        const pending = await tx.serviceOrderPaymentSubmission.count({
+          where: { serviceOrderId: order.id, status: 'PENDING' },
+        });
+        if (pending) fail(409, 'Your payment evidence is already awaiting review.');
+        const submission = await tx.serviceOrderPaymentSubmission.create({
+          data: {
+            serviceOrderId: order.id,
+            userId: req.user.id,
+            method: 'ZELLE',
+            transactionId: transactionId.trim(),
+            fileName: 'payment-proof',
+            contentType: mime,
+            bytes,
+          },
+          select: { id: true, method: true, transactionId: true, status: true, createdAt: true },
+        });
+        await tx.serviceOrder.update({
+          where: { id: order.id },
+          data: { paymentStatus: 'PENDING', paymentTransactionId: transactionId.trim() },
+        });
+        await audit(tx, req, 'ServiceOrder', order.id, 'BUY_FOR_ME_PAYMENT_SUBMITTED', transactionId.trim());
+        return submission;
+      });
+      res.status(201).json(result);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get('/requests/:id/payment-submissions/:submissionId/image', async (req, res, next) => {
+  try {
+    const customer = await prisma.customer.findUnique({ where: { userId: req.user.id }, select: { id: true } });
+    const order = customer && await prisma.serviceOrder.findFirst({
+      where: { id: req.params.id, customerId: customer.id, kind: 'BUY_FOR_ME', source: 'APP' },
+      select: { id: true },
+    });
+    if (!order) fail(404, 'Payment evidence not found.');
+    const submission = await prisma.serviceOrderPaymentSubmission.findFirst({
+      where: { id: req.params.submissionId, serviceOrderId: order.id },
+    });
+    if (!submission?.bytes) fail(404, 'Payment evidence not found.');
+    res.set({
+      'Content-Type': submission.contentType,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': 'inline; filename="payment-proof"',
+    }).send(submission.bytes);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/requests/:id/updates/:updateId/image', async (req, res, next) => {
+  try {
+    const customer = await prisma.customer.findUnique({ where: { userId: req.user.id }, select: { id: true } });
+    const order = customer && await prisma.serviceOrder.findFirst({
+      where: { id: req.params.id, customerId: customer.id, kind: 'BUY_FOR_ME', source: 'APP' },
+      select: { id: true },
+    });
+    if (!order) fail(404, 'Update image not found.');
+    const update = await prisma.serviceOrderUpdate.findFirst({
+      where: { id: req.params.updateId, serviceOrderId: order.id },
+    });
+    if (!update?.bytes) fail(404, 'Update image not found.');
+    res.set({
+      'Content-Type': update.contentType,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': 'inline; filename="d2f-update"',
+    }).send(update.bytes);
   } catch (error) {
     next(error);
   }
@@ -118,7 +256,7 @@ router.post('/requests/:id/:decision', async (req, res, next) => {
       await audit(tx, req, 'ServiceOrder', existing.id, rule.action, rule.detail);
       return updated;
     });
-    res.json(result);
+    res.json(customerOrder(result));
   } catch (error) {
     next(error);
   }

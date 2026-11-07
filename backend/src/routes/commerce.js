@@ -1,9 +1,9 @@
-import { Router } from 'express';
+import { Router, raw } from 'express';
 import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { resolveOrganizationId } from '../tracking.js';
 import { fail, warehouseLock } from '../warehouse.js';
-import { commissionFor, releaseStock } from '../shopfront.js';
+import { commissionFor, releaseStock, validOptionalText } from '../shopfront.js';
 import { createNotification } from '../notifications.js';
 const router = Router();
 router.use(authenticate, requireRole('ADMIN'), async (req, res, next) => {
@@ -12,10 +12,28 @@ router.use(authenticate, requireRole('ADMIN'), async (req, res, next) => {
 const validText = (v, max = 200) => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
 const validAmount = v => Number.isSafeInteger(v) && v >= 0 && v <= 1000000000;
 const currencies = ['USD', 'EUR', 'XOF'];
-const orderInclude = { customer: { select: { id: true, displayName: true } }, product: { select: { title: true } }, parcel: { select: { trackingId: true, id: true } }, seller: { select: { id: true, displayName: true } } };
+const orderInclude = {
+  customer: { select: { id: true, displayName: true } },
+  product: { select: { title: true } },
+  parcel: { select: { trackingId: true, id: true } },
+  seller: { select: { id: true, displayName: true } },
+  paymentSubmissions: {
+    select: { id: true, method: true, transactionId: true, status: true, reviewNote: true, createdAt: true },
+    orderBy: { createdAt: 'desc' },
+    take: 25,
+  },
+  updates: {
+    select: {
+      id: true, status: true, message: true, deliveryService: true, shippingCarrier: true,
+      shippingTrackingNumber: true, shippingLabelUrl: true, fileName: true, contentType: true, createdAt: true,
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  },
+};
 const transitions = {
   MARKETPLACE: { REQUESTED: ['ACCEPTED', 'CANCELLED'], ACCEPTED: ['PROCESSING', 'CANCELLED'], PROCESSING: ['SHIPPED', 'CANCELLED'], SHIPPED: ['COMPLETED'], COMPLETED: [], CANCELLED: [] },
-  BUY_FOR_ME: { REQUESTED: ['QUOTED', 'CANCELLED'], QUOTED: ['ACCEPTED', 'CANCELLED'], ACCEPTED: ['PURCHASED', 'CANCELLED'], PURCHASED: ['RECEIVED'], RECEIVED: ['SHIPPED'], SHIPPED: ['COMPLETED'], COMPLETED: [], CANCELLED: [] },
+  BUY_FOR_ME: { REQUESTED: ['QUOTED', 'CANCELLED'], QUOTED: ['ACCEPTED', 'CANCELLED'], ACCEPTED: ['PAYMENT_CONFIRMED', 'PURCHASED', 'CANCELLED'], PAYMENT_CONFIRMED: ['PURCHASED'], PURCHASED: ['RECEIVED'], RECEIVED: ['SHIPPED'], SHIPPED: ['COMPLETED'], COMPLETED: [], CANCELLED: [] },
 };
 async function audit(tx, req, entity, id, action, detail) {
   await tx.auditLog.create({ data: { actorId: req.user.id, action, entity, entityId: id, detail } });
@@ -209,7 +227,193 @@ router.get('/:kind', async (req, res, next) => {
       prisma.serviceOrder.count({ where }),
       prisma.product.findMany({ where: { organizationId: req.organizationId }, orderBy: { title: 'asc' }, include: { seller: { select: { id: true, displayName: true } } } }),
     ]);
-    res.json({ orders, total, products, limit, offset, transitions: transitions[kind] });
+    res.json({
+      orders: kind === 'BUY_FOR_ME'
+        ? orders.map(order => ({ ...order, paymentInstructions: `Zelle: ${process.env.D2F_ZELLE_ACCOUNT || '01234567'}` }))
+        : orders,
+      total, products, limit, offset, transitions: transitions[kind],
+    });
+  } catch (e) { next(e); }
+});
+
+router.get('/orders/:id/payment-submissions/:submissionId/image', async (req, res, next) => {
+  try {
+    const order = await prisma.serviceOrder.findFirst({
+      where: { id: req.params.id, organizationId: req.organizationId, kind: 'BUY_FOR_ME' },
+      select: { id: true },
+    });
+    if (!order) fail(404, 'Payment evidence not found.');
+    const submission = await prisma.serviceOrderPaymentSubmission.findFirst({
+      where: { id: req.params.submissionId, serviceOrderId: order.id },
+    });
+    if (!submission?.bytes) fail(404, 'Payment evidence not found.');
+    res.set({
+      'Content-Type': submission.contentType,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': 'inline; filename="payment-proof"',
+    }).send(submission.bytes);
+  } catch (e) { next(e); }
+});
+
+router.post('/orders/:id/payment-submissions/:submissionId/review', async (req, res, next) => {
+  try {
+    const { accepted, note } = req.body || {};
+    if (typeof accepted !== 'boolean') fail(400, 'Choose whether the payment evidence is verified.');
+    if (!accepted && !validText(note, 1000)) fail(400, 'Explain what needs to be corrected.');
+    const result = await prisma.$transaction(async tx => {
+      await warehouseLock(tx, req.organizationId);
+      const order = await tx.serviceOrder.findFirst({
+        where: { id: req.params.id, organizationId: req.organizationId, kind: 'BUY_FOR_ME' },
+      });
+      if (!order) fail(404, 'Purchase request not found.');
+      const submission = await tx.serviceOrderPaymentSubmission.findFirst({
+        where: { id: req.params.submissionId, serviceOrderId: order.id, status: 'PENDING' },
+      });
+      if (!submission || order.status !== 'ACCEPTED') fail(409, 'This payment evidence is no longer awaiting review.');
+      const updatedSubmission = await tx.serviceOrderPaymentSubmission.update({
+        where: { id: submission.id },
+        data: {
+          status: accepted ? 'VERIFIED' : 'REJECTED',
+          reviewNote: accepted ? null : note.trim(),
+          reviewedById: req.user.id,
+          reviewedAt: new Date(),
+        },
+      });
+      const updatedOrder = await tx.serviceOrder.update({
+        where: { id: order.id },
+        data: {
+          paymentStatus: accepted ? 'VERIFIED' : 'REJECTED',
+          ...(accepted ? { status: 'PAYMENT_CONFIRMED' } : {}),
+        },
+        include: orderInclude,
+      });
+      await tx.serviceOrderUpdate.create({
+        data: {
+          serviceOrderId: order.id,
+          actorId: req.user.id,
+          status: accepted ? 'PAYMENT_CONFIRMED' : null,
+          message: accepted ? 'Payment received and verified by D2F.' : `Payment proof needs correction: ${note.trim()}`,
+        },
+      });
+      await audit(tx, req, 'ServiceOrder', order.id, accepted ? 'BUY_FOR_ME_PAYMENT_VERIFIED' : 'BUY_FOR_ME_PAYMENT_REJECTED', submission.transactionId);
+      return { order: updatedOrder, submission: updatedSubmission };
+    });
+    if (result.order.customer?.id) {
+      const customer = await prisma.customer.findUnique({ where: { id: result.order.customer.id }, select: { userId: true } });
+      if (customer?.userId) {
+        await createNotification({
+          userId: customer.userId,
+          type: accepted ? 'BUY_FOR_ME_PAYMENT_VERIFIED' : 'BUY_FOR_ME_PAYMENT_REJECTED',
+          title: accepted ? 'Payment confirmed' : 'Payment needs attention',
+          body: accepted
+            ? 'D2F verified your payment and will now purchase your item.'
+            : `Please review your payment proof: ${note.trim()}`,
+        });
+      }
+    }
+    res.json(result);
+  } catch (e) { next(e); }
+});
+
+router.post('/orders/:id/updates', raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '4mb' }), async (req, res, next) => {
+  try {
+    const body = Buffer.isBuffer(req.body) ? req.query : (req.body || {});
+    const bytes = Buffer.isBuffer(req.body) ? req.body : null;
+    const mime = bytes ? req.headers['content-type']?.split(';')[0] : null;
+    if (bytes && !(bytes.length > 12 && (
+      (mime === 'image/jpeg' && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) ||
+      (mime === 'image/png' && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) ||
+      (mime === 'image/webp' && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP')
+    ))) fail(400, 'Upload a valid JPEG, PNG or WebP image (up to 4 MB).');
+    const message = body.message;
+    const status = body.status || null;
+    const deliveryService = body.deliveryService || null;
+    const shippingCarrier = body.shippingCarrier || null;
+    const shippingTrackingNumber = body.shippingTrackingNumber || null;
+    const shippingLabelUrl = body.shippingLabelUrl || null;
+    if (!validText(message, 1000) && !bytes) fail(400, 'Add a customer update or an image.');
+    if (status !== null && (!transitions.BUY_FOR_ME[status] || status === 'PAYMENT_CONFIRMED')) fail(400, 'Choose a valid customer-visible status.');
+    if (status === 'QUOTED') fail(409, 'Send a quote using the product and shipping cost fields.');
+    if (deliveryService && !['D2F_CONNECT', 'AIR_CARGO', 'SEA', 'AIR_TRAVELLER'].includes(deliveryService)) fail(400, 'Choose an available D2F delivery service.');
+    if (!validOptionalText(shippingCarrier, 120) || !validOptionalText(shippingTrackingNumber, 120)) fail(400, 'Enter valid carrier and tracking details.');
+    if (shippingLabelUrl) {
+      try {
+        if (!['http:', 'https:'].includes(new URL(shippingLabelUrl).protocol) || shippingLabelUrl.length > 2000) throw new Error();
+      } catch {
+        fail(400, 'Enter a secure HTTP or HTTPS shipping label link.');
+      }
+    }
+    const result = await prisma.$transaction(async tx => {
+      await warehouseLock(tx, req.organizationId);
+      const order = await tx.serviceOrder.findFirst({
+        where: { id: req.params.id, organizationId: req.organizationId, kind: 'BUY_FOR_ME' },
+      });
+      if (!order) fail(404, 'Purchase request not found.');
+      if (status && !transitions.BUY_FOR_ME[order.status]?.includes(status)) fail(409, 'Invalid status change. Refresh this request.');
+      if (status === 'PURCHASED' && order.paymentStatus !== 'VERIFIED') fail(409, 'Verify the customer payment before marking this item purchased.');
+      const data = {
+        ...(status ? { status } : {}),
+        ...(deliveryService ? { deliveryService } : {}),
+        ...(shippingCarrier ? { shippingCarrier } : {}),
+        ...(shippingTrackingNumber ? { shippingTrackingNumber } : {}),
+        ...(shippingLabelUrl ? { shippingLabelUrl } : {}),
+      };
+      if (status === 'SHIPPED' && !(shippingTrackingNumber || order.shippingTrackingNumber || order.trackingRef || order.parcelId)) {
+        fail(400, 'Add a shipment tracking number before marking this request shipped.');
+      }
+      if (status === 'SHIPPED' && !(deliveryService || order.deliveryService)) {
+        fail(400, 'Choose a D2F delivery option before marking this request shipped.');
+      }
+      if (Object.keys(data).length) await tx.serviceOrder.update({ where: { id: order.id }, data });
+      const update = await tx.serviceOrderUpdate.create({
+        data: {
+          serviceOrderId: order.id,
+          actorId: req.user.id,
+          status,
+          message: message?.trim() || (status ? `Your request is now ${status.toLowerCase().replaceAll('_', ' ')}.` : 'D2F added an update image.'),
+          deliveryService,
+          shippingCarrier,
+          shippingTrackingNumber,
+          shippingLabelUrl,
+          fileName: bytes ? 'd2f-update' : null,
+          contentType: mime,
+          bytes,
+        },
+      });
+      await audit(tx, req, 'ServiceOrderUpdate', update.id, 'BUY_FOR_ME_CUSTOMER_UPDATE', JSON.stringify({ orderId: order.id, status }));
+      return { update, order: await tx.serviceOrder.findUnique({ where: { id: order.id }, include: orderInclude }) };
+    });
+    const customer = await prisma.customer.findUnique({ where: { id: result.order.customer.id }, select: { userId: true } });
+    if (customer?.userId) {
+      await createNotification({
+        userId: customer.userId,
+        type: 'BUY_FOR_ME_UPDATE',
+        title: 'New update on your Buy For Me request',
+        body: message?.trim() || `D2F updated your request${status ? ` to ${status.toLowerCase().replaceAll('_', ' ')}` : ''}.`,
+      });
+    }
+    res.status(201).json(result.order);
+  } catch (e) { next(e); }
+});
+
+router.get('/orders/:id/updates/:updateId/image', async (req, res, next) => {
+  try {
+    const order = await prisma.serviceOrder.findFirst({
+      where: { id: req.params.id, organizationId: req.organizationId, kind: 'BUY_FOR_ME' },
+      select: { id: true },
+    });
+    if (!order) fail(404, 'Update image not found.');
+    const update = await prisma.serviceOrderUpdate.findFirst({
+      where: { id: req.params.updateId, serviceOrderId: order.id },
+    });
+    if (!update?.bytes) fail(404, 'Update image not found.');
+    res.set({
+      'Content-Type': update.contentType,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': 'inline; filename="d2f-update"',
+    }).send(update.bytes);
   } catch (e) { next(e); }
 });
 router.post('/products', async (req, res, next) => {
@@ -276,11 +480,31 @@ router.post('/orders', async (req, res, next) => {
 });
 router.patch('/orders/:id', async (req, res, next) => {
   try {
-    const { status, amountMinor, trackingId, notes, trackingRef } = req.body || {};
+    const {
+      status, amountMinor, productCostMinor, shippingCostMinor, trackingId, notes, trackingRef,
+      deliveryService, shippingCarrier, shippingTrackingNumber, shippingLabelUrl, customerMessage,
+    } = req.body || {};
     if (amountMinor !== undefined && !validAmount(amountMinor)) fail(400, 'Enter a valid quote total.');
+    if (productCostMinor !== undefined && !validAmount(productCostMinor)) fail(400, 'Enter a valid product cost.');
+    if (shippingCostMinor !== undefined && !validAmount(shippingCostMinor)) fail(400, 'Enter a valid shipping cost.');
     if (notes !== undefined && (typeof notes !== 'string' || notes.length > 2000)) fail(400, 'Enter a valid note.');
     if (trackingRef !== undefined && (typeof trackingRef !== 'string' || trackingRef.length > 120)) fail(400, 'Carrier reference is too long.');
     if (trackingId !== undefined && !validText(trackingId, 80)) fail(400, 'Enter a tracking number.');
+    if (customerMessage !== undefined && !validText(customerMessage, 1000)) fail(400, 'Enter a customer update.');
+    if (deliveryService !== undefined && !['D2F_CONNECT', 'AIR_CARGO', 'SEA', 'AIR_TRAVELLER'].includes(deliveryService)) fail(400, 'Choose an available D2F delivery service.');
+    if (shippingCarrier !== undefined && !validOptionalText(shippingCarrier, 120)) fail(400, 'Enter a valid shipping carrier.');
+    if (shippingTrackingNumber !== undefined && !validOptionalText(shippingTrackingNumber, 120)) fail(400, 'Enter a valid shipping tracking number.');
+    if (shippingLabelUrl !== undefined) {
+      if (shippingLabelUrl !== null && typeof shippingLabelUrl !== 'string') fail(400, 'Enter a valid shipping label link.');
+      if (shippingLabelUrl) {
+        try {
+          if (!['http:', 'https:'].includes(new URL(shippingLabelUrl).protocol) || shippingLabelUrl.length > 2000) throw new Error();
+        } catch {
+          fail(400, 'Enter a secure HTTP or HTTPS shipping label link.');
+        }
+      }
+    }
+    const quoteChanged = amountMinor !== undefined || productCostMinor !== undefined || shippingCostMinor !== undefined;
     const result = await prisma.$transaction(async tx => {
       await warehouseLock(tx, req.organizationId);
       const existing = await tx.serviceOrder.findFirst({ where: { id: req.params.id, organizationId: req.organizationId } });
@@ -288,34 +512,87 @@ router.patch('/orders/:id', async (req, res, next) => {
       const data = {};
       if (status !== undefined) {
         if (!transitions[existing.kind][existing.status]?.includes(status)) fail(409, 'Invalid status change. Refresh this order.');
+        if (existing.kind === 'BUY_FOR_ME' && status === 'PAYMENT_CONFIRMED') fail(409, 'Verify the submitted payment evidence before confirming payment.');
+        if (existing.kind === 'BUY_FOR_ME' && existing.source === 'APP' && status === 'PURCHASED' && existing.paymentStatus !== 'VERIFIED') fail(409, 'Verify the customer payment before marking this item purchased.');
         data.status = status;
       }
       if (amountMinor !== undefined) {
         if (existing.kind !== 'BUY_FOR_ME' || !['REQUESTED', 'QUOTED'].includes(existing.status)) fail(409, 'Accepted quotes and marketplace price snapshots cannot be changed.');
         data.amountMinor = amountMinor;
       }
-      if (status === 'QUOTED' && (data.amountMinor ?? existing.amountMinor) === null) fail(400, 'Record the total quote before marking it quoted.');
+      if (productCostMinor !== undefined || shippingCostMinor !== undefined) {
+        if (existing.kind !== 'BUY_FOR_ME' || !['REQUESTED', 'QUOTED'].includes(existing.status)) fail(409, 'Accepted quotes cannot be changed.');
+        data.productCostMinor = productCostMinor ?? existing.productCostMinor;
+        data.shippingCostMinor = shippingCostMinor ?? existing.shippingCostMinor;
+        if (data.productCostMinor == null || data.shippingCostMinor == null || !validAmount(data.productCostMinor + data.shippingCostMinor)) {
+          fail(400, 'Enter both product and shipping costs within the supported total.');
+        }
+        data.amountMinor = data.productCostMinor + data.shippingCostMinor;
+      } else if (amountMinor !== undefined && existing.kind === 'BUY_FOR_ME') {
+        data.productCostMinor = amountMinor;
+        data.shippingCostMinor = 0;
+      }
+      if (status === 'QUOTED' && (
+        (data.amountMinor ?? existing.amountMinor) === null ||
+        (data.productCostMinor ?? existing.productCostMinor) == null ||
+        (data.shippingCostMinor ?? existing.shippingCostMinor) == null
+      )) fail(400, 'Record product and shipping costs before sending the quote.');
       if (trackingId !== undefined) {
         const parcel = await tx.parcel.findFirst({ where: { trackingId: trackingId.trim().toUpperCase(), customerId: existing.customerId, organizationId: req.organizationId } });
         if (!parcel) fail(400, 'Choose a parcel belonging to this customer and organization.');
         data.parcelId = parcel.id;
       }
       if (trackingRef !== undefined) data.trackingRef = trackingRef.trim() || null;
+      if (deliveryService !== undefined) data.deliveryService = deliveryService;
+      if (shippingCarrier !== undefined) data.shippingCarrier = shippingCarrier?.trim() || null;
+      if (shippingTrackingNumber !== undefined) data.shippingTrackingNumber = shippingTrackingNumber?.trim() || null;
+      if (shippingLabelUrl !== undefined) data.shippingLabelUrl = shippingLabelUrl?.trim() || null;
       const effectiveTrackingRef = data.trackingRef !== undefined ? data.trackingRef : existing.trackingRef;
       if (status === 'SHIPPED') {
         const appOrder = existing.kind === 'MARKETPLACE' && existing.source === 'APP';
         // D2F-fulfilled orders link a parcel; seller-shipped app orders may
         // carry the seller's carrier reference instead.
-        const hasProof = data.parcelId || existing.parcelId || (appOrder && effectiveTrackingRef);
-        if (!hasProof) fail(400, appOrder ? 'Link a parcel or record the carrier reference before marking this order shipped.' : 'Link the customer’s parcel before marking it shipped.');
+        const hasProof = data.parcelId || existing.parcelId ||
+          (existing.kind === 'BUY_FOR_ME' && (data.shippingTrackingNumber || existing.shippingTrackingNumber || effectiveTrackingRef)) ||
+          (appOrder && effectiveTrackingRef);
+        if (!hasProof) fail(400, appOrder || existing.kind === 'BUY_FOR_ME' ? 'Add shipment tracking before marking this order shipped.' : 'Link the customer’s parcel before marking it shipped.');
+        if (existing.kind === 'BUY_FOR_ME' && !(data.deliveryService || existing.deliveryService)) fail(400, 'Choose a D2F delivery option before marking this request shipped.');
       }
       if (notes !== undefined) data.notes = notes.trim() || null;
-      if (!Object.keys(data).length) fail(400, 'No changes provided.');
+      if (!Object.keys(data).length && customerMessage === undefined) fail(400, 'No changes provided.');
       if (status === 'CANCELLED' && existing.status !== 'CANCELLED') await releaseStock(tx, existing.productId, existing.quantity);
       const updated = await tx.serviceOrder.update({ where: { id: existing.id }, data, include: orderInclude });
       await audit(tx, req, 'ServiceOrder', existing.id, 'SERVICE_ORDER_UPDATE', JSON.stringify({ from: existing.status, ...data }));
+      if (existing.kind === 'BUY_FOR_ME' && (customerMessage || status || deliveryService || shippingTrackingNumber || shippingLabelUrl || quoteChanged)) {
+        await tx.serviceOrderUpdate.create({
+          data: {
+            serviceOrderId: existing.id,
+            actorId: req.user.id,
+            status: status || null,
+            message: customerMessage?.trim() || (status ? `Your request is now ${status.toLowerCase().replaceAll('_', ' ')}.` : quoteChanged ? 'D2F updated your quote.' : 'D2F updated your delivery details.'),
+            deliveryService: data.deliveryService ?? updated.deliveryService,
+            shippingCarrier: data.shippingCarrier ?? updated.shippingCarrier,
+            shippingTrackingNumber: data.shippingTrackingNumber ?? updated.shippingTrackingNumber,
+            shippingLabelUrl: data.shippingLabelUrl ?? updated.shippingLabelUrl,
+          },
+        });
+      }
       return updated;
     });
+    const quoteIsReady = result.kind === 'BUY_FOR_ME' && result.status === 'QUOTED' && (status === 'QUOTED' || quoteChanged);
+    if (result.kind === 'BUY_FOR_ME' && (quoteIsReady || status)) {
+      const customer = await prisma.customer.findUnique({ where: { id: result.customer.id }, select: { userId: true } });
+      if (customer?.userId) {
+        await createNotification({
+          userId: customer.userId,
+          type: quoteIsReady ? 'BUY_FOR_ME_QUOTED' : 'BUY_FOR_ME_UPDATE',
+          title: quoteIsReady ? 'Your Buy For Me quote is ready' : 'Your Buy For Me request was updated',
+          body: quoteIsReady
+            ? `D2F quoted ${result.title} at ${result.currency} ${((result.amountMinor || 0) / (result.currency === 'XOF' ? 1 : 100)).toFixed(result.currency === 'XOF' ? 0 : 2)}. Respond now in the app.`
+            : customerMessage?.trim() || `Your request status is now ${status.toLowerCase().replaceAll('_', ' ')}.`,
+        });
+      }
+    }
     res.json(result);
   } catch (e) { next(e); }
 });

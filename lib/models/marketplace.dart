@@ -20,8 +20,10 @@ class CategoryCount {
   final String name;
   final int count;
   const CategoryCount(this.name, this.count);
-  factory CategoryCount.fromJson(Map<String, dynamic> json) =>
-      CategoryCount(json['name'] as String? ?? 'Other', (json['count'] as num?)?.toInt() ?? 0);
+  factory CategoryCount.fromJson(Map<String, dynamic> json) => CategoryCount(
+    json['name'] as String? ?? 'Other',
+    (json['count'] as num?)?.toInt() ?? 0,
+  );
 }
 
 class ProductImageMeta {
@@ -37,7 +39,8 @@ class ProductImageMeta {
     required this.sizeBytes,
     required this.position,
   });
-  factory ProductImageMeta.fromJson(Map<String, dynamic> json) => ProductImageMeta(
+  factory ProductImageMeta.fromJson(Map<String, dynamic> json) =>
+      ProductImageMeta(
         id: json['id'] as String,
         fileName: json['fileName'] as String? ?? 'photo',
         contentType: json['contentType'] as String? ?? 'image/jpeg',
@@ -62,14 +65,17 @@ class SellerSummary {
     this.category,
   });
   factory SellerSummary.fromJson(Map<String, dynamic> json) => SellerSummary(
-        id: json['id'] as String,
-        displayName: json['displayName'] as String? ?? 'D2F Seller',
-        city: json['city'] as String?,
-        country: json['country'] as String?,
-        headline: json['headline'] as String?,
-        category: json['category'] as String?,
-      );
-  String get location => [city, country].where((part) => part != null && part.isNotEmpty).join(', ');
+    id: json['id'] as String,
+    displayName: json['displayName'] as String? ?? 'D2F Seller',
+    city: json['city'] as String?,
+    country: json['country'] as String?,
+    headline: json['headline'] as String?,
+    category: json['category'] as String?,
+  );
+  String get location => [
+    city,
+    country,
+  ].where((part) => part != null && part.isNotEmpty).join(', ');
 }
 
 class MarketplaceProduct {
@@ -112,7 +118,8 @@ class MarketplaceProduct {
   });
 
   factory MarketplaceProduct.fromJson(Map<String, dynamic> json) {
-    final imageList = (json['images'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+    final imageList =
+        (json['images'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
     final sellerJson = json['seller'] as Map<String, dynamic>?;
     return MarketplaceProduct(
       id: json['id'] as String,
@@ -135,29 +142,31 @@ class MarketplaceProduct {
     );
   }
 
-  String? get location =>
-      [locationCity, locationCountry].where((p) => p != null && p.isNotEmpty).join(', ');
+  String? get location => [
+    locationCity,
+    locationCountry,
+  ].where((p) => p != null && p.isNotEmpty).join(', ');
   String? get heroImageId => images.isEmpty ? null : images.first.id;
 
   MarketplaceProduct copyWith({bool? isActive}) => MarketplaceProduct(
-        id: id,
-        title: title,
-        category: category,
-        description: description,
-        priceMinor: priceMinor,
-        currency: currency,
-        fulfillment: fulfillment,
-        stockCount: stockCount,
-        locationCity: locationCity,
-        locationCountry: locationCountry,
-        featured: featured,
-        soldOut: soldOut,
-        createdAt: createdAt,
-        images: images,
-        seller: seller,
-        isActive: isActive ?? this.isActive,
-        ordersCount: ordersCount,
-      );
+    id: id,
+    title: title,
+    category: category,
+    description: description,
+    priceMinor: priceMinor,
+    currency: currency,
+    fulfillment: fulfillment,
+    stockCount: stockCount,
+    locationCity: locationCity,
+    locationCountry: locationCountry,
+    featured: featured,
+    soldOut: soldOut,
+    createdAt: createdAt,
+    images: images,
+    seller: seller,
+    isActive: isActive ?? this.isActive,
+    ordersCount: ordersCount,
+  );
 }
 
 class MarketplaceBrowse {
@@ -175,7 +184,8 @@ class MarketplaceBrowse {
     required this.categories,
     required this.countries,
   });
-  factory MarketplaceBrowse.fromJson(Map<String, dynamic> json) => MarketplaceBrowse(
+  factory MarketplaceBrowse.fromJson(Map<String, dynamic> json) =>
+      MarketplaceBrowse(
         products: ((json['products'] as List?) ?? const [])
             .cast<Map<String, dynamic>>()
             .map(MarketplaceProduct.fromJson)
@@ -199,14 +209,22 @@ class OrderProductSummary {
   final String title;
   final String? category;
   final String? imageId;
-  const OrderProductSummary({required this.id, required this.title, this.category, this.imageId});
-  factory OrderProductSummary.fromJson(Map<String, dynamic> json) => OrderProductSummary(
+  const OrderProductSummary({
+    required this.id,
+    required this.title,
+    this.category,
+    this.imageId,
+  });
+  factory OrderProductSummary.fromJson(Map<String, dynamic> json) =>
+      OrderProductSummary(
         id: json['id'] as String,
         title: json['title'] as String? ?? 'Product',
         category: json['category'] as String?,
-        imageId: ((json['images'] as List?)?.cast<Map<String, dynamic>>() ?? const [])
-            .map((e) => e['id'] as String?)
-            .firstWhere((id) => id != null, orElse: () => null),
+        imageId:
+            ((json['images'] as List?)?.cast<Map<String, dynamic>>() ??
+                    const [])
+                .map((e) => e['id'] as String?)
+                .firstWhere((id) => id != null, orElse: () => null),
       );
 }
 
@@ -225,8 +243,21 @@ class MarketplaceOrder {
   final String? recipientPhone;
   final String? deliveryAddress;
   final String? deliveryCity;
+  final String? deliveryStateProvince;
   final String? deliveryCountry;
+  final String? deliveryPostalCode;
   final int? budgetMinor;
+  final int? productCostMinor;
+  final int? shippingCostMinor;
+  final String? paymentStatus;
+  final String? paymentTransactionId;
+  final String? paymentInstructions;
+  final String? deliveryService;
+  final String? shippingCarrier;
+  final String? shippingTrackingNumber;
+  final String? shippingLabelUrl;
+  final List<ServiceOrderUpdate> updates;
+  final List<ServiceOrderPaymentSubmission> paymentSubmissions;
   final String? sourceUrl;
   final String? trackingRef;
   final String? parcelTrackingId;
@@ -253,8 +284,21 @@ class MarketplaceOrder {
     this.recipientPhone,
     this.deliveryAddress,
     this.deliveryCity,
+    this.deliveryStateProvince,
     this.deliveryCountry,
+    this.deliveryPostalCode,
     this.budgetMinor,
+    this.productCostMinor,
+    this.shippingCostMinor,
+    this.paymentStatus,
+    this.paymentTransactionId,
+    this.paymentInstructions,
+    this.deliveryService,
+    this.shippingCarrier,
+    this.shippingTrackingNumber,
+    this.shippingLabelUrl,
+    this.updates = const [],
+    this.paymentSubmissions = const [],
     this.sourceUrl,
     this.trackingRef,
     this.parcelTrackingId,
@@ -285,24 +329,116 @@ class MarketplaceOrder {
       recipientPhone: json['recipientPhone'] as String?,
       deliveryAddress: json['deliveryAddress'] as String?,
       deliveryCity: json['deliveryCity'] as String?,
+      deliveryStateProvince: json['deliveryStateProvince'] as String?,
       deliveryCountry: json['deliveryCountry'] as String?,
+      deliveryPostalCode: json['deliveryPostalCode'] as String?,
       budgetMinor: (json['budgetMinor'] as num?)?.toInt(),
+      productCostMinor: (json['productCostMinor'] as num?)?.toInt(),
+      shippingCostMinor: (json['shippingCostMinor'] as num?)?.toInt(),
+      paymentStatus: json['paymentStatus'] as String?,
+      paymentTransactionId: json['paymentTransactionId'] as String?,
+      paymentInstructions: json['paymentInstructions'] as String?,
+      deliveryService: json['deliveryService'] as String?,
+      shippingCarrier: json['shippingCarrier'] as String?,
+      shippingTrackingNumber: json['shippingTrackingNumber'] as String?,
+      shippingLabelUrl: json['shippingLabelUrl'] as String?,
+      updates: ((json['updates'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(ServiceOrderUpdate.fromJson)
+          .toList(),
+      paymentSubmissions: ((json['paymentSubmissions'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(ServiceOrderPaymentSubmission.fromJson)
+          .toList(),
       sourceUrl: json['sourceUrl'] as String?,
       trackingRef: json['trackingRef'] as String?,
       parcelTrackingId: parcelJson?['trackingId'] as String?,
       createdAt: DateTime.tryParse(json['createdAt'] as String? ?? ''),
       updatedAt: DateTime.tryParse(json['updatedAt'] as String? ?? ''),
-      product: productJson == null ? null : OrderProductSummary.fromJson(productJson),
+      product: productJson == null
+          ? null
+          : OrderProductSummary.fromJson(productJson),
       seller: sellerJson == null ? null : SellerSummary.fromJson(sellerJson),
       commissionBps: (json['commissionBps'] as num?)?.toInt(),
       commissionMinor: (json['commissionMinor'] as num?)?.toInt(),
     );
   }
 
-  String get reference => 'D2F-${id.replaceAll('-', '').substring(0, 8).toUpperCase()}';
+  String get reference =>
+      'D2F-${id.replaceAll('-', '').substring(0, 8).toUpperCase()}';
   bool get isActive => !const {'COMPLETED', 'CANCELLED'}.contains(status);
-  String? get delivery =>
-      [deliveryCity, deliveryCountry].where((p) => p != null && p.isNotEmpty).join(', ');
+  String? get delivery => [
+    deliveryCity,
+    deliveryCountry,
+  ].where((p) => p != null && p.isNotEmpty).join(', ');
+}
+
+class ServiceOrderUpdate {
+  final String id;
+  final String? status;
+  final String message;
+  final String? deliveryService;
+  final String? shippingCarrier;
+  final String? shippingTrackingNumber;
+  final String? shippingLabelUrl;
+  final String? fileName;
+  final String? contentType;
+  final DateTime? createdAt;
+
+  const ServiceOrderUpdate({
+    required this.id,
+    this.status,
+    required this.message,
+    this.deliveryService,
+    this.shippingCarrier,
+    this.shippingTrackingNumber,
+    this.shippingLabelUrl,
+    this.fileName,
+    this.contentType,
+    this.createdAt,
+  });
+
+  factory ServiceOrderUpdate.fromJson(Map<String, dynamic> json) =>
+      ServiceOrderUpdate(
+        id: json['id'] as String,
+        status: json['status'] as String?,
+        message: json['message'] as String? ?? '',
+        deliveryService: json['deliveryService'] as String?,
+        shippingCarrier: json['shippingCarrier'] as String?,
+        shippingTrackingNumber: json['shippingTrackingNumber'] as String?,
+        shippingLabelUrl: json['shippingLabelUrl'] as String?,
+        fileName: json['fileName'] as String?,
+        contentType: json['contentType'] as String?,
+        createdAt: DateTime.tryParse(json['createdAt'] as String? ?? ''),
+      );
+}
+
+class ServiceOrderPaymentSubmission {
+  final String id;
+  final String method;
+  final String transactionId;
+  final String status;
+  final String? reviewNote;
+  final DateTime? createdAt;
+
+  const ServiceOrderPaymentSubmission({
+    required this.id,
+    required this.method,
+    required this.transactionId,
+    required this.status,
+    this.reviewNote,
+    this.createdAt,
+  });
+
+  factory ServiceOrderPaymentSubmission.fromJson(Map<String, dynamic> json) =>
+      ServiceOrderPaymentSubmission(
+        id: json['id'] as String,
+        method: json['method'] as String? ?? 'ZELLE',
+        transactionId: json['transactionId'] as String? ?? '',
+        status: json['status'] as String? ?? 'PENDING',
+        reviewNote: json['reviewNote'] as String?,
+        createdAt: DateTime.tryParse(json['createdAt'] as String? ?? ''),
+      );
 }
 
 class SellerProfileInfo {
@@ -346,7 +482,8 @@ class SellerProfileInfo {
     this.bannerName,
   });
 
-  factory SellerProfileInfo.fromJson(Map<String, dynamic> json) => SellerProfileInfo(
+  factory SellerProfileInfo.fromJson(Map<String, dynamic> json) =>
+      SellerProfileInfo(
         id: json['id'] as String,
         status: json['status'] as String? ?? 'PENDING',
         displayName: json['displayName'] as String? ?? '',
@@ -361,13 +498,16 @@ class SellerProfileInfo {
         city: json['city'] as String?,
         commissionBps: (json['commissionBps'] as num?)?.toInt() ?? 1000,
         reviewNote: json['reviewNote'] as String?,
-        termsAcceptedAt: DateTime.tryParse(json['termsAcceptedAt'] as String? ?? ''),
+        termsAcceptedAt: DateTime.tryParse(
+          json['termsAcceptedAt'] as String? ?? '',
+        ),
         createdAt: DateTime.tryParse(json['createdAt'] as String? ?? ''),
         profilePictureName: json['profilePictureName'] as String?,
         bannerName: json['bannerName'] as String?,
       );
 
-  String get commissionLabel => '${(commissionBps / 100).toStringAsFixed(commissionBps % 100 == 0 ? 0 : 1)}%';
+  String get commissionLabel =>
+      '${(commissionBps / 100).toStringAsFixed(commissionBps % 100 == 0 ? 0 : 1)}%';
 }
 
 class SellerMe {
@@ -376,12 +516,14 @@ class SellerMe {
   final int openOrders;
   const SellerMe({this.profile, this.productCount = 0, this.openOrders = 0});
   factory SellerMe.fromJson(Map<String, dynamic> json) => SellerMe(
-        profile: json['profile'] == null
-            ? null
-            : SellerProfileInfo.fromJson(Map<String, dynamic>.from(json['profile'] as Map)),
-        productCount: (json['productCount'] as num?)?.toInt() ?? 0,
-        openOrders: (json['openOrders'] as num?)?.toInt() ?? 0,
-      );
+    profile: json['profile'] == null
+        ? null
+        : SellerProfileInfo.fromJson(
+            Map<String, dynamic>.from(json['profile'] as Map),
+          ),
+    productCount: (json['productCount'] as num?)?.toInt() ?? 0,
+    openOrders: (json['openOrders'] as num?)?.toInt() ?? 0,
+  );
 }
 
 /// A notification sent to a signed-in user: marketplace order events, seller
@@ -414,19 +556,21 @@ class MarketplaceNotification {
       );
 
   String get typeLabel => switch (type) {
-        'ORDER_REQUESTED' => 'Order request',
-        'ORDER_ACCEPTED' => 'Order accepted',
-        'ORDER_SHIPPED' => 'Order shipped',
-        'ORDER_COMPLETED' => 'Order completed',
-        'ORDER_CANCELLED' => 'Order cancelled',
-        'SELLER_APPROVED' => 'Seller approved',
-        'SELLER_APPLICATION_UPDATE' => 'Application update',
-        'BUY_FOR_ME_UPDATE' => 'Buy For Me update',
-        _ => type.replaceAll('_', ' ').toTitleCase(),
-      };
+    'ORDER_REQUESTED' => 'Order request',
+    'ORDER_ACCEPTED' => 'Order accepted',
+    'ORDER_SHIPPED' => 'Order shipped',
+    'ORDER_COMPLETED' => 'Order completed',
+    'ORDER_CANCELLED' => 'Order cancelled',
+    'SELLER_APPROVED' => 'Seller approved',
+    'SELLER_APPLICATION_UPDATE' => 'Application update',
+    'BUY_FOR_ME_UPDATE' => 'Buy For Me update',
+    _ => type.replaceAll('_', ' ').toTitleCase(),
+  };
 }
 
 extension _TitleCase on String {
   String toTitleCase() =>
-      split(' ').map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}').join(' ');
+      split(' ')
+          .map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
+          .join(' ');
 }

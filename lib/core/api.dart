@@ -2,8 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart';
 
-import 'dart:typed_data';
-
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -957,6 +955,11 @@ class Api {
     int? budgetMinor,
     required String currency,
     String? notes,
+    required String deliveryAddress,
+    required String deliveryCity,
+    String? deliveryStateProvince,
+    required String deliveryPostalCode,
+    required String deliveryCountry,
   }) async {
     try {
       final response = await _dio!.post(
@@ -969,6 +972,12 @@ class Api {
           if (budgetMinor != null) 'budgetMinor': budgetMinor,
           'currency': currency,
           if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+          'deliveryAddress': deliveryAddress.trim(),
+          'deliveryCity': deliveryCity.trim(),
+          if (deliveryStateProvince?.trim().isNotEmpty ?? false)
+            'deliveryStateProvince': deliveryStateProvince?.trim(),
+          'deliveryPostalCode': deliveryPostalCode.trim(),
+          'deliveryCountry': deliveryCountry.trim(),
         },
       );
       return MarketplaceOrder.fromJson(
@@ -990,6 +999,38 @@ class Api {
       throw _map(e);
     }
   }
+
+  Future<void> submitBuyForMePaymentEvidence({
+    required String requestId,
+    required String transactionId,
+    required Uint8List bytes,
+  }) async {
+    final mime = bytes.length > 8 && bytes[0] == 137 && bytes[1] == 80
+        ? 'image/png'
+        : bytes.length > 12 && String.fromCharCodes(bytes.take(4)) == 'RIFF'
+        ? 'image/webp'
+        : 'image/jpeg';
+    try {
+      await _dio!.post(
+        '/buy-for-me/requests/$requestId/payment-submissions',
+        queryParameters: {'transactionId': transactionId.trim()},
+        data: bytes,
+        options: Options(contentType: mime),
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
+  Future<Uint8List> buyForMePaymentImage(
+    String requestId,
+    String submissionId,
+  ) => _imageBytes(
+    '/buy-for-me/requests/$requestId/payment-submissions/$submissionId/image',
+  );
+
+  Future<Uint8List> buyForMeUpdateImage(String requestId, String updateId) =>
+      _imageBytes('/buy-for-me/requests/$requestId/updates/$updateId/image');
 
   // ── Seller Studio ─────────────────────────────────────────────────────────
 
@@ -1055,7 +1096,8 @@ class Api {
           'category': category.trim(),
           'country': country.trim(),
           if (city != null && city.trim().isNotEmpty) 'city': city.trim(),
-          if (address != null && address.trim().isNotEmpty) 'address': address.trim(),
+          if (address != null && address.trim().isNotEmpty)
+            'address': address.trim(),
           'phone': phone.trim(),
           'terms': terms,
         },
@@ -1147,7 +1189,8 @@ class Api {
             'stockCount': stockCount,
           if (isActive != null) 'isActive': isActive,
           if (locationCity != null) 'locationCity': locationCity.trim(),
-          if (locationCountry != null) 'locationCountry': locationCountry.trim(),
+          if (locationCountry != null)
+            'locationCountry': locationCountry.trim(),
         },
       );
       return MarketplaceProduct.fromJson(
@@ -1192,7 +1235,10 @@ class Api {
     }
   }
 
-  Future<void> deleteSellerProductImage(String productId, String imageId) async {
+  Future<void> deleteSellerProductImage(
+    String productId,
+    String imageId,
+  ) async {
     try {
       await _dio!.delete('/seller/products/$productId/images/$imageId');
     } on DioException catch (e) {
@@ -1226,7 +1272,8 @@ class Api {
       final response = await _dio!.post(
         '/seller/orders/$id/$action',
         data: {
-          if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+          if (reason != null && reason.trim().isNotEmpty)
+            'reason': reason.trim(),
           if (trackingRef != null && trackingRef.trim().isNotEmpty)
             'trackingRef': trackingRef.trim(),
         },
@@ -1279,8 +1326,7 @@ class Api {
           if (country != null && country.trim().isNotEmpty)
             'country': country.trim(),
           if (city != null && city.trim().isNotEmpty) 'city': city.trim(),
-          if (phone != null && phone.trim().isNotEmpty)
-            'phone': phone.trim(),
+          if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim(),
           'commissionBps': commissionBps,
           if (headline != null && headline.trim().isNotEmpty)
             'headline': headline.trim(),
@@ -1315,7 +1361,10 @@ class Api {
     }
   }
 
-  Future<Map<String, dynamic>> adminCommissions({String? from, String? to}) async {
+  Future<Map<String, dynamic>> adminCommissions({
+    String? from,
+    String? to,
+  }) async {
     try {
       final response = await _dio!.get(
         '/admin/commerce/commissions',
@@ -1330,7 +1379,10 @@ class Api {
     }
   }
 
-  Future<List<Map<String, dynamic>>> adminOrders({String? kind, String? status}) async {
+  Future<List<Map<String, dynamic>>> adminOrders({
+    String? kind,
+    String? status,
+  }) async {
     try {
       final response = await _dio!.get(
         '/admin/commerce/${kind ?? 'marketplace'}',
@@ -1478,7 +1530,8 @@ class Api {
           'itemDescription': itemDescription.trim(),
           if (retailerOrderId != null && retailerOrderId.trim().isNotEmpty)
             'retailerOrderId': retailerOrderId.trim(),
-          if (retailerTrackingId != null && retailerTrackingId.trim().isNotEmpty)
+          if (retailerTrackingId != null &&
+              retailerTrackingId.trim().isNotEmpty)
             'retailerTrackingId': retailerTrackingId.trim(),
           if (declaredValueMinor != null)
             'declaredValueMinor': declaredValueMinor,
@@ -1502,7 +1555,8 @@ class Api {
         data: {
           if (retailerOrderId != null && retailerOrderId.trim().isNotEmpty)
             'retailerOrderId': retailerOrderId.trim(),
-          if (retailerTrackingId != null && retailerTrackingId.trim().isNotEmpty)
+          if (retailerTrackingId != null &&
+              retailerTrackingId.trim().isNotEmpty)
             'retailerTrackingId': retailerTrackingId.trim(),
         },
       );
@@ -1537,7 +1591,7 @@ class Api {
     try {
       final response = await _dio!.post(
         '/ship-for-me/terms/accept',
-        data: { 'agreementId': agreementId, 'version': version },
+        data: {'agreementId': agreementId, 'version': version},
       );
       return Map<String, dynamic>.from(response.data as Map);
     } on DioException catch (e) {
@@ -1587,11 +1641,9 @@ class Api {
           'amountMinor': amountMinor,
           'currency': currency,
           'paymentMethod': paymentMethod,
-          if (paymentProvider != null)
-            'paymentProvider': paymentProvider,
+          if (paymentProvider != null) 'paymentProvider': paymentProvider,
           'purpose': purpose,
-          if (verificationImage != null)
-            'verificationImage': verificationImage,
+          if (verificationImage != null) 'verificationImage': verificationImage,
         },
       );
       return Map<String, dynamic>.from(response.data as Map);
@@ -1608,7 +1660,7 @@ class Api {
     try {
       final response = await _dio!.post(
         '/payments/$id/verify',
-        data: { 'status': status, if (notes != null) 'notes': notes },
+        data: {'status': status, if (notes != null) 'notes': notes},
       );
       return Map<String, dynamic>.from(response.data as Map);
     } on DioException catch (e) {
@@ -1624,7 +1676,10 @@ class Api {
     try {
       final response = await _dio!.post(
         '/payments/$id/refund',
-        data: { 'amountMinor': amountMinor, if (reason != null) 'reason': reason },
+        data: {
+          'amountMinor': amountMinor,
+          if (reason != null) 'reason': reason,
+        },
       );
       return Map<String, dynamic>.from(response.data as Map);
     } on DioException catch (e) {
@@ -1636,11 +1691,15 @@ class Api {
   // ADMIN SERVICES (agreements, warehouse addresses, payment methods, returns)
   // ═════════════════════════════════════════════════════════════════════════════
 
-  Future<List<Map<String, dynamic>>> adminAgreements({String? serviceType}) async {
+  Future<List<Map<String, dynamic>>> adminAgreements({
+    String? serviceType,
+  }) async {
     try {
       final response = await _dio!.get(
         '/admin/commerce/services/agreements',
-        queryParameters: serviceType == null ? null : { 'serviceType': serviceType },
+        queryParameters: serviceType == null
+            ? null
+            : {'serviceType': serviceType},
       );
       return (response.data as List).cast<Map<String, dynamic>>();
     } on DioException catch (e) {
@@ -1676,7 +1735,9 @@ class Api {
 
   Future<List<Map<String, dynamic>>> adminWarehouseAddresses() async {
     try {
-      final response = await _dio!.get('/admin/commerce/services/warehouse-addresses');
+      final response = await _dio!.get(
+        '/admin/commerce/services/warehouse-addresses',
+      );
       return (response.data as List).cast<Map<String, dynamic>>();
     } on DioException catch (e) {
       throw _map(e);
@@ -1741,7 +1802,7 @@ class Api {
     try {
       final response = await _dio!.get(
         '/admin/commerce/services/returns',
-        queryParameters: status == null ? null : { 'status': status },
+        queryParameters: status == null ? null : {'status': status},
       );
       return (response.data as List).cast<Map<String, dynamic>>();
     } on DioException catch (e) {

@@ -5,29 +5,76 @@ import '../core/theme.dart';
 /// Shared presentation for order lifecycle statuses, used by the buyer
 /// orders screen, the Buy For Me flow and Seller Studio.
 String statusLabel(String status) => switch (status) {
-      'REQUESTED' => 'Requested',
-      'ACCEPTED' => 'Confirmed',
-      'QUOTED' => 'Quoted',
-      'PURCHASED' => 'Purchased',
-      'RECEIVED' => 'Received by D2F',
-      'PROCESSING' => 'Being prepared',
-      'SHIPPED' => 'Shipped',
-      'COMPLETED' => 'Completed',
-      'CANCELLED' => 'Cancelled',
-      _ => status,
-    };
+  'REQUESTED' => 'Requested',
+  'ACCEPTED' => 'Confirmed',
+  'QUOTED' => 'Quoted',
+  'PAYMENT_CONFIRMED' => 'Payment confirmed',
+  'PURCHASED' => 'Purchased',
+  'RECEIVED' => 'Received by D2F',
+  'PROCESSING' => 'Being prepared',
+  'SHIPPED' => 'Shipped',
+  'COMPLETED' => 'Completed',
+  'CANCELLED' => 'Cancelled',
+  _ => status,
+};
 
-({Color bg, Color fg, IconData icon}) statusVisual(String status) => switch (status) {
-      'REQUESTED' => (bg: AppColors.goldSoft, fg: const Color(0xFF9A7100), icon: Icons.hourglass_top_rounded),
-      'QUOTED' => (bg: AppColors.blueSoft, fg: AppColors.blue, icon: Icons.request_quote_rounded),
-      'ACCEPTED' => (bg: AppColors.blueSoft, fg: AppColors.blue, icon: Icons.thumb_up_alt_rounded),
-      'PURCHASED' => (bg: AppColors.indigoSoft, fg: AppColors.indigo, icon: Icons.shopping_bag_rounded),
-      'RECEIVED' => (bg: AppColors.tealSoft, fg: AppColors.teal, icon: Icons.warehouse_rounded),
-      'PROCESSING' => (bg: AppColors.goldSoft, fg: const Color(0xFF9A7100), icon: Icons.inventory_2_rounded),
-      'SHIPPED' => (bg: AppColors.blueSoft, fg: AppColors.blue, icon: Icons.local_shipping_rounded),
-      'COMPLETED' => (bg: AppColors.greenSoft, fg: AppColors.green, icon: Icons.check_circle_rounded),
-      'CANCELLED' => (bg: AppColors.coralSoft, fg: AppColors.coral, icon: Icons.cancel_rounded),
-      _ => (bg: AppColors.chipGrey, fg: AppColors.textGrey, icon: Icons.circle_outlined),
+({Color bg, Color fg, IconData icon}) statusVisual(String status) =>
+    switch (status) {
+      'REQUESTED' => (
+        bg: AppColors.goldSoft,
+        fg: const Color(0xFF9A7100),
+        icon: Icons.hourglass_top_rounded,
+      ),
+      'QUOTED' => (
+        bg: AppColors.blueSoft,
+        fg: AppColors.blue,
+        icon: Icons.request_quote_rounded,
+      ),
+      'ACCEPTED' => (
+        bg: AppColors.blueSoft,
+        fg: AppColors.blue,
+        icon: Icons.thumb_up_alt_rounded,
+      ),
+      'PAYMENT_CONFIRMED' => (
+        bg: AppColors.greenSoft,
+        fg: AppColors.green,
+        icon: Icons.verified_rounded,
+      ),
+      'PURCHASED' => (
+        bg: AppColors.indigoSoft,
+        fg: AppColors.indigo,
+        icon: Icons.shopping_bag_rounded,
+      ),
+      'RECEIVED' => (
+        bg: AppColors.tealSoft,
+        fg: AppColors.teal,
+        icon: Icons.warehouse_rounded,
+      ),
+      'PROCESSING' => (
+        bg: AppColors.goldSoft,
+        fg: const Color(0xFF9A7100),
+        icon: Icons.inventory_2_rounded,
+      ),
+      'SHIPPED' => (
+        bg: AppColors.blueSoft,
+        fg: AppColors.blue,
+        icon: Icons.local_shipping_rounded,
+      ),
+      'COMPLETED' => (
+        bg: AppColors.greenSoft,
+        fg: AppColors.green,
+        icon: Icons.check_circle_rounded,
+      ),
+      'CANCELLED' => (
+        bg: AppColors.coralSoft,
+        fg: AppColors.coral,
+        icon: Icons.cancel_rounded,
+      ),
+      _ => (
+        bg: AppColors.chipGrey,
+        fg: AppColors.textGrey,
+        icon: Icons.circle_outlined,
+      ),
     };
 
 /// Compact pill used in list cards.
@@ -70,7 +117,16 @@ class OrderTimeline extends StatelessWidget {
   const OrderTimeline({super.key, required this.kind, required this.status});
 
   static List<String> stepsFor(String kind) => kind == 'BUY_FOR_ME'
-      ? ['REQUESTED', 'QUOTED', 'ACCEPTED', 'PURCHASED', 'RECEIVED', 'SHIPPED', 'COMPLETED']
+      ? [
+          'REQUESTED',
+          'QUOTED',
+          'ACCEPTED',
+          'PAYMENT_CONFIRMED',
+          'PURCHASED',
+          'RECEIVED',
+          'SHIPPED',
+          'COMPLETED',
+        ]
       : ['REQUESTED', 'ACCEPTED', 'PROCESSING', 'SHIPPED', 'COMPLETED'];
 
   @override
@@ -89,7 +145,11 @@ class OrderTimeline extends StatelessWidget {
             Expanded(
               child: Text(
                 'This order was cancelled. Contact D2F if you believe this is a mistake.',
-                style: TextStyle(fontSize: 12, height: 1.5, color: AppColors.navy),
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.5,
+                  color: AppColors.navy,
+                ),
               ),
             ),
           ],
@@ -103,7 +163,11 @@ class OrderTimeline extends StatelessWidget {
         for (var i = 0; i < steps.length; i++)
           _StepRow(
             label: statusLabel(steps[i]),
-            state: i < current ? _StepState.done : i == current ? _StepState.now : _StepState.todo,
+            state: i < current
+                ? _StepState.done
+                : i == current
+                ? _StepState.now
+                : _StepState.todo,
             isLast: i == steps.length - 1,
           ),
       ],
@@ -117,7 +181,11 @@ class _StepRow extends StatelessWidget {
   final String label;
   final _StepState state;
   final bool isLast;
-  const _StepRow({required this.label, required this.state, required this.isLast});
+  const _StepRow({
+    required this.label,
+    required this.state,
+    required this.isLast,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -126,8 +194,8 @@ class _StepRow extends StatelessWidget {
     final color = done
         ? AppColors.green
         : now
-            ? AppColors.coral
-            : const Color(0xFFD8D4C9);
+        ? AppColors.coral
+        : const Color(0xFFD8D4C9);
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -144,7 +212,13 @@ class _StepRow extends StatelessWidget {
                     color: done || now ? color : Colors.transparent,
                     border: Border.all(color: color, width: 2),
                   ),
-                  child: done ? const Icon(Icons.check_rounded, size: 12, color: Colors.white) : null,
+                  child: done
+                      ? const Icon(
+                          Icons.check_rounded,
+                          size: 12,
+                          color: Colors.white,
+                        )
+                      : null,
                 ),
                 if (!isLast)
                   Expanded(

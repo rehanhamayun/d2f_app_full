@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/api.dart';
 import '../models/models.dart';
@@ -486,7 +487,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                                       if (!keyboard) ...[
                                         const Spacer(),
                                         const Text(
-                                          'By creating an account, you agree to our',
+                                          'Official Terms and Privacy pages are not yet published. Both links currently open the D2F website.',
                                           textAlign: TextAlign.center,
                                           style: TextStyle(
                                             color: authMuted,
@@ -497,10 +498,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                                           mainAxisAlignment:
                                               MainAxisAlignment.center,
                                           children: [
-                                            _policyLink(
-                                              'Terms of Service',
-                                              'Use your own accurate account details and keep your sign-in information private. Staff and driver access requires an administrator invitation. Shipping prices, delivery estimates and shipment terms are confirmed by D2F before a booking. For the full service agreement, contact info@d2fshipping.com.',
-                                            ),
+                                            _policyLink('Terms of Service'),
                                             const Text(
                                               ' and ',
                                               style: TextStyle(
@@ -508,10 +506,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                                                 fontSize: 11.5,
                                               ),
                                             ),
-                                            _policyLink(
-                                              'Privacy Policy',
-                                              'Your name, email, phone and account role are used to provide your D2F account. Passwords are hashed on the server and session tokens are kept in secure device storage. Google and Apple sign-in share the profile information you authorize. Contact info@d2fshipping.com to request help with your data or obtain D2F’s full privacy notice.',
-                                            ),
+                                            _policyLink('Privacy Policy'),
                                           ],
                                         ),
                                       ],
@@ -676,8 +671,30 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     ],
   );
 
-  Widget _policyLink(String title, String body) => TextButton(
-    onPressed: () => authInfo(context, title, body),
+  Future<void> _openPolicySite() async {
+    try {
+      final opened = await launchUrl(
+        Uri.https('d2fshipping.com'),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened && mounted) {
+        authMessage(
+          context,
+          'Could not open the D2F website. Please try again.',
+        );
+      }
+    } on PlatformException {
+      if (mounted) {
+        authMessage(
+          context,
+          'Could not open the D2F website. Please try again.',
+        );
+      }
+    }
+  }
+
+  Widget _policyLink(String title) => TextButton(
+    onPressed: _openPolicySite,
     style: TextButton.styleFrom(
       padding: EdgeInsets.zero,
       foregroundColor: authBlue,

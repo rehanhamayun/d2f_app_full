@@ -575,52 +575,102 @@ model ProductImage {
 }
 
 model ServiceOrder {
-  id                  String         @id @default(uuid())
-  organizationId      String
-  kind                String
-  customerId          String
-  productId           String?
-  sellerId            String?
-  parcelId            String?
-  title               String
-  sourceUrl           String?
-  quantity            Int            @default(1)
-  amountMinor         Int?
-  currency            String         @default("USD")
-  status              String         @default("REQUESTED")
-  notes               String?
-  source              String         @default("ADMIN") // ADMIN | APP
+  id                     String                          @id @default(uuid())
+  organizationId         String
+  kind                   String
+  customerId             String
+  productId              String?
+  sellerId               String?
+  parcelId               String?
+  title                  String
+  sourceUrl              String?
+  quantity               Int                             @default(1)
+  amountMinor            Int?
+  currency               String                          @default("USD")
+  status                 String                          @default("REQUESTED")
+  notes                  String?
+  source                 String                          @default("ADMIN") // ADMIN | APP
   // Commission snapshot taken from the agreed seller rate at order time.
-  commissionBps       Int?
-  commissionMinor     Int?
+  commissionBps          Int?
+  commissionMinor        Int?
   // Fulfillment fee charged by D2F (when D2F fulfils).
-  fulfillmentFeeBps   Int?
-  fulfillmentFeeMinor Int?
+  fulfillmentFeeBps      Int?
+  fulfillmentFeeMinor    Int?
   // Delivery fee charged by D2F (when D2F delivers).
-  deliveryFeeBps      Int?
-  deliveryFeeMinor    Int?
+  deliveryFeeBps         Int?
+  deliveryFeeMinor       Int?
   // Net amount payable to seller after all fees.
-  sellerNetMinor      Int?
+  sellerNetMinor         Int?
   // Delivery choice + recipient details captured at app checkout.
-  deliveryPreference  String? // SELLER | D2F
-  recipientName       String?
-  recipientPhone      String?
-  deliveryAddress     String?
-  deliveryCity        String?
-  deliveryCountry     String?
+  deliveryPreference     String? // SELLER | D2F
+  recipientName          String?
+  recipientPhone         String?
+  deliveryAddress        String?
+  deliveryCity           String?
+  deliveryStateProvince  String?
+  deliveryCountry        String?
+  deliveryPostalCode     String?
   // Buy For Me: buyer's target budget and the seller's carrier reference.
-  budgetMinor         Int?
-  trackingRef         String?
-  createdAt           DateTime       @default(now())
-  updatedAt           DateTime       @updatedAt
-  organization        Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  customer            Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  product             Product?       @relation(fields: [productId], references: [id], onDelete: Restrict)
-  seller              SellerProfile? @relation(fields: [sellerId], references: [id], onDelete: SetNull)
-  parcel              Parcel?        @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  budgetMinor            Int?
+  trackingRef            String?
+  productCostMinor       Int?
+  shippingCostMinor      Int?
+  paymentStatus          String                          @default("NOT_SUBMITTED")
+  paymentTransactionId   String?
+  deliveryService        String?
+  shippingCarrier        String?
+  shippingTrackingNumber String?
+  shippingLabelUrl       String?
+  createdAt              DateTime                        @default(now())
+  updatedAt              DateTime                        @updatedAt
+  organization           Organization                    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer               Customer                        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  product                Product?                        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  seller                 SellerProfile?                  @relation(fields: [sellerId], references: [id], onDelete: SetNull)
+  parcel                 Parcel?                         @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  paymentSubmissions     ServiceOrderPaymentSubmission[]
+  updates                ServiceOrderUpdate[]
 
   @@index([organizationId, kind, createdAt])
   @@index([organizationId, sellerId, createdAt])
+}
+
+model ServiceOrderPaymentSubmission {
+  id             String       @id @default(uuid())
+  serviceOrderId String
+  userId         String
+  method         String
+  transactionId  String
+  fileName       String
+  contentType    String
+  bytes          Bytes
+  status         String       @default("PENDING")
+  reviewNote     String?
+  reviewedById   String?
+  reviewedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+
+  @@index([serviceOrderId, createdAt])
+}
+
+model ServiceOrderUpdate {
+  id                     String       @id @default(uuid())
+  serviceOrderId         String
+  actorId                String
+  status                 String?
+  message                String
+  deliveryService        String?
+  shippingCarrier        String?
+  shippingTrackingNumber String?
+  shippingLabelUrl       String?
+  fileName               String?
+  contentType            String?
+  bytes                  Bytes?
+  createdAt              DateTime     @default(now())
+  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+
+  @@index([serviceOrderId, createdAt])
 }
 
 // D2F Connect has its own commercial and custody workflow. Traveller access is

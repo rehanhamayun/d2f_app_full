@@ -17,7 +17,8 @@ class NotificationsScreen extends ConsumerStatefulWidget {
   const NotificationsScreen({super.key});
 
   @override
-  ConsumerState<NotificationsScreen> createState() => _NotificationsScreenState();
+  ConsumerState<NotificationsScreen> createState() =>
+      _NotificationsScreenState();
 }
 
 class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
@@ -51,10 +52,11 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
     });
     try {
       final data = await Api.I.notifications(limit: 50);
-      final items = (data['items'] as List?)
-          ?.cast<Map<String, dynamic>>()
-          .map(MarketplaceNotification.fromJson)
-          .toList() ??
+      final items =
+          (data['items'] as List?)
+              ?.cast<Map<String, dynamic>>()
+              .map(MarketplaceNotification.fromJson)
+              .toList() ??
           const [];
       final unread = (data['unread'] as num?)?.toInt() ?? 0;
       if (!mounted) return;
@@ -125,7 +127,11 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.cloud_off_rounded, size: 38, color: AppColors.textGrey),
+              const Icon(
+                Icons.cloud_off_rounded,
+                size: 38,
+                color: AppColors.textGrey,
+              ),
               const SizedBox(height: 10),
               const Text('Could not load notifications.'),
               const SizedBox(height: 14),
@@ -156,17 +162,29 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.notifications_none_rounded, size: 56, color: AppColors.textGrey),
+                    Icon(
+                      Icons.notifications_none_rounded,
+                      size: 56,
+                      color: AppColors.textGrey,
+                    ),
                     SizedBox(height: 14),
                     Text(
                       'No notifications yet',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.navy),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.navy,
+                      ),
                     ),
                     SizedBox(height: 6),
                     Text(
-                      'When D2F has an update for you — an order accepted, an item shipped, a seller application decided — it will appear here.',
+                      'When D2F has an update for you — including a quote ready for your response — it will appear here.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 12, height: 1.6, color: AppColors.textGrey),
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.6,
+                        color: AppColors.textGrey,
+                      ),
                     ),
                   ],
                 ),
@@ -179,35 +197,42 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
                 itemCount: _notifications.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (context, index) => _notificationCard(_notifications[index]),
+                itemBuilder: (context, index) =>
+                    _notificationCard(_notifications[index]),
               ),
             ),
     );
   }
 
   IconData _notificationIcon(String type) => switch (type) {
-        'ORDER_REQUESTED' => Icons.request_quote_rounded,
-        'ORDER_ACCEPTED' => Icons.check_circle_outline_rounded,
-        'ORDER_SHIPPED' => Icons.local_shipping_rounded,
-        'ORDER_COMPLETED' => Icons.task_alt_rounded,
-        'ORDER_CANCELLED' => Icons.cancel_outlined,
-        'SELLER_APPROVED' => Icons.storefront_rounded,
-        'SELLER_APPLICATION_UPDATE' => Icons.file_present_rounded,
-        'BUY_FOR_ME_UPDATE' => Icons.shopping_bag_rounded,
-        _ => Icons.notifications_outlined,
-      };
+    'ORDER_REQUESTED' => Icons.request_quote_rounded,
+    'ORDER_ACCEPTED' => Icons.check_circle_outline_rounded,
+    'ORDER_SHIPPED' => Icons.local_shipping_rounded,
+    'ORDER_COMPLETED' => Icons.task_alt_rounded,
+    'ORDER_CANCELLED' => Icons.cancel_outlined,
+    'BUY_FOR_ME_QUOTED' => Icons.request_quote_rounded,
+    'BUY_FOR_ME_PAYMENT_VERIFIED' => Icons.verified_rounded,
+    'BUY_FOR_ME_PAYMENT_REJECTED' => Icons.receipt_long_rounded,
+    'SELLER_APPROVED' => Icons.storefront_rounded,
+    'SELLER_APPLICATION_UPDATE' => Icons.file_present_rounded,
+    'BUY_FOR_ME_UPDATE' => Icons.shopping_bag_rounded,
+    _ => Icons.notifications_outlined,
+  };
 
   Color _notificationColor(String type) => switch (type) {
-        'ORDER_REQUESTED' => AppColors.blue,
-        'ORDER_ACCEPTED' => AppColors.green,
-        'ORDER_SHIPPED' => AppColors.blue,
-        'ORDER_COMPLETED' => AppColors.green,
-        'ORDER_CANCELLED' => AppColors.coral,
-        'SELLER_APPROVED' => AppColors.gold,
-        'SELLER_APPLICATION_UPDATE' => AppColors.deepPurple,
-        'BUY_FOR_ME_UPDATE' => AppColors.deepPurple,
-        _ => AppColors.textGrey,
-      };
+    'ORDER_REQUESTED' => AppColors.blue,
+    'ORDER_ACCEPTED' => AppColors.green,
+    'ORDER_SHIPPED' => AppColors.blue,
+    'ORDER_COMPLETED' => AppColors.green,
+    'ORDER_CANCELLED' => AppColors.coral,
+    'BUY_FOR_ME_QUOTED' => AppColors.green,
+    'BUY_FOR_ME_PAYMENT_VERIFIED' => AppColors.green,
+    'BUY_FOR_ME_PAYMENT_REJECTED' => AppColors.coral,
+    'SELLER_APPROVED' => AppColors.gold,
+    'SELLER_APPLICATION_UPDATE' => AppColors.deepPurple,
+    'BUY_FOR_ME_UPDATE' => AppColors.deepPurple,
+    _ => AppColors.textGrey,
+  };
 
   Widget _notificationCard(MarketplaceNotification n) {
     final icon = _notificationIcon(n.type);
@@ -235,13 +260,7 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                   color: color.withValues(alpha: .14),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Center(
-                  child: Icon(
-                    icon,
-                    size: 18,
-                    color: color,
-                  ),
-                ),
+                child: Center(child: Icon(icon, size: 18, color: color)),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -258,7 +277,9 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                             style: TextStyle(
                               fontSize: 13.5,
                               fontWeight: FontWeight.w800,
-                              color: n.read ? AppColors.textGrey : AppColors.navy,
+                              color: n.read
+                                  ? AppColors.textGrey
+                                  : AppColors.navy,
                             ),
                           ),
                         ),
@@ -279,7 +300,11 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                         n.body!,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 11.5, height: 1.5, color: AppColors.textGrey),
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          height: 1.5,
+                          color: AppColors.textGrey,
+                        ),
                       ),
                     ],
                     const SizedBox(height: 8),
@@ -297,12 +322,19 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                         const SizedBox(width: 10),
                         Text(
                           _when(n.createdAt),
-                          style: const TextStyle(fontSize: 9, color: AppColors.textGrey),
+                          style: const TextStyle(
+                            fontSize: 9,
+                            color: AppColors.textGrey,
+                          ),
                         ),
                         const Spacer(),
                         InkWell(
                           onTap: () => _delete(n.id),
-                          child: const Icon(Icons.close_rounded, size: 16, color: AppColors.textGrey),
+                          child: const Icon(
+                            Icons.close_rounded,
+                            size: 16,
+                            color: AppColors.textGrey,
+                          ),
                         ),
                       ],
                     ),

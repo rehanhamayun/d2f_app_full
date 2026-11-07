@@ -15,7 +15,7 @@ it('staff reviews complete Connect details and separate domestic fees without ad
 });
 it('quotation errors preserve entered values and fees use integer cents', async () => {
   const writes = [];
-  vi.stubGlobal('fetch', vi.fn(async (url, options = {}) => { if (options.method === 'POST') { writes.push(JSON.parse(options.body)); return json({ error: 'The agreed price is locked.' }, 409); } return json({ bookings: [booking], trips: [], rates: [], locations: [] }); }));
+  vi.stubGlobal('fetch', vi.fn(async (url, options = {}) => { if (options.method === 'POST') { writes.push(JSON.parse(options.body)); return json({ error: 'The agreed price is locked.' }, 409); } return json({ bookings: [{ ...booking, internationalFeeMinor: null, domesticCostMinor: null }], trips: [], rates: [], locations: [] }); }));
   const user = userEvent.setup(); render(<ConnectOperations token="test" notify={vi.fn()} refreshKey={0} isAdmin />);
   await user.click(await screen.findByRole('button', { name: 'Review D2F000000000101' })); await user.click(screen.getByRole('button', { name: 'Set final quotation' }));
   const dialog = screen.getByRole('dialog', { name: 'Set separate domestic and international fees' });

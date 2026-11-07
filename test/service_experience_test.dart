@@ -166,6 +166,7 @@ void main() {
       await tester.tap(find.textContaining('Start a purchase request'));
       await tester.pumpAndSettle();
       expect(find.byType(BuyForMeRequestFormScreen), findsOneWidget);
+      await reveal(tester, find.text('Send request'));
       await tester.tap(find.text('Send request'));
       await tester.pumpAndSettle();
       expect(
