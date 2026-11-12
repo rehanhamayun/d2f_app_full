@@ -22,7 +22,6 @@ import {
   validOptionalText,
   validText,
 } from '../shopfront.js';
-import { createNotification } from '../notifications.js';
 
 const router = Router();
 router.use(authenticate);
@@ -289,17 +288,6 @@ router.post('/orders', requireRole('CUSTOMER'), async (req, res, next) => {
       await audit(tx, req, 'ServiceOrder', created.id, 'MARKETPLACE_ORDER_REQUEST', `${product.title} ×${quantity}`);
       return created;
     });
-    if (order.seller?.id) {
-      const seller = await prisma.sellerProfile.findUnique({ where: { id: order.seller.id }, select: { userId: true } });
-      if (seller?.userId) {
-        await createNotification({
-          userId: seller.userId,
-          type: 'ORDER_REQUESTED',
-          title: 'New marketplace order request',
-          body: `${order.product?.title ?? 'A product'} ×${order.quantity} is waiting for your response.`,
-        });
-      }
-    }
     res.status(201).json(order);
   } catch (error) {
     next(error);
@@ -325,18 +313,6 @@ router.post('/orders/:id/cancel', requireRole('CUSTOMER'), async (req, res, next
       await audit(tx, req, 'ServiceOrder', order.id, 'MARKETPLACE_ORDER_CANCEL', 'cancelled by customer');
       return updated;
     });
-    const sellerId = result.seller?.id;
-    if (sellerId) {
-      const seller = await prisma.sellerProfile.findUnique({ where: { id: sellerId }, select: { userId: true } });
-      if (seller?.userId) {
-        await createNotification({
-          userId: seller.userId,
-          type: 'ORDER_CANCELLED',
-          title: 'Order cancelled',
-          body: `${result.product?.title ?? 'A product'} ×${result.quantity} was cancelled by the buyer.`,
-        });
-      }
-    }
     res.json(result);
   } catch (error) {
     next(error);

@@ -4,7 +4,6 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { resolveOrganizationId } from '../tracking.js';
 import { fail, warehouseLock } from '../warehouse.js';
 import { commissionFor, releaseStock, validOptionalText } from '../shopfront.js';
-import { createNotification } from '../notifications.js';
 const router = Router();
 router.use(authenticate, requireRole('ADMIN'), async (req, res, next) => {
   try { req.organizationId = await resolveOrganizationId(prisma, req.user); next(); } catch (e) { next(e); }
@@ -147,17 +146,6 @@ router.patch('/sellers/:id', async (req, res, next) => {
       if (action === 'approve' && commissionBps !== undefined) data.commissionBps = commissionBps;
       const updated = await tx.sellerProfile.update({ where: { id: existing.id }, data, include: sellerInclude });
       await audit(tx, req, 'SellerProfile', existing.id, rule.label, note || `${existing.status} → ${rule.to}${data.commissionBps != null ? ` · commission ${data.commissionBps}bps` : ''}`);
-      if (rule.to === 'APPROVED') {
-        const sellerUser = await tx.user.findUnique({ where: { id: existing.userId }, select: { id: true, fullName: true } });
-        if (sellerUser) {
-          await createNotification({
-            userId: sellerUser.id,
-            type: 'SELLER_APPROVED',
-            title: 'Your D2F seller account is approved',
-            body: data.commissionBps != null ? `Commission agreed at ${(data.commissionBps / 100).toFixed(2)}%. You can now publish your listings.` : 'You can now publish your listings.',
-          });
-        }
-      }
       return updated;
     });
     res.json(result);
@@ -229,7 +217,7 @@ router.get('/:kind', async (req, res, next) => {
     ]);
     res.json({
       orders: kind === 'BUY_FOR_ME'
-        ? orders.map(order => ({ ...order, paymentInstructions: `Zelle: ${process.env.D2F_ZELLE_ACCOUNT || '01234567'}` }))
+        ? orders.map(order => ({ ...order, paymentInstructions: process.env.D2F_ZELLE_ACCOUNT ? `Zelle: ${process.env.D2F_ZELLE_ACCOUNT}` : 'Payment instructions are not configured. Contact D2F before requesting payment.' }))
         : orders,
       total, products, limit, offset, transitions: transitions[kind],
     });
@@ -299,19 +287,6 @@ router.post('/orders/:id/payment-submissions/:submissionId/review', async (req, 
       await audit(tx, req, 'ServiceOrder', order.id, accepted ? 'BUY_FOR_ME_PAYMENT_VERIFIED' : 'BUY_FOR_ME_PAYMENT_REJECTED', submission.transactionId);
       return { order: updatedOrder, submission: updatedSubmission };
     });
-    if (result.order.customer?.id) {
-      const customer = await prisma.customer.findUnique({ where: { id: result.order.customer.id }, select: { userId: true } });
-      if (customer?.userId) {
-        await createNotification({
-          userId: customer.userId,
-          type: accepted ? 'BUY_FOR_ME_PAYMENT_VERIFIED' : 'BUY_FOR_ME_PAYMENT_REJECTED',
-          title: accepted ? 'Payment confirmed' : 'Payment needs attention',
-          body: accepted
-            ? 'D2F verified your payment and will now purchase your item.'
-            : `Please review your payment proof: ${note.trim()}`,
-        });
-      }
-    }
     res.json(result);
   } catch (e) { next(e); }
 });
@@ -384,15 +359,6 @@ router.post('/orders/:id/updates', raw({ type: ['image/jpeg', 'image/png', 'imag
       await audit(tx, req, 'ServiceOrderUpdate', update.id, 'BUY_FOR_ME_CUSTOMER_UPDATE', JSON.stringify({ orderId: order.id, status }));
       return { update, order: await tx.serviceOrder.findUnique({ where: { id: order.id }, include: orderInclude }) };
     });
-    const customer = await prisma.customer.findUnique({ where: { id: result.order.customer.id }, select: { userId: true } });
-    if (customer?.userId) {
-      await createNotification({
-        userId: customer.userId,
-        type: 'BUY_FOR_ME_UPDATE',
-        title: 'New update on your Buy For Me request',
-        body: message?.trim() || `D2F updated your request${status ? ` to ${status.toLowerCase().replaceAll('_', ' ')}` : ''}.`,
-      });
-    }
     res.status(201).json(result.order);
   } catch (e) { next(e); }
 });
@@ -579,20 +545,6 @@ router.patch('/orders/:id', async (req, res, next) => {
       }
       return updated;
     });
-    const quoteIsReady = result.kind === 'BUY_FOR_ME' && result.status === 'QUOTED' && (status === 'QUOTED' || quoteChanged);
-    if (result.kind === 'BUY_FOR_ME' && (quoteIsReady || status)) {
-      const customer = await prisma.customer.findUnique({ where: { id: result.customer.id }, select: { userId: true } });
-      if (customer?.userId) {
-        await createNotification({
-          userId: customer.userId,
-          type: quoteIsReady ? 'BUY_FOR_ME_QUOTED' : 'BUY_FOR_ME_UPDATE',
-          title: quoteIsReady ? 'Your Buy For Me quote is ready' : 'Your Buy For Me request was updated',
-          body: quoteIsReady
-            ? `D2F quoted ${result.title} at ${result.currency} ${((result.amountMinor || 0) / (result.currency === 'XOF' ? 1 : 100)).toFixed(result.currency === 'XOF' ? 0 : 2)}. Respond now in the app.`
-            : customerMessage?.trim() || `Your request status is now ${status.toLowerCase().replaceAll('_', ' ')}.`,
-        });
-      }
-    }
     res.json(result);
   } catch (e) { next(e); }
 });
@@ -627,15 +579,6 @@ router.post('/products/:id/approve', async (req, res, next) => {
       await audit(tx, req, 'Product', product.id, action === 'APPROVE' ? 'PRODUCT_APPROVE' : 'PRODUCT_REJECT', reviewNote || `${product.status} → ${action}`);
       return result;
     });
-    // Notify the seller
-    if (updated.seller?.userId) {
-      await createNotification({
-        userId: updated.seller.userId,
-        type: action === 'APPROVE' ? 'PRODUCT_APPROVED' : 'PRODUCT_REJECTED',
-        title: action === 'APPROVE' ? 'Product approved' : 'Product rejected',
-        body: action === 'APPROVE' ? `${product.title} is now live on the marketplace.` : `Product "${product.title}" was not approved. ${reviewNote || ''}`,
-      });
-    }
     res.json(updated);
   } catch (e) { next(e); }
 });

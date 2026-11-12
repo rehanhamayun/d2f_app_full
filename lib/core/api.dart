@@ -1,3 +1,5 @@
+import '../services/push_notifications.dart';
+
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
@@ -354,6 +356,7 @@ class Api {
   }
 
   Future<void> signOut() async {
+    await PushNotifications.I.disconnect();
     final cached = _printIdentity == null
         ? null
         : User.fromJson(Map<String, dynamic>.from(_printIdentity!['user']));
@@ -950,6 +953,7 @@ class Api {
 
   Future<MarketplaceOrder> createBuyForMeRequest({
     required String title,
+    String? clientRequestId,
     String? sourceUrl,
     required int quantity,
     int? budgetMinor,
@@ -966,6 +970,7 @@ class Api {
         '/buy-for-me/requests',
         data: {
           'title': title.trim(),
+          if (clientRequestId != null) 'clientRequestId': clientRequestId,
           if (sourceUrl != null && sourceUrl.trim().isNotEmpty)
             'sourceUrl': sourceUrl.trim(),
           'quantity': quantity,
@@ -989,9 +994,21 @@ class Api {
   }
 
   /// decision: accept | decline | cancel
-  Future<MarketplaceOrder> buyForMeDecision(String id, String decision) async {
+  Future<MarketplaceOrder> buyForMeDecision(
+    String id,
+    String decision, {
+    int? expectedAmountMinor,
+    String? expectedCurrency,
+  }) async {
     try {
-      final response = await _dio!.post('/buy-for-me/requests/$id/$decision');
+      final response = await _dio!.post(
+        '/buy-for-me/requests/$id/$decision',
+        data: {
+          if (expectedAmountMinor != null)
+            'expectedAmountMinor': expectedAmountMinor,
+          if (expectedCurrency != null) 'expectedCurrency': expectedCurrency,
+        },
+      );
       return MarketplaceOrder.fromJson(
         Map<String, dynamic>.from(response.data as Map),
       );
@@ -1392,6 +1409,17 @@ class Api {
     } on DioException catch (e) {
       throw _map(e);
     }
+  }
+
+  Future<void> registerPushDevice(String token, String platform) async {
+    await _dio!.put(
+      '/notifications/devices',
+      data: {'token': token, 'platform': platform},
+    );
+  }
+
+  Future<void> unregisterPushDevice(String token) async {
+    await _dio!.delete('/notifications/devices', data: {'token': token});
   }
 
   // ── Notifications ─────────────────────────────────────────────────────────

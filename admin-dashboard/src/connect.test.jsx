@@ -68,3 +68,23 @@ it('temporary mode proposes a traveller without receiving approval and allows a 
   await waitFor(() => expect(writes).toHaveLength(2));
   expect(writes[1]).toEqual({ path: '/connect/trips/t1/receiving-location', data: { locationId: 'ny' } });
 });
+it('Connect schedules use the route country and save an explicit local time with regional US zones', async () => {
+  const trip = { id: 'tz-trip', origin: 'New York, USA', destination: 'Lomé, Togo', departureAt: '2026-12-15T17:00:00Z', departureTimezone: 'America/New_York', destinationTimezone: 'Africa/Lome', status: 'APPROVED', remainingKg: 15, capacityKg: 15, flightNumber: 'QA 123', traveller: { fullName: 'Traveller' }, categories: ['CLOTHING'] };
+  const writes = [];
+  vi.stubGlobal('fetch', vi.fn(async (url, options = {}) => {
+    if (options.method === 'PATCH') { writes.push(JSON.parse(options.body)); return json({}); }
+    return json({ bookings: [], rates: [], locations: [], trips: [trip] });
+  }));
+  const user = userEvent.setup(); render(<ConnectOperations token="test" notify={vi.fn()} refreshKey={0} isAdmin />);
+  await user.click(await screen.findByRole('button', { name: 'Trips & manifests' }));
+  expect(await screen.findByText(/12:00 PM.*America\/New_York/)).toBeInTheDocument();
+  expect(screen.getByText(/5:00 PM.*Africa\/Lome/)).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Edit schedule & time zones' }));
+  const dialog = screen.getByRole('dialog', { name: 'Update country-based trip schedule' });
+  const zone = within(dialog).getByLabelText('Departure country time zone');
+  expect(zone).toHaveValue('America/New_York');
+  expect(within(zone).getByRole('option', { name: 'America/Los_Angeles' })).toBeInTheDocument();
+  expect(within(zone).queryByRole('option', { name: 'Africa/Lome' })).toBeNull();
+  await user.click(within(dialog).getByRole('button', { name: 'Confirm & record' }));
+  await waitFor(() => expect(writes[0]).toEqual({ departureTimezone: 'America/New_York', destinationTimezone: 'Africa/Lome', departureLocal: null, departureOccurrence: null }));
+});

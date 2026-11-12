@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "67658453734",
+    "project_id": "d2f-shipping-m1",
+    "storage_bucket": "d2f-shipping-m1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:67658453734:android:dfde5857f3ebe22d976127",
+        "android_client_info": {
+          "package_name": "com.d2fshipping.m1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDulOWy_y37fgwtEvYExuWlMErkkUT8GD8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:67658453734:android:475fb3ea635ccf39976127",
+        "android_client_info": {
+          "package_name": "com.example.d2f_application"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDulOWy_y37fgwtEvYExuWlMErkkUT8GD8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

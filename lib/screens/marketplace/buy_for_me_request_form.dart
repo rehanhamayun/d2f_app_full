@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../../core/api.dart';
@@ -26,6 +28,8 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
   int _quantity = 1;
   String _currency = 'USD';
   bool _busy = false;
+  final _requestId =
+      'purchase-${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 32)}';
 
   @override
   void dispose() {
@@ -42,9 +46,9 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
   }
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (_busy || !_formKey.currentState!.validate()) return;
     setState(() => _busy = true);
-    final budget = _budget.text.trim();
+    final budget = _budget.text.trim().replaceAll(RegExp(r'\s'), '');
     final parsedBudget = budget.isEmpty ? null : double.tryParse(budget);
     final budgetMinor = parsedBudget == null
         ? null
@@ -54,6 +58,7 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
     try {
       await Api.I.createBuyForMeRequest(
         title: _title.text,
+        clientRequestId: _requestId,
         sourceUrl: _link.text,
         quantity: _quantity,
         budgetMinor: budgetMinor,
@@ -125,6 +130,8 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
               const SizedBox(height: 8),
               TextFormField(
                 controller: _title,
+                key: const ValueKey('purchase-title'),
+                maxLength: 200,
                 textCapitalization: TextCapitalization.sentences,
                 validator: (v) => (v == null || v.trim().length < 4)
                     ? 'Describe the item (at least a few words).'
@@ -147,6 +154,8 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
               const SizedBox(height: 8),
               TextFormField(
                 controller: _link,
+                key: const ValueKey('purchase-link'),
+                maxLength: 2000,
                 keyboardType: TextInputType.url,
                 autocorrect: false,
                 validator: (v) {
@@ -154,7 +163,8 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
                   if (value.isEmpty) return null;
                   final parsed = Uri.tryParse(value);
                   if (parsed == null ||
-                      !['http', 'https'].contains(parsed.scheme)) {
+                      !['http', 'https'].contains(parsed.scheme) ||
+                      parsed.host.isEmpty) {
                     return 'Enter a valid http(s) link.';
                   }
                   return null;
@@ -171,83 +181,96 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
                 ),
               ),
               const SizedBox(height: 14),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Quantity', style: AppTheme.sectionTitle),
-                        const SizedBox(height: 8),
-                        Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: AppColors.border),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              IconButton(
-                                onPressed: _quantity > 1
-                                    ? () => setState(() => _quantity--)
-                                    : null,
-                                icon: const Icon(Icons.remove_rounded),
-                              ),
-                              Text(
-                                '$_quantity',
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                              IconButton(
-                                onPressed: _quantity < 1000
-                                    ? () => setState(() => _quantity++)
-                                    : null,
-                                icon: const Icon(Icons.add_rounded),
-                              ),
-                            ],
-                          ),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final quantityField = Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Quantity', style: AppTheme.sectionTitle),
+                      const SizedBox(height: 8),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: AppColors.border),
                         ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Currency', style: AppTheme.sectionTitle),
-                        const SizedBox(height: 8),
-                        DropdownButtonFormField<String>(
-                          initialValue: _currency,
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'USD',
-                              child: Text('USD (\$)'),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            IconButton(
+                              onPressed: _quantity > 1
+                                  ? () => setState(() => _quantity--)
+                                  : null,
+                              icon: const Icon(Icons.remove_rounded),
                             ),
-                            DropdownMenuItem(
-                              value: 'EUR',
-                              child: Text('EUR (€)'),
+                            Text(
+                              '$_quantity',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                              ),
                             ),
-                            DropdownMenuItem(
-                              value: 'XOF',
-                              child: Text('XOF (CFA)'),
+                            IconButton(
+                              onPressed: _quantity < 1000
+                                  ? () => setState(() => _quantity++)
+                                  : null,
+                              icon: const Icon(Icons.add_rounded),
                             ),
                           ],
-                          onChanged: (value) =>
-                              setState(() => _currency = value ?? 'USD'),
-                          decoration: const InputDecoration(
-                            filled: true,
-                            fillColor: Colors.white,
-                          ),
                         ),
+                      ),
+                    ],
+                  );
+                  final currencyField = Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Currency', style: AppTheme.sectionTitle),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        initialValue: _currency,
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'USD',
+                            child: Text('USD (\$)'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'EUR',
+                            child: Text('EUR (€)'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'XOF',
+                            child: Text('XOF (CFA)'),
+                          ),
+                        ],
+                        onChanged: (value) =>
+                            setState(() => _currency = value ?? 'USD'),
+                        decoration: const InputDecoration(
+                          filled: true,
+                          fillColor: Colors.white,
+                        ),
+                      ),
+                    ],
+                  );
+                  if (constraints.maxWidth < 340 ||
+                      MediaQuery.textScalerOf(context).scale(14) > 18) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        quantityField,
+                        const SizedBox(height: 14),
+                        currencyField,
                       ],
-                    ),
-                  ),
-                ],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: quantityField),
+                      const SizedBox(width: 12),
+                      Expanded(child: currencyField),
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 14),
               const Text(
@@ -257,14 +280,20 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
               const SizedBox(height: 8),
               TextFormField(
                 controller: _budget,
+                key: const ValueKey('purchase-budget'),
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
                 validator: (v) {
                   final value = v?.trim() ?? '';
                   if (value.isEmpty) return null;
-                  final parsed = double.tryParse(value);
-                  if (parsed == null || parsed < 0) {
+                  final parsed = double.tryParse(
+                    value.replaceAll(RegExp(r'\s'), ''),
+                  );
+                  if (parsed == null ||
+                      !parsed.isFinite ||
+                      parsed < 0 ||
+                      parsed > (_currency == 'XOF' ? 1000000000 : 10000000)) {
                     return 'Enter a valid amount.';
                   }
                   return null;
@@ -290,6 +319,8 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
               const SizedBox(height: 8),
               TextFormField(
                 controller: _notes,
+                key: const ValueKey('purchase-notes'),
+                maxLength: 2000,
                 maxLines: 3,
                 textCapitalization: TextCapitalization.sentences,
                 decoration: const InputDecoration(
@@ -315,6 +346,7 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
               const SizedBox(height: 8),
               TextFormField(
                 controller: _address,
+                key: const ValueKey('purchase-address'),
                 maxLines: 2,
                 textCapitalization: TextCapitalization.sentences,
                 validator: (v) => (v == null || v.trim().isEmpty)
@@ -332,6 +364,7 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
                   Expanded(
                     child: TextFormField(
                       controller: _city,
+                      key: const ValueKey('purchase-city'),
                       textCapitalization: TextCapitalization.words,
                       validator: (v) => (v == null || v.trim().isEmpty)
                           ? 'Enter a city.'
@@ -347,6 +380,7 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
                   Expanded(
                     child: TextFormField(
                       controller: _stateProvince,
+                      key: const ValueKey('purchase-stateProvince'),
                       textCapitalization: TextCapitalization.words,
                       decoration: const InputDecoration(
                         labelText: 'State / region',
@@ -363,6 +397,7 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
                   Expanded(
                     child: TextFormField(
                       controller: _postalCode,
+                      key: const ValueKey('purchase-postalCode'),
                       validator: (v) => (v == null || v.trim().isEmpty)
                           ? 'Enter a ZIP / postal code.'
                           : null,
@@ -377,6 +412,7 @@ class _BuyForMeRequestFormScreenState extends State<BuyForMeRequestFormScreen> {
                   Expanded(
                     child: TextFormField(
                       controller: _country,
+                      key: const ValueKey('purchase-country'),
                       textCapitalization: TextCapitalization.words,
                       validator: (v) => (v == null || v.trim().isEmpty)
                           ? 'Enter a country.'

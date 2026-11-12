@@ -19,7 +19,6 @@ import {
   validText,
   currencies,
 } from '../shopfront.js';
-import { createNotification } from '../notifications.js';
 
 const router = Router();
 router.use(authenticate, requireRole('CUSTOMER'));
@@ -507,33 +506,6 @@ async function advance(req, res, next, { from, to, action, requireNote = false, 
       const updated = await tx.serviceOrder.update({ where: { id: order.id }, data, select: sellerOrderSelect });
       if (to === 'CANCELLED') await releaseStock(tx, order.productId, order.quantity);
       await audit(tx, req, 'ServiceOrder', order.id, action, trackingRef ? `trackingRef=${trackingRef}` : note || `${order.status} → ${to}`);
-      const buyerUserId = order.customer?.userId ?? null;
-      if (to === 'ACCEPTED' && buyerUserId) {
-        await createNotification({
-          userId: buyerUserId,
-          type: 'ORDER_ACCEPTED',
-          title: 'Your order was accepted',
-          body: `${order.title} ×${order.quantity} is being prepared. D2F or the seller will coordinate the next step with you.`,
-        });
-      }
-      if (to === 'SHIPPED' && buyerUserId) {
-        await createNotification({
-          userId: buyerUserId,
-          type: 'ORDER_SHIPPED',
-          title: 'Your order has shipped',
-          body: order.trackingRef ? `Carrier reference ${order.trackingRef}.` : 'The seller shipped your order.',
-        });
-      }
-      if (to === 'COMPLETED') {
-        if (buyerUserId) {
-          await createNotification({
-            userId: buyerUserId,
-            type: 'ORDER_COMPLETED',
-            title: 'Order completed',
-            body: 'Your marketplace order is complete. D2F will follow up on the agreed settlement.',
-          });
-        }
-      }
       return updated;
     });
     res.json(redactUnaccepted([result])[0]);

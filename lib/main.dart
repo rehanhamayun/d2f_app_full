@@ -1,3 +1,7 @@
+import 'dart:async';
+
+import 'services/push_notifications.dart';
+import 'screens/marketplace/notifications_screen.dart';
 import 'screens/direct_label_print_screen.dart';
 
 import 'package:flutter/material.dart';
@@ -24,6 +28,9 @@ class D2FApp extends StatefulWidget {
 }
 
 class _D2FAppState extends State<D2FApp> {
+  final _navigator = GlobalKey<NavigatorState>();
+  final _messenger = GlobalKey<ScaffoldMessengerState>();
+  StreamSubscription<dynamic>? _pushMessage, _pushOpen;
   bool _apiReady = false;
   bool _identDone = false;
   String? _startupError;
@@ -35,7 +42,32 @@ class _D2FAppState extends State<D2FApp> {
     Future<void>.delayed(const Duration(milliseconds: 2300), () {
       if (mounted) setState(() => _identDone = true);
     });
+    _pushMessage = PushNotifications.I.messages.stream.listen((message) {
+      _messenger.currentState?.showSnackBar(
+        SnackBar(
+          content: Text(message.notification?.title ?? 'New D2F update'),
+          action: SnackBarAction(label: 'View', onPressed: _openNotifications),
+        ),
+      );
+    });
+    _pushOpen = PushNotifications.I.opened.stream.listen(
+      (_) => _openNotifications(),
+    );
     _initialize();
+  }
+
+  void _openNotifications() {
+    if (Api.I.sessionToken == null) return;
+    _navigator.currentState?.push(
+      MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pushMessage?.cancel();
+    _pushOpen?.cancel();
+    super.dispose();
   }
 
   Future<void> _initialize() async {
@@ -60,6 +92,8 @@ class _D2FAppState extends State<D2FApp> {
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'D2F Shipping',
+    navigatorKey: _navigator,
+    scaffoldMessengerKey: _messenger,
     debugShowCheckedModeBanner: false,
     theme: AppTheme.build(),
     builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
@@ -119,6 +153,17 @@ class _RootSwitch extends ConsumerStatefulWidget {
 
 class _RootSwitchState extends ConsumerState<_RootSwitch> {
   _Entry _entry = _Entry.welcome;
+  @override
+  void initState() {
+    super.initState();
+    ref.listenManual(authControllerProvider, (previous, next) {
+      final user = next.valueOrNull;
+      if (user != null && !Api.I.offlinePrintingOnly) {
+        unawaited(PushNotifications.I.connect(user.id));
+      }
+    }, fireImmediately: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.listen(authControllerProvider, (previous, next) {

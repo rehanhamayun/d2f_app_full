@@ -1,3 +1,4 @@
+import { COUNTRY_ZONES, routeZone, localToInstant, tripTiming } from '../timezones.js';
 import { TERMS_VERSION, DECLARATION_WARNING, DECLARATION_CHECKS, DECLARATION_TERMS, guidanceFor, contentsHash, requireDeclaration } from '../connect_declaration.js';
 import { Router, raw } from 'express';
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
@@ -21,7 +22,7 @@ const bookingInclude = {
 const tripInclude = { traveller: { select: { id: true, fullName: true, email: true, phone: true } }, receivingLocation: true,
   assignments: { include: { declarations: { orderBy: { createdAt: 'desc' } }, booking: { include: { parcel: true, payment: true, receivingLocation: true } } } } };
 const safeLocation = location => location && ({ id: location.id, name: location.name, address: location.address, city: location.city, country: location.country });
-const safeTrip = trip => ({ id: trip.id, origin: trip.origin, destination: trip.destination, departureAt: trip.departureAt,
+const safeTrip = trip => ({ ...tripTiming(trip), id: trip.id, origin: trip.origin, destination: trip.destination, departureAt: trip.departureAt,
   flightNumber: trip.flightNumber, capacityKg: trip.capacityKg, categories: trip.categories, status: trip.status,
   receivingLocation: safeLocation(trip.receivingLocation) });
 const remaining = trip => Math.round((trip.capacityKg - trip.assignments.filter(a => ACTIVE_ASSIGNMENTS.includes(a.status)).reduce((sum, a) => sum + effectiveWeight(a.booking), 0)) * 1000) / 1000;
@@ -33,7 +34,7 @@ function customerBooking(b) {
 }
 function staffBooking(b) {
   const { handoverCodeHash, handoverCodeExpiresAt, handoverAttempts, ...rest } = b;
-  return rest;
+  return { ...rest, assignments: rest.assignments.map(a => ({ ...a, trip: { ...a.trip, ...tripTiming(a.trip) } })) };
 }
 function travellerAssignment(a) {
   const b = a.booking;
@@ -92,7 +93,7 @@ router.get('/catalog', wrap(async (req, res) => {
     prisma.connectTrip.findMany({ where: { organizationId: req.connectOrg, status: 'APPROVED', departureAt: { gt: new Date() } }, include: tripInclude, orderBy: { departureAt: 'asc' } }),
     prisma.connectRate.findMany({ where: { organizationId: req.connectOrg, isActive: true }, orderBy: [{ origin: 'asc' }, { category: 'asc' }] }),
   ]);
-  res.json({ categories: CATEGORIES, trips: trips.map(t => ({ ...safeTrip(t), remainingKg: remaining(t) })), rates });
+  res.json({ timezones: COUNTRY_ZONES, categories: CATEGORIES, trips: trips.map(t => ({ ...safeTrip(t), remainingKg: remaining(t) })), rates });
 }));
 router.get('/operations', requireRole('STAFF', 'ADMIN'), wrap(async (req, res) => {
   const [trips, bookings, rates, locations] = await Promise.all([
@@ -103,7 +104,7 @@ router.get('/operations', requireRole('STAFF', 'ADMIN'), wrap(async (req, res) =
   ]);
   res.json({ policy: { receivingApprovalRequired: connectReceivingApprovalRequired(), facilityAuthorizationRequired: warehouseFacilityAuthorizationRequired() }, bookings: bookings.map(staffBooking), rates, locations, trips: trips.map(t => {
     const revenueMinor = t.assignments.filter(a => a.status === 'CONFIRMED' && a.booking.payment).reduce((sum, a) => sum + a.booking.internationalFeeMinor, 0);
-    return { ...t, assignments: t.assignments.map(travellerAssignment), remainingKg: remaining(t), revenueMinor,
+    return { ...t, ...tripTiming(t), assignments: t.assignments.map(travellerAssignment), remainingKg: remaining(t), revenueMinor,
       profitMinor: revenueMinor - t.compensationMinor - t.expensesMinor };
   }) });
 }));
@@ -144,7 +145,11 @@ router.post('/trips', requireRole('CUSTOMER'), wrap(async (req, res) => {
   const origin = text(b.origin, 'departure city and country'); const destination = text(b.destination, 'destination city and country');
   if (routeKey(origin) === routeKey(destination)) fail(400, 'Choose different departure and destination locations.');
   if (!Array.isArray(b.categories) || !b.categories.length || b.categories.some(c => !CATEGORIES.includes(c))) fail(400, 'Choose permitted parcel categories.');
-  const data = { organizationId: req.connectOrg, travellerId: req.user.id, origin, destination, departureAt: future(b.departureAt, 'a departure date'),
+  const departureTimezone = routeZone(origin, b.departureTimezone);
+  const destinationTimezone = routeZone(destination, b.destinationTimezone);
+  if (!b.departureLocal && (typeof b.departureAt !== 'string' || !/(Z|[+-]\d\d:\d\d)$/.test(b.departureAt))) fail(400, 'Include a time zone offset or enter a local departure time and zone.');
+  const departure = b.departureLocal ? localToInstant(b.departureLocal, departureTimezone, b.departureOccurrence) : b.departureAt;
+  const data = { organizationId: req.connectOrg, travellerId: req.user.id, origin, destination, departureTimezone, destinationTimezone, departureAt: future(departure, 'a departure date'),
     flightNumber: text(b.flightNumber, 'airline and flight number'), capacityKg: number(b.capacityKg, 'available baggage capacity', 0.1, 100),
     categories: [...new Set(b.categories)], verificationReference: text(b.verificationReference, 'your identity and ticket verification reference', 500) };
   if (b.complianceAcknowledged !== true) fail(400, 'Confirm that your ticket, baggage allowance and permitted goods require D2F verification.');
@@ -152,6 +157,21 @@ router.post('/trips', requireRole('CUSTOMER'), wrap(async (req, res) => {
     const trip = await tx.connectTrip.create({ data });
     await audit(tx, req, 'ConnectTrip', trip.id, 'TRIP_SUBMITTED', 'Traveller registration awaiting identity, ticket and compliance review.');
     return safeTrip(trip);
+  }));
+}));
+router.patch('/trips/:id/schedule', requireRole('ADMIN'), wrap(async (req, res) => {
+  res.json(await transaction(req, async tx => {
+    const t = await getTrip(tx, req);
+    if (!['PENDING_REVIEW', 'APPROVED', 'REJECTED'].includes(t.status)) fail(409, 'A departed trip schedule cannot be changed.');
+    const departureTimezone = routeZone(t.origin, req.body.departureTimezone || t.departureTimezone);
+    const destinationTimezone = routeZone(t.destination, req.body.destinationTimezone || t.destinationTimezone);
+    const departureAt = req.body.departureLocal ? future(localToInstant(req.body.departureLocal, departureTimezone, req.body.departureOccurrence), 'a departure date') : t.departureAt;
+    const bookings = t.assignments.filter(a => ACTIVE_ASSIGNMENTS.includes(a.status));
+    if (bookings.some(a => departureAt < a.booking.preferredDate)) fail(409, 'This departure is earlier than an assigned customer’s preferred date. Reconcile those bookings first.');
+    const updated = await tx.connectTrip.update({ where: { id: t.id }, data: { departureAt, departureTimezone, destinationTimezone } });
+    await audit(tx, req, 'ConnectTrip', t.id, 'SCHEDULE_UPDATED', JSON.stringify({ departureAt, departureTimezone, destinationTimezone }));
+    for (const a of bookings) await event(tx, req, a.booking, 'SCHEDULE_UPDATED', 'D2F updated your assigned trip schedule. Review the departure time in D2F Connect.', false);
+    return safeTrip(updated);
   }));
 }));
 router.post('/trips/:id/review', requireRole('ADMIN'), wrap(async (req, res) => {
@@ -217,7 +237,8 @@ router.post('/bookings', requireRole('CUSTOMER'), wrap(async (req, res) => {
   const recipientName = text(b.recipientName, 'recipient name'); const recipientPhone = text(b.recipientPhone, 'recipient phone number', 40);
   if (recipientPhone.length < 6) fail(400, 'Enter the recipient’s full phone number.');
   const recipientAddress = text(b.recipientAddress, 'recipient address', 500);
-  const preferredDate = future(b.preferredDate, 'the earliest preferred travel date');
+  const preferredTimezone = routeZone(origin, b.preferredTimezone);
+  const preferredDate = future(b.preferredLocalDate ? localToInstant(`${b.preferredLocalDate}T00:00`, preferredTimezone) : b.preferredDate, 'the earliest preferred travel date');
   const declaredValueMinor = number(b.declaredValueMinor, 'declared value in cents', 0, 100000000, true);
   if (!['DOMESTIC_SHIPPING', 'DROP_OFF', 'PICKUP'].includes(b.handoverMode)) fail(400, 'Choose how the parcel reaches D2F.');
   if (!['D2F_PICKUP', 'DELIVERY_REQUEST'].includes(b.deliveryPreference)) fail(400, 'Choose destination pickup or a delivery request.');
@@ -251,7 +272,7 @@ router.post('/bookings', requireRole('CUSTOMER'), wrap(async (req, res) => {
       deliveryMode: b.handoverMode === 'PICKUP' ? 'PICKUP' : 'DROP_OFF', restrictionsAcknowledgedAt: new Date(),
       items: { create: { name: description.slice(0, 120), details: description, quantity, weightKg, type: b.category === 'DOCUMENTS' ? 'DOCUMENTS' : 'BOX' } } } });
     const booking = await tx.connectBooking.create({ data: { organizationId: req.connectOrg, parcelId: parcel.id, category: b.category, quantity,
-      declaredValueMinor, preferredDate, requestedTripId, handoverMode: b.handoverMode, senderCity, senderAddress, deliveryPreference: b.deliveryPreference,
+      declaredValueMinor, preferredDate, preferredTimezone, requestedTripId, handoverMode: b.handoverMode, senderCity, senderAddress, deliveryPreference: b.deliveryPreference,
       domesticStatus: b.handoverMode === 'DOMESTIC_SHIPPING' ? 'AWAITING_ADMIN_REVIEW' : 'NOT_REQUIRED',
       domesticCostMinor: b.handoverMode === 'DOMESTIC_SHIPPING' ? null : 0,
       internationalFeeMinor, pricingSnapshot: rate && internationalFeeMinor != null ? { rateId: rate.id, unit: rate.unit, amountMinor: rate.amountMinor, weightKg, quantity, quotedAt: new Date().toISOString() } : undefined } });

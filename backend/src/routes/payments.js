@@ -5,7 +5,6 @@ import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { fail } from '../warehouse.js';
 import { audit, validAmount, validOptionalText, validText } from '../shopfront.js';
-import { createNotification } from '../notifications.js';
 
 const router = Router();
 router.use(authenticate);
@@ -144,15 +143,6 @@ router.post('/:id/verify', requireRole('ADMIN', 'STAFF'), async (req, res, next)
         select: paymentSelect,
       });
       await audit(tx, req, 'Payment', existing.id, `PAYMENT_${status}`, `verified by ${req.user.fullName}`);
-      // Notify customer
-      await createNotification({
-        userId: existing.customerId,
-        type: 'PAYMENT_VERIFIED',
-        title: status === 'COMPLETED' ? 'Payment confirmed' : 'Payment failed',
-        body: status === 'COMPLETED'
-          ? `Your payment of ${existing.amountMinor} ${existing.currency} has been confirmed.`
-          : `Your payment could not be verified. ${notes || ''}`,
-      });
       return updated;
     });
     res.json(result);
@@ -183,12 +173,6 @@ router.post('/:id/refund', requireRole('ADMIN'), async (req, res, next) => {
         select: paymentSelect,
       });
       await audit(tx, req, 'Payment', existing.id, 'PAYMENT_REFUND', `refunded ${amountMinor} ${existing.currency}`);
-      await createNotification({
-        userId: existing.customerId,
-        type: 'PAYMENT_REFUNDED',
-        title: 'Payment refunded',
-        body: `A refund of ${amountMinor} ${existing.currency} has been issued. ${reason || ''}`,
-      });
       return updated;
     });
     res.json(result);

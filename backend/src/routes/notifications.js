@@ -6,6 +6,23 @@ import { listFor, markRead, markAllRead, unreadCount } from '../notifications.js
 const router = Router();
 router.use(authenticate);
 
+// Tokens are account-scoped, support multiple devices, and are revoked on logout.
+router.put('/devices', async (req, res, next) => {
+  try {
+    const { token, platform } = req.body || {};
+    if (typeof token !== 'string' || token.length < 20 || token.length > 4096 || !['android', 'ios', 'web', 'macos'].includes(platform)) return res.status(400).json({ error: 'Provide a valid device token and platform.' });
+    await prisma.pushDevice.upsert({ where: { token }, create: { token, platform, userId: req.user.id }, update: { platform, userId: req.user.id } });
+    res.json({ registered: true });
+  } catch (error) { next(error); }
+});
+router.delete('/devices', async (req, res, next) => {
+  try {
+    if (typeof req.body?.token !== 'string') return res.status(400).json({ error: 'Provide the device token.' });
+    await prisma.pushDevice.deleteMany({ where: { token: req.body.token, userId: req.user.id } });
+    res.json({ removed: true });
+  } catch (error) { next(error); }
+});
+
 // Buyer-facing notifications (marketplace, Buy For Me, seller lifecycle).
 router.get('/', async (req, res, next) => {
   try {

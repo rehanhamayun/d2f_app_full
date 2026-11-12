@@ -1,3 +1,7 @@
+import 'dart:async';
+
+import '../../services/push_notifications.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,17 +19,21 @@ import 'buy_for_me_request_form.dart';
 /// Buy For Me: the customer describes an item from any store; D2F quotes the
 /// total, the customer accepts, and D2F buys and ships it.
 class BuyForMeShop extends ConsumerStatefulWidget {
-  const BuyForMeShop({super.key});
+  final Future<List<MarketplaceOrder>> Function()? loadRequests;
+  final Future<MarketplaceOrder> Function(String, String)? decideRequest;
+  const BuyForMeShop({super.key, this.loadRequests, this.decideRequest});
 
   @override
   ConsumerState<BuyForMeShop> createState() => _BuyForMeShopState();
 }
 
-class _BuyForMeShopState extends ConsumerState<BuyForMeShop> {
+class _BuyForMeShopState extends ConsumerState<BuyForMeShop>
+    with WidgetsBindingObserver {
   List<MarketplaceOrder> _requests = const [];
   bool _loading = true, _failed = false;
 
   bool _loadStarted = false;
+  StreamSubscription<dynamic>? _pushUpdates;
 
   /// Fetch requests only once auth resolves to a CUSTOMER account.
   void _maybeLoad() {
@@ -39,11 +47,27 @@ class _BuyForMeShopState extends ConsumerState<BuyForMeShop> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _pushUpdates = PushNotifications.I.messages.stream.listen((_) {
+      if (_loadStarted && mounted) _load();
+    });
     ref.listenManual(
       authControllerProvider.select((state) => state.valueOrNull?.id),
       (_, _) => _maybeLoad(),
       fireImmediately: true,
     );
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _pushUpdates?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _loadStarted) _load();
   }
 
   Future<void> _load() async {
@@ -52,7 +76,7 @@ class _BuyForMeShopState extends ConsumerState<BuyForMeShop> {
       _failed = false;
     });
     try {
-      final requests = await Api.I.buyForMeRequests();
+      final requests = await (widget.loadRequests ?? Api.I.buyForMeRequests)();
       if (!mounted) return;
       requests.sort(
         (a, b) =>
@@ -72,13 +96,13 @@ class _BuyForMeShopState extends ConsumerState<BuyForMeShop> {
   }
 
   Future<void> _newRequest() async {
-    final created = await Navigator.push<bool>(
+    await Navigator.push<bool>(
       context,
       MaterialPageRoute<bool>(
         builder: (_) => const BuyForMeRequestFormScreen(),
       ),
     );
-    if (created == true) _load();
+    if (mounted) _load();
   }
 
   @override
@@ -289,12 +313,12 @@ class _BuyForMeShopState extends ConsumerState<BuyForMeShop> {
       (
         Icons.request_quote_rounded,
         'We quote the total',
-        'Item + your budget —\nyou see the full price',
+        'Product + shipping —\nyou see the full price',
       ),
       (
         Icons.local_shipping_rounded,
-        'Accept & we ship',
-        'We buy it, then air or\nsea freight to you',
+        'Accept, pay & track',
+        'Submit payment proof.\nWe buy, then ship.',
       ),
     ];
     return Row(
@@ -404,8 +428,12 @@ class _BuyForMeShopState extends ConsumerState<BuyForMeShop> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) =>
-          _RequestDetailSheet(initialOrder: order, onChanged: _load),
+      builder: (_) => _RequestDetailSheet(
+        initialOrder: order,
+        onChanged: _load,
+        loadRequests: widget.loadRequests ?? Api.I.buyForMeRequests,
+        decideRequest: widget.decideRequest,
+      ),
     );
   }
 }
@@ -492,6 +520,27 @@ class _StepCard extends StatelessWidget {
     ),
   );
 }
+
+String buyForMeNextStep(MarketplaceOrder o) => switch (o.status) {
+  'REQUESTED' =>
+    'D2F is preparing your quote. You will receive an update when it is ready.',
+  'QUOTED' => 'Your quote is ready. Review the product and shipping costs, then accept or decline below.',
+  'ACCEPTED' =>
+    o.paymentStatus == 'PENDING'
+        ? 'Your payment proof is awaiting D2F review. We will notify you when verification is complete.'
+        : o.paymentStatus == 'REJECTED'
+        ? 'Your payment proof needs a correction. Review the reason and send updated evidence below.'
+        : 'Next: follow the D2F payment instructions and submit your transaction ID and screenshot below.',
+  'PAYMENT_CONFIRMED' =>
+    'Payment confirmed. D2F will purchase your item and share the next update.',
+  'PURCHASED' => 'Your item has been purchased. D2F is waiting to receive it before shipping.',
+  'RECEIVED' => 'D2F has received your item and is preparing its delivery and tracking details.',
+  'SHIPPED' => 'Your item is on its way. Use the tracking details below to follow delivery.',
+  'COMPLETED' => 'Your request is complete. Your purchase and shipping updates are saved below.',
+  'CANCELLED' =>
+    'This request was cancelled. Contact D2F for any payment follow-up.',
+  _ => 'D2F is reviewing your request. Check the latest updates below.',
+};
 
 class _RequestCard extends StatelessWidget {
   final MarketplaceOrder order;
@@ -595,12 +644,14 @@ class _RequestCard extends StatelessWidget {
                               color: AppColors.coral,
                             ),
                             const SizedBox(width: 6),
-                            Text(
-                              'D2F quote: ${formatMoney(o.amountMinor, o.currency)} · Respond now',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w900,
-                                color: AppColors.coral,
+                            Flexible(
+                              child: Text(
+                                'D2F quote: ${formatMoney(o.amountMinor, o.currency)} · Respond now',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppColors.coral,
+                                ),
                               ),
                             ),
                           ],
@@ -627,16 +678,22 @@ class _RequestCard extends StatelessWidget {
 class _RequestDetailSheet extends StatefulWidget {
   final MarketplaceOrder initialOrder;
   final Future<void> Function() onChanged;
+  final Future<List<MarketplaceOrder>> Function() loadRequests;
+  final Future<MarketplaceOrder> Function(String, String)? decideRequest;
   const _RequestDetailSheet({
     required this.initialOrder,
     required this.onChanged,
+    required this.loadRequests,
+    required this.decideRequest,
   });
 
   @override
   State<_RequestDetailSheet> createState() => _RequestDetailSheetState();
 }
 
-class _RequestDetailSheetState extends State<_RequestDetailSheet> {
+class _RequestDetailSheetState extends State<_RequestDetailSheet>
+    with WidgetsBindingObserver {
+  StreamSubscription<dynamic>? _pushUpdates;
   late MarketplaceOrder _order;
   final _transactionId = TextEditingController();
   bool _busy = false;
@@ -645,10 +702,34 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet> {
   void initState() {
     super.initState();
     _order = widget.initialOrder;
+    WidgetsBinding.instance.addObserver(this);
+    _pushUpdates = PushNotifications.I.messages.stream.listen(
+      (_) => _refreshOrder(),
+    );
+  }
+
+  Future<void> _refreshOrder() async {
+    if (_busy) return;
+    try {
+      final orders = await widget.loadRequests();
+      final matches = orders.where((o) => o.id == _order.id);
+      if (mounted && matches.isNotEmpty && !_busy) {
+        setState(() => _order = matches.first);
+      }
+    } catch (_) {
+      /* Existing data remains usable during a connection outage. */
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshOrder();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _pushUpdates?.cancel();
     _transactionId.dispose();
     super.dispose();
   }
@@ -693,8 +774,12 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet> {
       }
     } on ApiException catch (error) {
       _fail(error.message);
+      await _refreshOrder();
     } catch (_) {
-      _fail('Payment proof could not be submitted. Please try again.');
+      _fail(
+        'Payment proof could not be confirmed. We are checking its latest status.',
+      );
+      await _refreshOrder();
     }
   }
 
@@ -743,7 +828,16 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet> {
     }
     setState(() => _busy = true);
     try {
-      final updated = await Api.I.buyForMeDecision(_order.id, decision);
+      final updated = widget.decideRequest != null
+          ? await widget.decideRequest!(_order.id, decision)
+          : await Api.I.buyForMeDecision(
+              _order.id,
+              decision,
+              expectedAmountMinor: decision == 'accept'
+                  ? _order.amountMinor
+                  : null,
+              expectedCurrency: decision == 'accept' ? _order.currency : null,
+            );
       if (!mounted) return;
       setState(() {
         _order = updated;
@@ -752,6 +846,7 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet> {
       await widget.onChanged();
     } on ApiException catch (error) {
       _fail(error.message);
+      await _refreshOrder();
     } catch (_) {
       _fail('Could not update the request. Please try again.');
     }
@@ -833,6 +928,32 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet> {
                     ),
                     const SizedBox(height: 4),
                   ],
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: AppColors.blueSoft,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'What happens next',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.navy,
+                          ),
+                        ),
+                        const SizedBox(height: 7),
+                        Text(
+                          buyForMeNextStep(o),
+                          style: const TextStyle(fontSize: 14, height: 1.6),
+                        ),
+                      ],
+                    ),
+                  ),
                   _sectionTitle('Progress'),
                   OrderTimeline(kind: o.kind, status: o.status),
                   _sectionTitle('Details'),
@@ -1018,8 +1139,7 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet> {
                           ),
                           const SizedBox(height: 5),
                           Text(
-                            o.paymentInstructions ??
-                                'Please contact D2F to confirm payment instructions before paying.',
+                            o.paymentInstructions ?? 'Please contact D2F to confirm payment instructions before paying.',
                           ),
                           if (o.paymentStatus == 'VERIFIED')
                             const Text(

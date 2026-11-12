@@ -1,4 +1,4 @@
-D2F Global source — version 1.1.9+2024
+D2F Global source — version 1.1.10+2025
 
 Android app: Flutter. API: backend/ (Express, Prisma, PostgreSQL).
 Admin dashboard: admin-dashboard/ (React/Vite).
@@ -33,3 +33,52 @@ remain unverified without physical test hardware. Local release reports record
 The repository's existing publishing rules exclude Markdown, design inputs and
 build outputs. Guides, source archives and signed APKs remain in the owner's
 local workspace/deliverables; this commit publishes source and build inputs.
+
+November 2026 operational refresh
+
+Apply the new Prisma migration before running this API version. Notifications
+are committed alongside operational changes by database triggers. The API's
+push worker retries failed deliveries independently for each registered device.
+Covered: Buy for ME and marketplace orders, quotes, customer messages, payment
+proof review, shipment and container tracking events, pickup/delivery driver
+assignments, Connect bookings/trips/assignments, Ship for ME, seller/product
+reviews, payments and returns. Internal staff notes are excluded from payloads.
+
+Railway remains the API/database host. Set FIREBASE_SERVICE_ACCOUNT_JSON in its
+backend service's private Variables to enable FCM delivery. Never put this private
+credential into Flutter, Git or Vite variables. Firebase initialization uses the
+Admin SDK; no Firebase database or authentication migration is required.
+
+Register the Android and iOS apps in the same Firebase project. Add the native
+client configuration with FlutterFire (android/app/google-services.json and the
+iOS GoogleService-Info.plist included in the Runner target), or supply the
+FIREBASE_API_KEY, FIREBASE_APP_ID, FIREBASE_MESSAGING_SENDER_ID,
+FIREBASE_PROJECT_ID and FIREBASE_IOS_BUNDLE_ID Flutter dart defines per platform.
+For iOS, enable Push Notifications for the signing identifier and upload the
+APNs authentication key to Firebase Cloud Messaging. The Runner push entitlement
+uses development for Debug and production for Release/Profile. iOS release
+signing and APNs access are required for physical-device verification.
+
+In-app notification history works without Firebase. On a real phone, sign in,
+allow notifications, and verify registration in the Notifications screen. Send
+an admin quote or shipping update; verify the foreground banner, background
+notification, cold-start tap, token refresh, logout and two-device delivery.
+Live-device push remains unverified until the real Firebase/APNs configuration
+is supplied. Android requires Google Play services for FCM delivery.
+
+Connect stores UTC instants with explicit departure/destination IANA zones.
+Trip registration uses departure-city civil time, and booking date preferences
+follow that city's calendar. Ambiguous or nonexistent daylight-saving times
+are rejected. Admins can edit the schedule and country zones before departure.
+Legacy trips retain their stored instant; known city zones are inferred for
+display and unknown routes show UTC until an administrator confirms the zone.
+The dashboard selector controls general admin timestamps and appointment input;
+trip departure times always show the route's zone. USA zones are regional.
+
+Dashboard visual review captures: output/admin-refresh/.
+
+Verification for this refresh: 98 backend, 35 dashboard and 125 Flutter tests
+passed; the dashboard production build and Android debug APK compilation passed.
+Use JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+on this Mac if the system Java launcher is not configured. Flutter currently
+reports informational legacy-style lints and Kotlin migration warnings.

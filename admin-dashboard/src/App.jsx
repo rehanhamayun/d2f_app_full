@@ -1,3 +1,6 @@
+import { WorldClocks, DashboardTimezone } from './world-clocks.jsx';
+import { NotificationBell } from './notification-bell.jsx';
+import { dashboardTimezone } from './timezones.js';
 import { LabelPrintPanel } from './label-print';
 import { StructuredAddress, isUsRoute } from './structured-address.jsx';
 import { OperationalNotes, OperationalNoteField } from './operational-notes.jsx';
@@ -187,7 +190,7 @@ function RecentActivity({ events, audits }) {
 
 function formatDate(value, options = { month: 'short', day: 'numeric' }) {
   if (!value) return '—';
-  return new Intl.DateTimeFormat(undefined, options).format(new Date(value));
+  return new Intl.DateTimeFormat(undefined, { ...options, timeZone: dashboardTimezone() }).format(new Date(value));
 }
 
 function initials(name = '') {
@@ -406,7 +409,7 @@ function Sidebar({ page, setPage, user, onLogout, open, setOpen }) {
   );
 }
 
-function Header({ page, onMenu, user, onRefresh, refreshing, onChangePassword }) {
+function Header({ token, page, onMenu, user, onRefresh, refreshing, onChangePassword }) {
   const current = NAV.find((item) => item.id === page);
   return (
     <header className="topbar">
@@ -414,7 +417,7 @@ function Header({ page, onMenu, user, onRefresh, refreshing, onChangePassword })
         <button className="icon-button mobile-menu" onClick={onMenu} aria-label="Open navigation"><Menu size={21} /></button>
         <div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><b>{current?.label || 'Overview'}</b></div>
       </div>
-      <div className="topbar-actions">
+      <div className="topbar-actions"><DashboardTimezone /><NotificationBell token={token} />
         <button className="icon-button refresh-button" onClick={onRefresh} disabled={refreshing} aria-label="Refresh dashboard" title="Refresh"><Activity size={18} className={refreshing ? 'spin' : ''} /></button>
         <button className="icon-button" onClick={onChangePassword} aria-label="Change password" title="Change password"><KeyRound size={17} /></button>
         <div className="topbar-divider" />
@@ -466,6 +469,11 @@ function Overview({ data, onPeriod, days, loading, onGo }) {
         <label className="select-wrap period-select"><Clock3 size={15} /><select value={days} onChange={(event) => onPeriod(Number(event.target.value))}><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option></select><ChevronDown size={15} /></label>
         <button className="button secondary" onClick={() => onGo('shipments')}><PackageCheck size={16} /> View shipments</button>
       </PageHeading>
+      <section className="operations-hero">
+        <div className="operations-hero-copy"><span className="hero-kicker"><span /> D2F GLOBAL · OPERATIONS WORKSPACE</span><h2>Great journeys.<br /><em>Seamless operations.</em></h2><p>From the first request to the final handover.<br />Your entire network, moving together.</p><div className="hero-actions"><button className="button primary" onClick={() => onGo('bookings')}><ClipboardList size={18} /> Review bookings <ArrowUpRight size={17} /></button><button className="hero-link" onClick={() => onGo('connect')}>Open D2F Connect <ArrowUpRight size={17} /></button></div></div>
+        <div className="network-art" aria-hidden="true"><div className="network-globe"><Globe2 strokeWidth={.7} /></div><svg viewBox="0 0 500 280" className="network-routes"><path d="M80 100 Q240 -30 370 170 M80 100 Q220 230 290 190 M370 170 Q390 70 305 70" /><circle cx="80" cy="100" r="6" /><circle cx="370" cy="170" r="6" /><circle cx="290" cy="190" r="4" /><circle cx="305" cy="70" r="4" /></svg><span className="network-stop stop-us">USA <small>Origin network</small></span><span className="network-stop stop-eu">Europe <small>Connected routes</small></span><span className="network-stop stop-africa">West Africa <small>Destination network</small></span><span className="network-parcel"><PackageCheck size={19} /> Every handover matters</span></div>
+      </section>
+      <WorldClocks />
       {loading && !data ? <LoadingPanel label="Loading your operations overview…" /> : data && (
         <>
           <div className="metric-grid">
@@ -485,7 +493,7 @@ function Overview({ data, onPeriod, days, loading, onGo }) {
                     <XAxis dataKey="date" tickFormatter={(value) => formatDate(value, { month: 'short', day: 'numeric' })} tickLine={false} axisLine={false} minTickGap={26} tick={{ fill: '#8b93a2', fontSize: 11, fontFamily: 'Plus Jakarta Sans' }} />
                     <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: '#8b93a2', fontSize: 11, fontFamily: 'Plus Jakarta Sans' }} />
                     <Tooltip content={<CustomTooltip />} />
-                    <Area type="monotone" dataKey="count" stroke="#ff533d" strokeWidth={2.8} fill="url(#shipmentGradient)" activeDot={{ r: 5, stroke: '#fff', strokeWidth: 3, fill: '#ff533d' }} />
+                    <Area isAnimationActive={false} type="monotone" dataKey="count" stroke="#ff533d" strokeWidth={2.8} fill="url(#shipmentGradient)" activeDot={{ r: 5, stroke: '#fff', strokeWidth: 3, fill: '#ff533d' }} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -494,7 +502,7 @@ function Overview({ data, onPeriod, days, loading, onGo }) {
             <section className="panel status-panel">
               <div className="panel-heading"><div><h2>Shipment status</h2><p>Current portfolio distribution</p></div><button className="icon-button mini-more" onClick={() => onGo('shipments')} aria-label="View shipment statuses"><ChevronRight size={18} /></button></div>
               <div className="donut-area">
-                {statuses.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={statuses} dataKey="count" nameKey="status" innerRadius="67%" outerRadius="88%" paddingAngle={3} stroke="none" cornerRadius={6}>{statuses.map((entry) => <Cell key={entry.status} fill={entry.color} />)}</Pie><Tooltip formatter={(value, _name, item) => [value, statusLabel(item.payload.status)]} contentStyle={{ borderRadius: 12, borderColor: '#eff1f4', fontFamily: 'Plus Jakarta Sans', fontSize: 12 }} /></PieChart></ResponsiveContainer> : <div className="empty-chart">No shipment records yet</div>}
+                {statuses.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie isAnimationActive={false} data={statuses} dataKey="count" nameKey="status" innerRadius="67%" outerRadius="88%" paddingAngle={3} stroke="none" cornerRadius={6}>{statuses.map((entry) => <Cell key={entry.status} fill={entry.color} />)}</Pie><Tooltip formatter={(value, _name, item) => [value, statusLabel(item.payload.status)]} contentStyle={{ borderRadius: 12, borderColor: '#eff1f4', fontFamily: 'Plus Jakarta Sans', fontSize: 12 }} /></PieChart></ResponsiveContainer> : <div className="empty-chart">No shipment records yet</div>}
                 <div className="donut-total"><b>{formatNumber(data.totalParcels)}</b><small>shipments</small></div>
               </div>
               <div className="legend-list">{statuses.slice(0, 5).map((item) => <div key={item.status}><span><i style={{ background: item.color }} />{statusLabel(item.status)}</span><b>{formatNumber(item.count)}</b></div>)}{statuses.length > 5 && <button className="text-button" onClick={() => onGo('shipments')}>View all statuses</button>}</div>
@@ -1332,6 +1340,12 @@ function Toast({ toast, onClose }) {
 }
 
 export default function App() {
+  const [, renderTimezone] = useState(0);
+  useEffect(() => {
+    const change = () => renderTimezone(n => n + 1);
+    window.addEventListener('d2f-timezone', change);
+    return () => window.removeEventListener('d2f-timezone', change);
+  }, []);
   const [session, setSession] = useState(getSavedSession);
   const [page, setPage] = useState(() => getSavedSession()?.user?.role === 'STAFF' ? 'shipments' : 'overview');
   const [days, setDays] = useState(30);
@@ -1402,7 +1416,7 @@ export default function App() {
     <div className="app-shell">
       <Sidebar page={page} setPage={setPage} user={session.user} onLogout={() => window.dispatchEvent(new Event('d2f-logout'))} open={menuOpen} setOpen={setMenuOpen} />
       <div className="main-shell">
-        <Header page={page} onMenu={() => setMenuOpen(true)} user={session.user} onRefresh={page === 'overview' ? loadOverview : () => setRefreshKey((value) => value + 1)} refreshing={refreshing} onChangePassword={() => setPasswordOpen(true)} />
+        <Header token={token} page={page} onMenu={() => setMenuOpen(true)} user={session.user} onRefresh={page === 'overview' ? loadOverview : () => setRefreshKey((value) => value + 1)} refreshing={refreshing} onChangePassword={() => setPasswordOpen(true)} />
         <main className="content">
           {isAdmin && page === 'overview' && <Overview data={overview} days={days} onPeriod={setDays} loading={overviewLoading} onGo={setPage} />}
           {page === 'shipments' && <Shipments staffAccess={!isAdmin} token={token} notify={notify} refreshOverview={loadOverview} refreshKey={refreshKey} currentUserId={session.user.id} key="shipments" />}

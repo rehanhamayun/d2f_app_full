@@ -113,21 +113,58 @@ model User {
   connectTrips     ConnectTrip[]
   sellerProfile    SellerProfile?
   notifications    Notification[]
+  pushDevices      PushDevice[]
 }
 
 // Marketplace / Buy For Me updates that reach a user inside the app (and, when
 // push credentials are configured, as a real device notification).
 model Notification {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      String
-  title     String
-  body      String?
-  read      Boolean  @default(false)
-  createdAt DateTime @default(now())
+  id           String         @id @default(uuid())
+  userId       String
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type         String
+  title        String
+  body         String?
+  read         Boolean        @default(false)
+  createdAt    DateTime       @default(now())
+  eventKey     String?        @unique
+  entityType   String?
+  entityId     String?
+  pushQueuedAt DateTime?
+  deliveries   PushDelivery[]
 
+  @@index([pushQueuedAt, createdAt])
   @@index([userId, createdAt])
+}
+
+// Each installation registers independently. A token can belong to one account.
+model PushDevice {
+  id         String         @id @default(uuid())
+  token      String         @unique
+  userId     String
+  platform   String
+  updatedAt  DateTime       @updatedAt
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries PushDelivery[]
+
+  @@index([userId])
+}
+
+// Durable, per-device delivery outbox; provider failures never roll back orders.
+model PushDelivery {
+  id             String       @id @default(uuid())
+  notificationId String
+  deviceId       String
+  attempts       Int          @default(0)
+  nextAttemptAt  DateTime     @default(now())
+  leaseUntil     DateTime?
+  completedAt    DateTime?
+  lastError      String?
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  device         PushDevice   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, deviceId])
+  @@index([completedAt, nextAttemptAt])
 }
 
 model SocialIdentity {
@@ -590,6 +627,7 @@ model ServiceOrder {
   status                 String                          @default("REQUESTED")
   notes                  String?
   source                 String                          @default("ADMIN") // ADMIN | APP
+  clientRequestId        String?
   // Commission snapshot taken from the agreed seller rate at order time.
   commissionBps          Int?
   commissionMinor        Int?
@@ -631,6 +669,7 @@ model ServiceOrder {
   paymentSubmissions     ServiceOrderPaymentSubmission[]
   updates                ServiceOrderUpdate[]
 
+  @@unique([organizationId, clientRequestId])
   @@index([organizationId, kind, createdAt])
   @@index([organizationId, sellerId, createdAt])
 }
@@ -649,7 +688,7 @@ model ServiceOrderPaymentSubmission {
   reviewedById   String?
   reviewedAt     DateTime?
   createdAt      DateTime     @default(now())
-  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
 
   @@index([serviceOrderId, createdAt])
 }
@@ -668,7 +707,7 @@ model ServiceOrderUpdate {
   contentType            String?
   bytes                  Bytes?
   createdAt              DateTime     @default(now())
-  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  serviceOrder           ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
 
   @@index([serviceOrderId, createdAt])
 }
@@ -681,6 +720,8 @@ model ConnectTrip {
   travellerId           String
   origin                String
   destination           String
+  departureTimezone     String?
+  destinationTimezone   String?
   departureAt           DateTime
   flightNumber          String
   capacityKg            Float
@@ -727,6 +768,7 @@ model ConnectBooking {
   category                   String
   quantity                   Int
   declaredValueMinor         Int
+  preferredTimezone          String?
   preferredDate              DateTime
   requestedTripId            String?
   verifiedWeightKg           Float?

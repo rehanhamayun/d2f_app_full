@@ -1,3 +1,4 @@
+import '../core/country_time.dart';
 import 'direct_label_print_screen.dart';
 import '../widgets/structured_address_field.dart';
 import '../widgets/connect_declaration_form.dart';
@@ -29,11 +30,27 @@ String connectLabel(dynamic value) => (value ?? 'Awaiting review')
 String connectMoney(dynamic cents) => cents == null
     ? 'D2F quotation required'
     : '\$${((cents as num) / 100).toStringAsFixed(2)} USD';
-String connectDate(dynamic value) {
-  final d = DateTime.tryParse('$value');
-  return d == null
-      ? 'Date pending'
-      : DateFormat('MMM d, yyyy · h:mm a').format(d.toLocal());
+String connectDate(dynamic value) => countryDate(value);
+String connectBookingDate(
+  Map<String, dynamic> booking,
+  dynamic value, {
+  bool destination = false,
+}) {
+  final parcel = booking['parcel'] as Map? ?? const {};
+  final assignments = connectRows(booking['assignments']);
+  final active = assignments.where(
+    (a) => ['PROPOSED', 'ACCEPTED', 'CONFIRMED'].contains(a['status']),
+  );
+  final trip = active.isEmpty
+      ? <String, dynamic>{}
+      : Map<String, dynamic>.from(active.first['trip'] as Map? ?? {});
+  final zone = destination
+      ? trip['destinationTimezone'] as String? ??
+            suggestedTimezone('${parcel['destination']}')
+      : trip['departureTimezone'] as String? ??
+            booking['preferredTimezone'] as String? ??
+            suggestedTimezone('${parcel['origin']}');
+  return countryDate(value, timezone: zone);
 }
 
 List<Map<String, dynamic>> connectRows(dynamic rows) => (rows as List? ?? [])
@@ -341,7 +358,7 @@ class _ConnectBookingFormState extends ConsumerState<_ConnectBookingForm> {
   String _category = 'CLOTHING',
       _handover = 'DOMESTIC_SHIPPING',
       _delivery = 'D2F_PICKUP';
-  String? _requestedTrip;
+  String? _requestedTrip, _preferredZone;
   DateTime? _date;
   bool _ack = false, _busy = false;
   String? _error;
@@ -387,7 +404,10 @@ class _ConnectBookingFormState extends ConsumerState<_ConnectBookingForm> {
       ),
       onChanged: (_) => setState(() {
         _requestedTrip = null;
-        if (key == 'origin') _fields['senderAddress']!.clear();
+        if (key == 'origin') {
+          _fields['senderAddress']!.clear();
+          _preferredZone = suggestedTimezone(_fields['origin']!.text);
+        }
         if (key == 'destination') _fields['recipientAddress']!.clear();
       }),
       validator: (v) {
@@ -452,7 +472,8 @@ class _ConnectBookingFormState extends ConsumerState<_ConnectBookingForm> {
           'category': _category,
           'handoverMode': _handover,
           'deliveryPreference': _delivery,
-          'preferredDate': _date!.toUtc().toIso8601String(),
+          'preferredLocalDate': DateFormat('yyyy-MM-dd').format(_date!),
+          'preferredTimezone': _preferredZone,
           'requestedTripId': _requestedTrip,
           'restrictionsAcknowledged': true,
           'clientRequestId': _requestId,
@@ -483,7 +504,8 @@ class _ConnectBookingFormState extends ConsumerState<_ConnectBookingForm> {
               t['destination'] == _fields['destination']!.text.trim() &&
               (t['categories'] as List).contains(_category) &&
               (_date == null ||
-                  !DateTime.parse(t['departureAt']).isBefore(_date!)),
+                  !DateTime.parse(t['departureAt'])
+                      .isBefore(countryDateStart(_date!, _preferredZone))),
         )
         .toList();
     final routes = <String, Map<String, dynamic>>{
@@ -538,6 +560,9 @@ class _ConnectBookingFormState extends ConsumerState<_ConnectBookingForm> {
                         final r = routes[v]!;
                         _fields['origin']!.text = r['origin'];
                         _fields['destination']!.text = r['destination'];
+                        _preferredZone = suggestedTimezone(
+                          _fields['origin']!.text,
+                        );
                         _requestedTrip = null;
                       }),
                     ),
@@ -551,6 +576,34 @@ class _ConnectBookingFormState extends ConsumerState<_ConnectBookingForm> {
                   'destination',
                   'Destination city & country',
                   hint: 'Lomé, Togo',
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey('preferred-zone-${_fields['origin']!.text}'),
+                    initialValue: _preferredZone,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Departure country time zone',
+                      helperText: 'Your preferred date follows the departure city’s calendar.',
+                    ),
+                    items:
+                        (countryTimezones[countryForRoute(
+                                  _fields['origin']!.text,
+                                )] ??
+                                <String>[])
+                            .map(
+                              (z) => DropdownMenuItem(value: z, child: Text(z)),
+                            )
+                            .toList(),
+                    onChanged: (zone) => setState(() {
+                      _preferredZone = zone;
+                      _requestedTrip = null;
+                    }),
+                    validator: (zone) => zone == null
+                        ? 'Choose the departure country time zone'
+                        : null,
+                  ),
                 ),
                 OutlinedButton.icon(
                   onPressed: () async {
@@ -794,7 +847,7 @@ class _ConnectBookingFormState extends ConsumerState<_ConnectBookingForm> {
                     (t) => DropdownMenuItem<String>(
                       value: t['id'],
                       child: Text(
-                        '${connectDate(t['departureAt'])} · ${t['remainingKg']} kg',
+                        '${connectTripDate(t)} · ${t['remainingKg']} kg',
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -1077,7 +1130,12 @@ class _ConnectBookingScreenState extends State<ConnectBookingScreen> {
                         ),
                         _ConnectLine(
                           'Preferred travel',
-                          connectDate(b['preferredDate']),
+                          countryDate(
+                            b['preferredDate'],
+                            timezone:
+                                b['preferredTimezone'] as String? ??
+                                suggestedTimezone('${b['parcel']['origin']}'),
+                          ),
                         ),
                         if (widget.staff) ...[
                           _ConnectLine(
@@ -1181,19 +1239,23 @@ class _ConnectBookingScreenState extends State<ConnectBookingScreen> {
                           'Actual assignment',
                           assignment == null
                               ? 'D2F review in progress'
-                              : '${connectLabel(assignment['status'])} · ${connectDate(assignment['trip']['departureAt'])}',
+                              : '${connectLabel(assignment['status'])} · ${connectTripDate(Map<String, dynamic>.from(assignment['trip']))}',
                         ),
                         _ConnectLine(
                           'Traveller collection',
                           b['collectedAt'] == null
                               ? 'Awaiting verified D2F handover'
-                              : connectDate(b['collectedAt']),
+                              : connectBookingDate(b, b['collectedAt']),
                         ),
                         _ConnectLine(
                           'Destination team receipt',
                           b['destinationReceivedAt'] == null
                               ? 'Awaiting confirmed arrival'
-                              : connectDate(b['destinationReceivedAt']),
+                              : connectBookingDate(
+                                  b,
+                                  b['destinationReceivedAt'],
+                                  destination: true,
+                                ),
                         ),
                       ],
                     ),
@@ -1220,7 +1282,7 @@ class _ConnectBookingScreenState extends State<ConnectBookingScreen> {
                           _ConnectLine('Itemized declaration', d['contents']),
                           _ConnectLine(
                             'Acknowledged',
-                            connectDate(d['createdAt']),
+                            connectBookingDate(b, d['createdAt']),
                           ),
                           _ConnectLine('Terms version', d['termsVersion']),
                           const Text(
@@ -1231,7 +1293,7 @@ class _ConnectBookingScreenState extends State<ConnectBookingScreen> {
                           'Separate staff review',
                           b['contentsVerifiedAt'] == null
                               ? 'Pending D2F inspection'
-                              : 'Recorded · ${connectDate(b['contentsVerifiedAt'])}',
+                              : 'Recorded · ${connectBookingDate(b, b['contentsVerifiedAt'])}',
                         ),
                         if (!widget.staff &&
                             b['originReceivedAt'] == null &&
@@ -1451,7 +1513,7 @@ class _ConnectBookingScreenState extends State<ConnectBookingScreen> {
                                       options: {
                                         for (final t in matches)
                                           t['id']:
-                                              '${t['origin']} → ${t['destination']} · ${connectDate(t['departureAt'])} · ${t['remainingKg']} kg',
+                                              '${t['origin']} → ${t['destination']} · ${connectTripDate(t)} · ${t['remainingKg']} kg',
                                       },
                                     ),
                                   ],
@@ -1685,7 +1747,16 @@ class _ConnectBookingScreenState extends State<ConnectBookingScreen> {
                                 Text(e['note'] ?? '', style: AppTheme.caption),
                                 const SizedBox(height: 4),
                                 Text(
-                                  connectDate(e['createdAt']),
+                                  connectBookingDate(
+                                    b,
+                                    e['createdAt'],
+                                    destination: [
+                                      'ARRIVED_DESTINATION',
+                                      'ARRIVED_LOME',
+                                      'READY_FOR_PICKUP',
+                                      'DELIVERED',
+                                    ].contains(e['status']),
+                                  ),
                                   style: AppTheme.caption.copyWith(
                                     fontSize: 10,
                                   ),
@@ -1730,6 +1801,7 @@ class _ConnectTripFormState extends State<_ConnectTripForm> {
   };
   final _categories = <String>{'CLOTHING', 'DOCUMENTS'};
   DateTime? _departure;
+  String? _departureZone, _destinationZone, _departureOccurrence;
   bool _ack = false, _busy = false;
   String? _error;
   @override
@@ -1742,9 +1814,13 @@ class _ConnectTripFormState extends State<_ConnectTripForm> {
 
   Future<void> _submit() async {
     if (!(_form.currentState?.validate() ?? false)) return;
-    if (!_ack || _departure == null || _categories.isEmpty) {
+    if (!_ack ||
+        _departure == null ||
+        _categories.isEmpty ||
+        _departureZone == null ||
+        _destinationZone == null) {
       setState(
-        () => _error = 'Add your departure, permitted categories and verification confirmation.',
+        () => _error = 'Add your departure, country time zones, permitted categories and verification confirmation.',
       );
       return;
     }
@@ -1765,7 +1841,12 @@ class _ConnectTripFormState extends State<_ConnectTripForm> {
           ])
             k: _fields[k]!.text.trim(),
           'capacityKg': double.parse(_fields['capacityKg']!.text),
-          'departureAt': _departure!.toUtc().toIso8601String(),
+          'departureLocal': DateFormat("yyyy-MM-dd'T'HH:mm")
+              .format(_departure!),
+          'departureTimezone': _departureZone,
+          if (_departureOccurrence != null)
+            'departureOccurrence': _departureOccurrence,
+          'destinationTimezone': _destinationZone,
           'categories': _categories.toList(),
           'complianceAcknowledged': true,
         },
@@ -1810,6 +1891,22 @@ class _ConnectTripFormState extends State<_ConnectTripForm> {
               padding: const EdgeInsets.only(bottom: 16),
               child: TextFormField(
                 controller: _fields[field.$1],
+                onChanged: (_) {
+                  if (field.$1 == 'origin' || field.$1 == 'destination') {
+                    setState(() {
+                      if (field.$1 == 'origin') {
+                        _departureZone = suggestedTimezone(
+                          _fields['origin']!.text,
+                        );
+                      }
+                      if (field.$1 == 'destination') {
+                        _destinationZone = suggestedTimezone(
+                          _fields['destination']!.text,
+                        );
+                      }
+                    });
+                  }
+                },
                 maxLength: field.$1 == 'verificationReference' ? 500 : 120,
                 keyboardType: field.$1 == 'capacityKg'
                     ? const TextInputType.numberWithOptions(decimal: true)
@@ -1828,6 +1925,39 @@ class _ConnectTripFormState extends State<_ConnectTripForm> {
                   }
                   return null;
                 },
+              ),
+            ),
+          for (final side in ['origin', 'destination'])
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: DropdownButtonFormField<String>(
+                key: ValueKey('$side-${_fields[side]!.text}'),
+                initialValue: side == 'origin'
+                    ? _departureZone
+                    : _destinationZone,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: side == 'origin'
+                      ? 'Departure country time zone'
+                      : 'Destination country time zone',
+                  helperText:
+                      'Local time for this route. USA has multiple time zones.',
+                ),
+                items:
+                    (countryTimezones[countryForRoute(_fields[side]!.text)] ??
+                            <String>[])
+                        .map((z) => DropdownMenuItem(value: z, child: Text(z)))
+                        .toList(),
+                onChanged: (value) => setState(() {
+                  if (side == 'origin') {
+                    _departureZone = value;
+                  } else {
+                    _destinationZone = value;
+                  }
+                }),
+                validator: (value) => value == null
+                    ? 'Choose the country and its time zone'
+                    : null,
               ),
             ),
           OutlinedButton.icon(
@@ -1858,11 +1988,40 @@ class _ConnectTripFormState extends State<_ConnectTripForm> {
             icon: const Icon(Icons.calendar_month),
             label: Text(
               _departure == null
-                  ? 'Departure date & time · your local time'
-                  : connectDate(_departure!.toIso8601String()),
+                  ? 'Departure date & time · departure city'
+                  : '${DateFormat('MMM d, yyyy · h:mm a').format(_departure!)} · ${_departureZone ?? 'choose zone'}',
             ),
           ),
           const SizedBox(height: 20),
+          ExpansionTile(
+            title: const Text(
+              'Daylight-saving adjustment (optional)',
+              style: TextStyle(fontSize: 13),
+            ),
+            tilePadding: EdgeInsets.zero,
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: _departureOccurrence,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'If this departure clock time occurs twice',
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'EARLIER',
+                    child: Text('First occurrence · earlier instant'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'LATER',
+                    child: Text('Second occurrence · later instant'),
+                  ),
+                ],
+                onChanged: (value) =>
+                    setState(() => _departureOccurrence = value),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
           const Text(
             'Categories you are willing to carry',
             style: AppTheme.sectionTitle,
@@ -1962,7 +2121,7 @@ class _ConnectTripTile extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
-        _ConnectLine('Departure', connectDate(trip['departureAt'])),
+        _ConnectLine('Departure', connectTripDate(trip)),
         _ConnectLine(
           'Available / total capacity',
           '${trip['remainingKg']} / ${trip['capacityKg']} kg',
@@ -2060,7 +2219,7 @@ class _ConnectTripTile extends StatelessWidget {
                   ),
                 if (a['travellerDeclaration'] != null)
                   Text(
-                    'Traveller declaration recorded · ${connectDate(a['travellerDeclaration']['createdAt'])}',
+                    'Traveller declaration recorded · ${countryDate(a['travellerDeclaration']['createdAt'], timezone: trip['departureTimezone'] as String? ?? suggestedTimezone('${trip['origin']}'))}',
                     style: AppTheme.caption,
                   ),
                 if (!staff && a['status'] == 'PROPOSED')

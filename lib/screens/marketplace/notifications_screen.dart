@@ -1,3 +1,5 @@
+import '../../services/push_notifications.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -78,7 +80,9 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
     try {
       final unread = await Api.I.notificationUnreadCount();
       if (!mounted) return;
-      setState(() => _unread = unread);
+      if (unread != _unread) {
+        await _load();
+      }
     } catch (_) {
       // Silently ignore poll failures.
     }
@@ -154,6 +158,20 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
               icon: const Icon(Icons.done_all_rounded),
             ),
         ],
+      ),
+      bottomNavigationBar: SafeArea(
+        child: ValueListenableBuilder<String>(
+          valueListenable: PushNotifications.I.status,
+          builder: (context, status, _) => ListTile(
+            leading: const Icon(Icons.notifications_active_outlined),
+            title: Text(status, style: const TextStyle(fontSize: 13)),
+            trailing: IconButton(
+              tooltip: 'Retry push setup',
+              icon: const Icon(Icons.refresh),
+              onPressed: PushNotifications.I.retry,
+            ),
+          ),
+        ),
       ),
       body: _notifications.isEmpty
           ? const Center(

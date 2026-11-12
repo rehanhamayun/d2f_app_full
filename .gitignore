@@ -86,3 +86,7 @@ android/key.properties
 
 # Proprietary Brother SDK: download using tool/install_brother_sdk.py.
 /android/app/libs/*.aar
+
+# Private Firebase Admin credentials; native Firebase client config is public.
+**/*firebase-adminsdk*.json
+**/firebase-service-account*.json

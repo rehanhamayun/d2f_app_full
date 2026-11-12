@@ -64,9 +64,10 @@ router.get('/requests', async (req, res, next) => {
 router.post('/requests', async (req, res, next) => {
   try {
     const {
-      title, sourceUrl, quantity = 1, budgetMinor, currency = 'USD', notes,
+      title, sourceUrl, quantity = 1, budgetMinor, currency = 'USD', notes, clientRequestId,
       deliveryAddress, deliveryCity, deliveryStateProvince, deliveryPostalCode, deliveryCountry,
     } = req.body || {};
+    if (clientRequestId != null && !validText(clientRequestId, 120)) fail(400, 'Enter a valid request identifier.');
     if (!validText(title)) fail(400, 'Describe the item you want.');
     if (sourceUrl != null && typeof sourceUrl !== 'string') fail(400, 'Enter a valid product link.');
     if (sourceUrl && sourceUrl.trim()) {
@@ -86,13 +87,32 @@ router.post('/requests', async (req, res, next) => {
     if (!validText(deliveryPostalCode, 20)) fail(400, 'Enter a ZIP or postal code.');
     if (!validText(deliveryCountry, 100)) fail(400, 'Enter a delivery country.');
 
+    let isNewRequest = true;
     const result = await prisma.$transaction(async (tx) => {
       const customer = await upsertCustomer(tx, req.user);
       await warehouseLock(tx, customer.organizationId);
+      if (clientRequestId) {
+        const previous = await tx.serviceOrder.findUnique({
+          where: { organizationId_clientRequestId: { organizationId: customer.organizationId, clientRequestId } },
+          select: { ...requestSelect, customerId: true },
+        });
+        if (previous) {
+          if (previous.customerId !== customer.id || previous.kind !== 'BUY_FOR_ME' || previous.source !== 'APP') fail(409, 'This request identifier has already been used.');
+          const expected = { title: title.trim(), sourceUrl: sourceUrl?.trim() || null, quantity, budgetMinor: budgetMinor ?? null, currency, notes: notes?.trim() || null,
+            deliveryAddress: deliveryAddress.trim(), deliveryCity: deliveryCity.trim(), deliveryStateProvince: deliveryStateProvince?.trim() || null,
+            deliveryPostalCode: deliveryPostalCode.trim(), deliveryCountry: deliveryCountry.trim() };
+          if (Object.entries(expected).some(([key, value]) => previous[key] !== value)) fail(409, 'This request was already submitted. Open your purchase requests to review it before starting another.');
+          isNewRequest = false;
+          const { customerId: _privateCustomerId, ...safe } = previous;
+          return safe;
+        }
+      }
+
       const created = await tx.serviceOrder.create({
         data: {
           organizationId: customer.organizationId,
           kind: 'BUY_FOR_ME',
+          clientRequestId: clientRequestId || null,
           customerId: customer.id,
           title: title.trim(),
           sourceUrl: sourceUrl?.trim() || null,
@@ -113,7 +133,7 @@ router.post('/requests', async (req, res, next) => {
       await audit(tx, req, 'ServiceOrder', created.id, 'BUY_FOR_ME_REQUEST', created.title);
       return created;
     });
-    res.status(201).json(customerOrder(result));
+    res.status(isNewRequest ? 201 : 200).json(customerOrder(result));
   } catch (error) {
     next(error);
   }
@@ -243,6 +263,11 @@ router.post('/requests/:id/:decision', async (req, res, next) => {
         where: { id: req.params.id, customerId: customer.id, kind: 'BUY_FOR_ME', source: 'APP' },
       });
       if (!existing) fail(404, 'Request not found.');
+      if (req.params.decision === 'accept') {
+        const { expectedAmountMinor, expectedCurrency } = req.body || {};
+        if (expectedAmountMinor !== undefined && (!validAmount(expectedAmountMinor) || expectedAmountMinor !== existing.amountMinor)) fail(409, 'Your quote changed. Review the latest product and shipping costs before accepting.');
+        if (expectedCurrency !== undefined && expectedCurrency !== existing.currency) fail(409, 'Your quote currency changed. Review the latest quote before accepting.');
+      }
       if (!rule.from.includes(existing.status)) {
         fail(409, existing.status === 'QUOTED' || existing.status === 'REQUESTED'
           ? 'This request already moved on. Refresh and try again.'
