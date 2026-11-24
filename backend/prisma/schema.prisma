@@ -18,6 +18,7 @@ model Organization {
   trackingCounter    BigInt             @default(1)
   isActive           Boolean            @default(true)
   createdAt          DateTime           @default(now())
+  retailerLinks      Json?
   users              User[]
   locations          Location[]
   customers          Customer[]
@@ -253,6 +254,8 @@ model Parcel {
   customsDocuments           String?
   connectBooking             ConnectBooking?
   notes                      String?
+  orderType                  String?
+  onwardDispatchedAt         DateTime?
   status                     String          @default("RECEIVED")
   // Customer shipment requests: how goods reach D2F.
   // PICKUP = D2F collects from the customer's address (pickupScheduledAt).
@@ -424,6 +427,7 @@ model Container {
   status         String           @default("LOADING")
   sealNumber     String?
   notes          String?
+  onwardCountries String[]       @default([])
   manifest       Json?
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
@@ -478,6 +482,9 @@ model SellerProfile {
   reviewedById       String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
+  storefrontOrder    Int       @default(0)
+  whatsappNumber     String?
+  localDeliveryEnabled Boolean @default(false)
   // Shop branding: profile photo + cover banner, stored like product photos.
   profilePicture     Bytes?
   profilePictureName String?   @default("")
@@ -653,6 +660,19 @@ model ServiceOrder {
   trackingRef            String?
   productCostMinor       Int?
   shippingCostMinor      Int?
+  pickupFeeMinor         Int                             @default(0)
+  handlingFeeMinor       Int                             @default(0)
+  deliveryMethod         String?
+  shipmentEvidence       String?
+  deliveryEvidence       String?
+  marketplacePaymentMethod String?
+  marketplacePaymentVerifiedAt DateTime?
+  marketplacePaymentVerifiedById String?
+  marketplacePaymentNote String?
+  marketplaceInvoice     Json?
+  marketplaceIssues      MarketplaceOrderIssue[]
+  deliveryConfirmedAt    DateTime?
+  deliveryConfirmedById  String?
   paymentStatus          String                          @default("NOT_SUBMITTED")
   paymentTransactionId   String?
   deliveryService        String?
@@ -672,6 +692,24 @@ model ServiceOrder {
   @@unique([organizationId, clientRequestId])
   @@index([organizationId, kind, createdAt])
   @@index([organizationId, sellerId, createdAt])
+}
+
+model MarketplaceOrderIssue {
+  id             String @id @default(uuid())
+  serviceOrderId String
+  type           String
+  status         String @default("OPEN")
+  reason         String
+  evidence       String?
+  amountMinor    Int?
+  openedById     String
+  resolvedById   String?
+  resolution     String?
+  createdAt      DateTime @default(now())
+  resolvedAt     DateTime?
+  order          ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+
+  @@index([serviceOrderId, createdAt])
 }
 
 model ServiceOrderPaymentSubmission {
@@ -723,10 +761,13 @@ model ConnectTrip {
   departureTimezone     String?
   destinationTimezone   String?
   departureAt           DateTime
+  arrivalAt             DateTime?
+  airline               String?
   flightNumber          String
   capacityKg            Float
   categories            String[]
-  verificationReference String
+  verificationReference String?
+  verificationChecks    Json?
   status                String              @default("PENDING_REVIEW")
   reviewNote            String?
   receivingLocationId   String?
@@ -738,10 +779,22 @@ model ConnectTrip {
   organization          Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   traveller             User                @relation(fields: [travellerId], references: [id], onDelete: Restrict)
   receivingLocation     Location?           @relation(fields: [receivingLocationId], references: [id], onDelete: Restrict)
+  verificationDocuments ConnectTripVerificationDocument[]
   requestedBookings     ConnectBooking[]    @relation("requestedTrip")
   assignments           ConnectAssignment[]
 
   @@index([organizationId, status, departureAt])
+}
+
+model ConnectTripVerificationDocument {
+  tripId      String
+  kind        String
+  contentType String
+  bytes       Bytes
+  updatedAt   DateTime @updatedAt
+  trip        ConnectTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@id([tripId, kind])
 }
 
 model ConnectRate {

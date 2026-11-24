@@ -12,6 +12,7 @@ export function SellersPanel({ token, notify, refreshKey }) {
   const [filter, setFilter] = useState('ALL');
   const [review, setReview] = useState(null);
   const [note, setNote] = useState(null); // { seller, action }
+  const [storefront, setStorefront] = useState(null);
   const [register, setRegister] = useState(false);
   const remote = useRemote('/admin/commerce/sellers', token, refreshKey);
 
@@ -52,19 +53,55 @@ export function SellersPanel({ token, notify, refreshKey }) {
         <SellerCard
           key={seller.id}
           seller={seller}
+          onEdit={() => setStorefront(seller)}
           onReview={() => setReview(seller)}
           onNote={(action) => setNote({ seller, action })}
           onReinstate={() => patch(seller.id, { action: 'reinstate' }, 'Seller reinstated. Their listings are live again.').catch(e => notify(e.message))}
         />
       ))}</div> : <Empty title="Nobody here yet" text={filter === 'PENDING' ? 'Seller applications from the app will appear here for review.' : 'No sellers with this status yet.'} />}
     </LoadState>
+    {storefront && <StorefrontEditor seller={storefront} token={token} onClose={() => setStorefront(null)} onDone={() => { setStorefront(null); remote.reload(); notify('Storefront saved.'); }} />}
     {review && <ApproveModal seller={review} token={token} onClose={() => setReview(null)} onDone={message => { setReview(null); remote.reload(); notify(message); }} />}
     {note && <NoteModal note={note} token={token} onClose={() => setNote(null)} onDone={(message) => { setNote(null); remote.reload(); notify(message); }} />}
     {register && <RegisterSellerModal token={token} onClose={() => setRegister(false)} onDone={message => { setRegister(false); remote.reload(); notify(message); }} />}
   </>;
 }
 
-function SellerCard({ seller, onReview, onNote, onReinstate }) {
+function StorefrontEditor({ seller, token, onClose, onDone }) {
+  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  async function save(event) {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(event.currentTarget));
+    setBusy(true);
+    setError('');
+    try {
+      await request(`/admin/commerce/sellers/${seller.id}/storefront`, {
+        token, method: 'PATCH', body: JSON.stringify({ ...values, storefrontOrder: Number(values.storefrontOrder), localDeliveryEnabled: values.localDeliveryEnabled === 'on' }),
+      });
+      onDone();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+  return <Modal title="Edit storefront" onClose={onClose} busy={busy}>
+    <form className="modal-body invite-form" onSubmit={save}>
+      <label>Display name<input name="displayName" defaultValue={seller.displayName} required maxLength={120} /></label>
+      <div className="form-row">
+        <label>City<input name="city" defaultValue={seller.city || ''} maxLength={120} /></label>
+        <label>Country<input name="country" defaultValue={seller.country} required maxLength={80} /></label>
+      </div>
+      <label>Category<input name="category" defaultValue={seller.category} required maxLength={80} /></label>
+      <label>Headline<input name="headline" defaultValue={seller.headline || ''} maxLength={160} /></label>
+      <label>Business description<textarea name="bio" defaultValue={seller.bio || ''} maxLength={2000} /></label>
+      <label>Public WhatsApp number (optional)<input name="whatsappNumber" type="tel" defaultValue={seller.whatsappNumber || ''} placeholder="+22890123456" /></label>
+      <label>Display order<input name="storefrontOrder" type="number" min="0" max="10000" step="1" required defaultValue={seller.storefrontOrder || 0} /></label>
+      <label className="checkbox-label"><input type="checkbox" name="localDeliveryEnabled" defaultChecked={seller.localDeliveryEnabled} /> Offer D2F local delivery for this storefront</label>
+      {error && <p role="alert">{error}</p>}
+      <button className="button primary" disabled={busy}>Save storefront</button>
+    </form>
+  </Modal>;
+}
+
+function SellerCard({ seller, onReview, onNote, onReinstate, onEdit }) {
   const s = seller;
   const initials = (s.displayName || 'S').trim().split(/\s+/).slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
   return <article className="seller-card">
@@ -86,6 +123,7 @@ function SellerCard({ seller, onReview, onNote, onReinstate }) {
     {s.headline && <p className="seller-headline">“{s.headline}”</p>}
     {s.reviewNote && <p className="seller-review-note"><ClipboardCheck size={13} /> {s.reviewNote}</p>}
     <div className="seller-actions">
+      <button className="button secondary small" onClick={onEdit}>Edit storefront</button>
       {(s.status === 'PENDING' || s.status === 'REJECTED') && <button className="button primary small" onClick={onReview}><Check size={15} /> {s.status === 'PENDING' ? 'Review & approve' : 'Approve anyway'}</button>}
       {s.status === 'PENDING' && <button className="text-button danger-text" onClick={() => onNote('reject')}><X size={15} /> Reject</button>}
       {s.status === 'APPROVED' && <button className="text-button danger-text" onClick={() => onNote('suspend')}><ShieldOff size={15} /> Suspend</button>}

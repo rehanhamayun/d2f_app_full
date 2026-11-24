@@ -1,3 +1,4 @@
+import { ShipForMeSettings } from './service-settings.jsx';
 import { WorldClocks, DashboardTimezone } from './world-clocks.jsx';
 import { NotificationBell } from './notification-bell.jsx';
 import { dashboardTimezone } from './timezones.js';
@@ -74,6 +75,7 @@ const NAV = [
   { id: 'locations', label: 'Locations', icon: Globe2 },
   { id: 'marketplace', label: 'Marketplace', icon: Building2 },
   { id: 'buy-for-me', label: 'Buy For Me', icon: Download },
+  { id: 'ship-for-me', label: 'Ship For Me', icon: PackageCheck },
   { id: 'customers', label: 'Customers', icon: UserRound },
   { id: 'team', label: 'Team & access', icon: UsersRound },
   { id: 'system', label: 'System health', icon: Activity },
@@ -685,6 +687,7 @@ function ShipmentFormModal({ token, notify, onClose, onCreated, staffAccess = fa
     destination: parcel?.destination || 'Lomé, Togo',
     method: parcel?.method || 'AIR',
     notes: parcel?.notes || '',
+    orderType: parcel?.orderType || '',
   });
 
   useEffect(() => {
@@ -741,7 +744,8 @@ function ShipmentFormModal({ token, notify, onClose, onCreated, staffAccess = fa
         method: parcel ? 'PATCH' : 'POST',
         body: JSON.stringify({
           customerId,
-          ...form,
+          ...Object.fromEntries(Object.entries(form).filter(([key]) => key !== 'orderType')),
+          ...(form.orderType || parcel?.orderType ? { orderType: form.orderType || null } : {}),
           weightKg: Number(form.weightKg),
           ...(parcel && form.deliveryMode === 'PICKUP' && pickupWhenEdit.trim() ? { pickupScheduledAt: new Date(pickupWhenEdit).toISOString(), rescheduleReason: rescheduleReason.trim() } : {}),
           ...(parcel ? { updatedAt: parcel.updatedAt } : {}),
@@ -790,7 +794,10 @@ function ShipmentFormModal({ token, notify, onClose, onCreated, staffAccess = fa
             <label>Destination<input disabled={routeLocked} list="d2f-route-locations" required pattern=".*\S.*" maxLength={120} value={form.destination} onChange={(event) => setForm({ ...form, destination: event.target.value })} /></label>
           </div>
           <small className="field-help">Origin is where the shipment starts; the receiving D2F warehouse is recorded separately at intake. Domestic Togo cities are available for road routes. Air and sea need different cities; same-city road needs different pickup and delivery addresses.</small>
-          <label>Staff note (optional)<input maxLength={1000} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+          <label>Order type<select value={form.orderType} onChange={event => setForm({ ...form, orderType: event.target.value })}>
+            <option value="">Select order type</option><option value="BUY_FOR_ME">Buy for me</option><option value="SHIP_FOR_ME">Ship for me</option>
+          </select></label>
+          <label>Additional note from staff (optional)<textarea rows={3} maxLength={1000} value={form.notes} onChange={event => setForm({ ...form, notes: event.target.value })} placeholder="Add any extra instructions or details…" /></label>
           {routeLocked && <p className="muted">Route and method are managed by container {parcel.container.code}. Remove the parcel from a loading container to change them.</p>}
           {parcel?.container && parcel.container.status !== 'LOADING' && <p className="muted">The departure manifest keeps the details recorded at departure.</p>}
           <div className="alert info-alert"><ShieldCheck size={16} /> {parcel ? 'Corrections are saved to the shared shipment record and recorded in the admin audit trail.' : 'The shipment is saved to the shared D2F API and appears in staff operations.'}</div>
@@ -1043,12 +1050,12 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
           <AirCargoReference parcel={parcel} token={token} notify={notify} onSaved={onRefreshDetail} />
       {goods.length > 0 && <div className="goods-list">{goods.map((item, index) => <div className="goods-row" key={item.id || index}>
             <b>{`${item.type || 'BOX'} ${index + 1} of ${goods.length}`} · {item.name}</b>
-            <span>{item.quantity} contents unit{item.quantity === 1 ? '' : 's'}{item.weightKg != null ? ` · ${item.weightKg} kg` : ''}{item.details ? ` · ${item.details}` : ''}</span>
+            <span>{item.quantity} {/\brice bags?\b/i.test(item.name) ? (item.quantity === 1 ? 'rice bag' : 'rice bags') : (item.quantity === 1 ? 'contents unit' : 'contents units')}{item.weightKg != null ? ` · ${item.weightKg} kg` : ''}{item.details ? ` · ${item.details}` : ''}</span>
             {item.lengthCm != null && item.widthCm != null && item.heightCm != null && <span>{`${item.lengthCm} × ${item.widthCm} × ${item.heightCm} cm`}</span>}
             {item.packageCode && <span>Package code: {item.packageCode}</span>}
             {item.notCollectedReason && !item.collectedAt && <strong>Not collected: {item.notCollectedReason}</strong>}
           </div>)}</div>}
-          <div className="detail-grid"><div><small>Staff note</small><b>{parcel.notes || '—'}</b></div><div><small>Released to</small><b>{parcel.releasedToName ? `${parcel.releasedToName}${parcel.releasedAt ? ` · ${formatDate(parcel.releasedAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}` : '—'}</b></div><div><small>Delivered to</small><b>{parcel.deliveredToName || '—'}</b></div><div><small>Proof of delivery</small><b>{parcel.deliveryProofType ? `${DELIVERY_PROOF_TYPES[parcel.deliveryProofType] || parcel.deliveryProofType}${parcel.deliveryProofReference ? ` · ${parcel.deliveryProofReference}` : ''}` : '—'}</b></div></div>
+          <div className="detail-grid"><div><small>Order type</small><b>{{ BUY_FOR_ME: 'Buy for me', SHIP_FOR_ME: 'Ship for me' }[parcel.orderType] || '—'}</b></div><div><small>Staff note</small><b>{parcel.notes || '—'}</b></div><div><small>Released to</small><b>{parcel.releasedToName ? `${parcel.releasedToName}${parcel.releasedAt ? ` · ${formatDate(parcel.releasedAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}` : '—'}</b></div><div><small>Delivered to</small><b>{parcel.deliveredToName || '—'}</b></div><div><small>Proof of delivery</small><b>{parcel.deliveryProofType ? `${DELIVERY_PROOF_TYPES[parcel.deliveryProofType] || parcel.deliveryProofType}${parcel.deliveryProofReference ? ` · ${parcel.deliveryProofReference}` : ''}` : '—'}</b></div></div>
           {parcel.images?.length > 0 && <div className="goods-photos"><h3 className="modal-section-title">{`Goods photos (${parcel.images.length})`}</h3><GoodsPhotos parcelId={parcel.id} images={parcel.images} goods={goods} token={token} /></div>}
           {onEdit && <button className="button secondary" disabled={busy} onClick={onEdit}><Pencil size={16} /> Edit shipment</button>}
           <h3 className="modal-section-title">Tracking history</h3>
@@ -1426,6 +1433,7 @@ export default function App() {
           {isAdmin && page === 'locations' && <Locations token={token} notify={notify} refreshKey={refreshKey} />}
           {page === 'bookings' && <Shipments staffAccess={!isAdmin} token={token} notify={notify} refreshOverview={loadOverview} refreshKey={refreshKey} currentUserId={session.user.id} bookings key="bookings" />}
           {isAdmin && page === 'marketplace' && <Commerce kind="MARKETPLACE" token={token} notify={notify} refreshKey={refreshKey} key="marketplace" />}
+          {isAdmin && page === 'ship-for-me' && <ShipForMeSettings token={token} notify={notify} />}
           {isAdmin && page === 'buy-for-me' && <Commerce kind="BUY_FOR_ME" token={token} notify={notify} refreshKey={refreshKey} key="buy-for-me" />}
           {page === 'customers' && <Customers staffAccess={!isAdmin} token={token} notify={notify} refreshKey={refreshKey} key="customers" />}
           {isAdmin && page === 'team' && <Team token={token} notify={notify} refreshKey={refreshKey} currentUserId={session.user.id} key="team" />}

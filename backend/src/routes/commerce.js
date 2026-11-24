@@ -1,9 +1,10 @@
+import { deliveryRequirement, marketplaceDeliveryMethod, marketplaceDeliveryMethods, marketplaceInvoice, marketplaceNotice, marketplaceTransitions, openOrderIssue, payableBalance, refundTotal, requirePaid } from '../marketplace_orders.js';
 import { Router, raw } from 'express';
 import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { resolveOrganizationId } from '../tracking.js';
 import { fail, warehouseLock } from '../warehouse.js';
-import { commissionFor, releaseStock, validOptionalText } from '../shopfront.js';
+import { calculateFees, reserveStock, releaseStock, validOptionalText } from '../shopfront.js';
 const router = Router();
 router.use(authenticate, requireRole('ADMIN'), async (req, res, next) => {
   try { req.organizationId = await resolveOrganizationId(prisma, req.user); next(); } catch (e) { next(e); }
@@ -14,6 +15,7 @@ const currencies = ['USD', 'EUR', 'XOF'];
 const orderInclude = {
   customer: { select: { id: true, displayName: true } },
   product: { select: { title: true } },
+  marketplaceIssues: { orderBy: { createdAt: 'desc' }, take: 30 },
   parcel: { select: { trackingId: true, id: true } },
   seller: { select: { id: true, displayName: true } },
   paymentSubmissions: {
@@ -31,7 +33,7 @@ const orderInclude = {
   },
 };
 const transitions = {
-  MARKETPLACE: { REQUESTED: ['ACCEPTED', 'CANCELLED'], ACCEPTED: ['PROCESSING', 'CANCELLED'], PROCESSING: ['SHIPPED', 'CANCELLED'], SHIPPED: ['COMPLETED'], COMPLETED: [], CANCELLED: [] },
+  MARKETPLACE: marketplaceTransitions,
   BUY_FOR_ME: { REQUESTED: ['QUOTED', 'CANCELLED'], QUOTED: ['ACCEPTED', 'CANCELLED'], ACCEPTED: ['PAYMENT_CONFIRMED', 'PURCHASED', 'CANCELLED'], PAYMENT_CONFIRMED: ['PURCHASED'], PURCHASED: ['RECEIVED'], RECEIVED: ['SHIPPED'], SHIPPED: ['COMPLETED'], COMPLETED: [], CANCELLED: [] },
 };
 async function audit(tx, req, entity, id, action, detail) {
@@ -56,7 +58,7 @@ router.get('/sellers', async (req, res, next) => {
     const sellers = await prisma.sellerProfile.findMany({
       where: { organizationId: req.organizationId, ...(status ? { status } : {}) },
       include: sellerInclude,
-      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      orderBy: [{ status: 'asc' }, { storefrontOrder: 'asc' }, { createdAt: 'desc' }],
       take: 200,
     });
     res.json(sellers);
@@ -147,6 +149,30 @@ router.patch('/sellers/:id', async (req, res, next) => {
       const updated = await tx.sellerProfile.update({ where: { id: existing.id }, data, include: sellerInclude });
       await audit(tx, req, 'SellerProfile', existing.id, rule.label, note || `${existing.status} → ${rule.to}${data.commissionBps != null ? ` · commission ${data.commissionBps}bps` : ''}`);
       return updated;
+    });
+    res.json(result);
+  } catch (e) { next(e); }
+});
+
+router.patch('/sellers/:id/storefront', async (req, res, next) => {
+  try {
+    const { displayName, city, country, category, headline, bio, whatsappNumber, storefrontOrder, localDeliveryEnabled } = req.body || {};
+    if (!validText(displayName, 120) || !validText(country, 80) || !validText(category, 80) ||
+      !validOptionalText(city, 120) || !validOptionalText(headline, 160) || !validOptionalText(bio, 2000) ||
+      (whatsappNumber && !/^\+[1-9]\d{7,14}$/.test(whatsappNumber)) ||
+      !Number.isSafeInteger(storefrontOrder) || storefrontOrder < 0 || storefrontOrder > 10000 ||
+      typeof localDeliveryEnabled !== 'boolean') fail(400, 'Enter valid seller details and an international WhatsApp number if supplied.');
+    const result = await prisma.$transaction(async tx => {
+      await warehouseLock(tx, req.organizationId);
+      const seller = await tx.sellerProfile.findFirst({ where: { id: req.params.id, organizationId: req.organizationId } });
+      if (!seller) fail(404, 'Seller not found.');
+      const updated = await tx.sellerProfile.update({ where: { id: seller.id }, data: {
+        displayName: displayName.trim(), city: city?.trim() || null, country: country.trim(), category: category.trim(),
+        headline: headline?.trim() || null, bio: bio?.trim() || null, whatsappNumber: whatsappNumber || null, storefrontOrder, localDeliveryEnabled,
+      } });
+      await audit(tx, req, 'SellerProfile', seller.id, 'SELLER_STOREFRONT_UPDATED', updated.displayName);
+      const { profilePicture, banner, ...profile } = updated;
+      return profile;
     });
     res.json(result);
   } catch (e) { next(e); }
@@ -418,7 +444,7 @@ router.patch('/products/:id', async (req, res, next) => {
 });
 router.post('/orders', async (req, res, next) => {
   try {
-    const { kind, customerId, productId, title, sourceUrl, quantity = 1, currency = 'USD', notes } = req.body || {};
+    const { kind, customerId, productId, title, sourceUrl, quantity = 1, currency = 'USD', notes, deliveryMethod = 'D2F_DELIVERY' } = req.body || {};
     if (!transitions[kind] || typeof customerId !== 'string' || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 1000 || !currencies.includes(currency) || (notes != null && !validText(notes, 2000))) fail(400, 'Choose a customer, module, currency and valid quantity.');
     if (kind === 'BUY_FOR_ME' && !validText(title)) fail(400, 'Describe the requested item.');
     if (sourceUrl != null && typeof sourceUrl !== 'string') fail(400, 'Enter a valid product link.');
@@ -426,18 +452,22 @@ router.post('/orders', async (req, res, next) => {
     const result = await prisma.$transaction(async tx => {
       await warehouseLock(tx, req.organizationId);
       if (!await tx.customer.findFirst({ where: { id: customerId, organizationId: req.organizationId } })) fail(404, 'Customer not found.');
-      let product;
+      let product, fees;
       if (kind === 'MARKETPLACE') {
         if (typeof productId !== 'string') fail(400, 'Choose an available product.');
-        product = await tx.product.findFirst({ where: { id: productId, organizationId: req.organizationId, isActive: true }, include: { seller: { select: { id: true, commissionBps: true } } } });
+        if (!marketplaceDeliveryMethods.includes(deliveryMethod)) fail(400, 'Choose a delivery method.');
+        product = await tx.product.findFirst({ where: { id: productId, organizationId: req.organizationId, isActive: true, OR: [{ sellerId: null }, { seller: { status: 'APPROVED' } }] }, include: { seller: { select: { id: true, commissionBps: true } } } });
         if (!product) fail(400, 'Choose an available product.');
         if (!validAmount(product.priceMinor * quantity)) fail(400, 'Order total is too large.');
+        if (!await reserveStock(tx, product.id, quantity)) fail(409, 'There is insufficient stock for this order.');
+        fees = calculateFees(product.priceMinor * quantity, { seller: product.seller, deliveryPreference: deliveryMethod === 'D2F_DELIVERY' ? 'D2F' : 'SELLER', fulfillment: product.fulfillment, settings: await tx.commissionSettings.findFirst() });
+        delete fees.totalFees;
       }
       const created = await tx.serviceOrder.create({ data: { organizationId: req.organizationId, kind, customerId,
         productId: product?.id, sellerId: product?.sellerId ?? null, title: product?.title || title.trim(), sourceUrl: sourceUrl || null,
         quantity, currency: product?.currency || currency, amountMinor: product ? product.priceMinor * quantity : null, notes: notes?.trim() || null,
         source: 'ADMIN',
-        ...(product ? commissionFor(product.priceMinor * quantity, product.seller) : {}) }, include: orderInclude });
+        ...(product ? { ...fees, deliveryMethod } : {}) }, include: orderInclude });
       await audit(tx, req, 'ServiceOrder', created.id, 'SERVICE_ORDER_CREATE', `${kind}: ${created.title}`);
       return created;
     });
@@ -447,11 +477,13 @@ router.post('/orders', async (req, res, next) => {
 router.patch('/orders/:id', async (req, res, next) => {
   try {
     const {
-      status, amountMinor, productCostMinor, shippingCostMinor, trackingId, notes, trackingRef,
+      status, amountMinor, productCostMinor, shippingCostMinor, pickupFeeMinor, handlingFeeMinor, trackingId, notes, trackingRef,
       deliveryService, shippingCarrier, shippingTrackingNumber, shippingLabelUrl, customerMessage,
+      deliveryMethod, shipmentEvidence, deliveryEvidence, statusReason,
     } = req.body || {};
     if (amountMinor !== undefined && !validAmount(amountMinor)) fail(400, 'Enter a valid quote total.');
     if (productCostMinor !== undefined && !validAmount(productCostMinor)) fail(400, 'Enter a valid product cost.');
+    for (const fee of [pickupFeeMinor, handlingFeeMinor]) if (fee !== undefined && !validAmount(fee)) fail(400, 'Enter a valid pickup or handling fee.');
     if (shippingCostMinor !== undefined && !validAmount(shippingCostMinor)) fail(400, 'Enter a valid shipping cost.');
     if (notes !== undefined && (typeof notes !== 'string' || notes.length > 2000)) fail(400, 'Enter a valid note.');
     if (trackingRef !== undefined && (typeof trackingRef !== 'string' || trackingRef.length > 120)) fail(400, 'Carrier reference is too long.');
@@ -470,33 +502,62 @@ router.patch('/orders/:id', async (req, res, next) => {
         }
       }
     }
-    const quoteChanged = amountMinor !== undefined || productCostMinor !== undefined || shippingCostMinor !== undefined;
+    if (deliveryMethod !== undefined && !marketplaceDeliveryMethods.includes(deliveryMethod)) fail(400, 'Choose a valid delivery method.');
+    for (const evidence of [shipmentEvidence, deliveryEvidence, statusReason]) if (evidence != null && !validText(evidence, 500)) fail(400, 'Record a concise reason or evidence reference.');
+    const lineItemsChanged = [productCostMinor, shippingCostMinor, pickupFeeMinor, handlingFeeMinor].some(value => value !== undefined);
+    const quoteChanged = amountMinor !== undefined || lineItemsChanged;
     const result = await prisma.$transaction(async tx => {
       await warehouseLock(tx, req.organizationId);
-      const existing = await tx.serviceOrder.findFirst({ where: { id: req.params.id, organizationId: req.organizationId } });
+      const existing = await tx.serviceOrder.findFirst({ where: { id: req.params.id, organizationId: req.organizationId }, include: { marketplaceIssues: true, parcel: { select: { status: true, deliveryProofReference: true } } } });
       if (!existing) fail(404, 'Order not found.');
       const data = {};
+      if (deliveryMethod !== undefined) {
+        if (existing.kind !== 'MARKETPLACE' || !['REQUESTED', 'ACCEPTED'].includes(existing.status) || existing.paymentStatus === 'VERIFIED') fail(409, 'Delivery method is locked after payment or fulfillment starts.');
+        const product = existing.productId ? await tx.product.findUnique({ where: { id: existing.productId }, include: { seller: { select: { commissionBps: true, localDeliveryEnabled: true, country: true } } } }) : null;
+        if (deliveryMethod === 'D2F_DELIVERY' && product?.seller && (!product.seller.localDeliveryEnabled ||
+          (existing.deliveryCountry && existing.deliveryCountry.toLowerCase() !== product.seller.country.toLowerCase()))) fail(409, 'D2F local delivery is unavailable for this seller and destination.');
+        data.deliveryMethod = deliveryMethod;
+        data.deliveryPreference = deliveryMethod === 'D2F_DELIVERY' ? 'D2F' : 'SELLER';
+        if (product) {
+          const fees = calculateFees(existing.amountMinor, { seller: product.seller, deliveryPreference: data.deliveryPreference, fulfillment: product.fulfillment, settings: await tx.commissionSettings.findFirst() });
+          // Preserve the agreed commission and fulfillment snapshots.
+          data.deliveryFeeBps = fees.deliveryFeeBps;
+          data.deliveryFeeMinor = fees.deliveryFeeMinor;
+          data.sellerNetMinor = Math.max(0, existing.amountMinor - (existing.commissionMinor || 0) - (existing.fulfillmentFeeMinor || 0) - fees.deliveryFeeMinor);
+        }
+      }
       if (status !== undefined) {
         if (!transitions[existing.kind][existing.status]?.includes(status)) fail(409, 'Invalid status change. Refresh this order.');
         if (existing.kind === 'BUY_FOR_ME' && status === 'PAYMENT_CONFIRMED') fail(409, 'Verify the submitted payment evidence before confirming payment.');
         if (existing.kind === 'BUY_FOR_ME' && existing.source === 'APP' && status === 'PURCHASED' && existing.paymentStatus !== 'VERIFIED') fail(409, 'Verify the customer payment before marking this item purchased.');
+        if (existing.kind === 'MARKETPLACE') {
+          if (['PROCESSING', 'SHIPPED', 'DELIVERED', 'COMPLETED'].includes(status)) requirePaid(existing);
+          if (['FAILED_DELIVERY', 'CANCELLED'].includes(status) && !statusReason) fail(400, 'Record why this order failed or was cancelled.');
+          if (status === 'COMPLETED' && !existing.deliveryConfirmedAt) fail(409, 'Confirm delivery from verified evidence first.');
+          if (status === 'ACCEPTED' && !existing.marketplaceInvoice) data.marketplaceInvoice = await marketplaceInvoice(tx, existing);
+        }
         data.status = status;
       }
       if (amountMinor !== undefined) {
         if (existing.kind !== 'BUY_FOR_ME' || !['REQUESTED', 'QUOTED'].includes(existing.status)) fail(409, 'Accepted quotes and marketplace price snapshots cannot be changed.');
         data.amountMinor = amountMinor;
       }
-      if (productCostMinor !== undefined || shippingCostMinor !== undefined) {
+      if (lineItemsChanged) {
         if (existing.kind !== 'BUY_FOR_ME' || !['REQUESTED', 'QUOTED'].includes(existing.status)) fail(409, 'Accepted quotes cannot be changed.');
         data.productCostMinor = productCostMinor ?? existing.productCostMinor;
         data.shippingCostMinor = shippingCostMinor ?? existing.shippingCostMinor;
-        if (data.productCostMinor == null || data.shippingCostMinor == null || !validAmount(data.productCostMinor + data.shippingCostMinor)) {
+        data.pickupFeeMinor = pickupFeeMinor ?? existing.pickupFeeMinor;
+        data.handlingFeeMinor = handlingFeeMinor ?? existing.handlingFeeMinor;
+        const total = data.productCostMinor + data.shippingCostMinor + data.pickupFeeMinor + data.handlingFeeMinor;
+        if (data.productCostMinor == null || data.shippingCostMinor == null || !validAmount(total)) {
           fail(400, 'Enter both product and shipping costs within the supported total.');
         }
-        data.amountMinor = data.productCostMinor + data.shippingCostMinor;
+        data.amountMinor = total;
       } else if (amountMinor !== undefined && existing.kind === 'BUY_FOR_ME') {
         data.productCostMinor = amountMinor;
         data.shippingCostMinor = 0;
+        data.pickupFeeMinor = 0;
+        data.handlingFeeMinor = 0;
       }
       if (status === 'QUOTED' && (
         (data.amountMinor ?? existing.amountMinor) === null ||
@@ -513,22 +574,40 @@ router.patch('/orders/:id', async (req, res, next) => {
       if (shippingCarrier !== undefined) data.shippingCarrier = shippingCarrier?.trim() || null;
       if (shippingTrackingNumber !== undefined) data.shippingTrackingNumber = shippingTrackingNumber?.trim() || null;
       if (shippingLabelUrl !== undefined) data.shippingLabelUrl = shippingLabelUrl?.trim() || null;
+      if (existing.kind === 'MARKETPLACE' && shipmentEvidence) data.shipmentEvidence = shipmentEvidence.trim();
+      if (status === 'DELIVERED' && existing.kind === 'MARKETPLACE') {
+        if (data.parcelId && data.parcelId !== existing.parcelId) fail(409, 'Verify the recorded shipment before confirming delivery.');
+        if (marketplaceDeliveryMethod(existing) === 'D2F_DELIVERY') {
+          if (existing.parcel?.status !== 'DELIVERED' || !existing.parcel.deliveryProofReference) fail(409, 'Confirm recipient delivery with proof in D2F shipment tracking first.');
+          data.deliveryEvidence = `D2F parcel ${existing.parcelId} · ${existing.parcel.deliveryProofReference}`;
+        } else {
+          if (!deliveryEvidence) fail(400, 'Record the verified carrier event, signed handover or pickup confirmation reference.');
+          data.deliveryEvidence = deliveryEvidence.trim();
+        }
+        data.deliveryConfirmedAt = new Date();
+        data.deliveryConfirmedById = req.user.id;
+      }
       const effectiveTrackingRef = data.trackingRef !== undefined ? data.trackingRef : existing.trackingRef;
-      if (status === 'SHIPPED') {
-        const appOrder = existing.kind === 'MARKETPLACE' && existing.source === 'APP';
-        // D2F-fulfilled orders link a parcel; seller-shipped app orders may
-        // carry the seller's carrier reference instead.
-        const hasProof = data.parcelId || existing.parcelId ||
-          (existing.kind === 'BUY_FOR_ME' && (data.shippingTrackingNumber || existing.shippingTrackingNumber || effectiveTrackingRef)) ||
-          (appOrder && effectiveTrackingRef);
-        if (!hasProof) fail(400, appOrder || existing.kind === 'BUY_FOR_ME' ? 'Add shipment tracking before marking this order shipped.' : 'Link the customer’s parcel before marking it shipped.');
-        if (existing.kind === 'BUY_FOR_ME' && !(data.deliveryService || existing.deliveryService)) fail(400, 'Choose a D2F delivery option before marking this request shipped.');
+      if (status === 'SHIPPED' && existing.kind === 'MARKETPLACE') {
+        deliveryRequirement({ ...existing, ...data }, {
+          carrier: data.shippingCarrier ?? existing.shippingCarrier, externalRef: effectiveTrackingRef,
+          parcelId: data.parcelId ?? existing.parcelId, shipmentEvidence: data.shipmentEvidence ?? existing.shipmentEvidence,
+        });
+      }
+      if (status === 'SHIPPED' && existing.kind === 'BUY_FOR_ME') {
+        if (!(data.parcelId || existing.parcelId || data.shippingTrackingNumber || existing.shippingTrackingNumber || effectiveTrackingRef)) fail(400, 'Add shipment tracking before marking this order shipped.');
+        if (!(data.deliveryService || existing.deliveryService)) fail(400, 'Choose a D2F delivery option before marking this request shipped.');
       }
       if (notes !== undefined) data.notes = notes.trim() || null;
       if (!Object.keys(data).length && customerMessage === undefined) fail(400, 'No changes provided.');
-      if (status === 'CANCELLED' && existing.status !== 'CANCELLED') await releaseStock(tx, existing.productId, existing.quantity);
+      if (status === 'CANCELLED' && existing.status !== 'CANCELLED') {
+        if (existing.kind === 'MARKETPLACE' && existing.paymentStatus === 'VERIFIED' && !existing.marketplaceIssues.some(issue => issue.type === 'REFUND' && issue.status === 'OPEN') && await refundTotal(tx, existing.id) < existing.amountMinor) {
+          await openOrderIssue(tx, req, existing, { type: 'REFUND', reason: statusReason });
+        }
+        if (existing.status !== 'FAILED_DELIVERY') await releaseStock(tx, existing.productId, existing.quantity);
+      }
       const updated = await tx.serviceOrder.update({ where: { id: existing.id }, data, include: orderInclude });
-      await audit(tx, req, 'ServiceOrder', existing.id, 'SERVICE_ORDER_UPDATE', JSON.stringify({ from: existing.status, ...data }));
+      await audit(tx, req, 'ServiceOrder', existing.id, 'SERVICE_ORDER_UPDATE', JSON.stringify({ from: existing.status, to: data.status || existing.status, reason: statusReason || undefined, ...data }));
       if (existing.kind === 'BUY_FOR_ME' && (customerMessage || status || deliveryService || shippingTrackingNumber || shippingLabelUrl || quoteChanged)) {
         await tx.serviceOrderUpdate.create({
           data: {
@@ -550,6 +629,78 @@ router.patch('/orders/:id', async (req, res, next) => {
 });
 
 // ── Product approval workflow ───────────────────────────────────────────
+
+router.post('/orders/:id/marketplace-payment', async (req, res, next) => {
+  try {
+    const { verified, method, reference, amountMinor, currency, note } = req.body || {};
+    if (typeof verified !== 'boolean' || !validText(reference, 120) || !['BANK_TRANSFER', 'MOBILE_MONEY', 'CASH', 'CARD'].includes(method) ||
+      (!verified && !validText(note, 500)) || !validOptionalText(note, 500)) fail(400, 'Record the payment method, transaction reference and any rejection reason.');
+    const updated = await prisma.$transaction(async tx => {
+      await warehouseLock(tx, req.organizationId);
+      const order = await tx.serviceOrder.findFirst({ where: { id: req.params.id, organizationId: req.organizationId, kind: 'MARKETPLACE' } });
+      if (!order) fail(404, 'Marketplace order not found.');
+      if (order.status !== 'ACCEPTED' || order.paymentStatus === 'VERIFIED') fail(409, 'Only an accepted order awaiting payment can be reviewed.');
+      if (verified && (amountMinor !== order.amountMinor || currency !== order.currency)) fail(400, 'Verified amount and currency must match the order total.');
+      if (verified && await tx.serviceOrder.count({ where: { organizationId: req.organizationId, kind: 'MARKETPLACE', marketplacePaymentMethod: method, paymentTransactionId: reference.trim(), paymentStatus: 'VERIFIED', id: { not: order.id } } })) fail(409, 'This payment reference is already recorded for another order.');
+      const data = { paymentStatus: verified ? 'VERIFIED' : 'REJECTED', paymentTransactionId: reference.trim(), marketplacePaymentMethod: method,
+        marketplacePaymentNote: note?.trim() || null, marketplacePaymentVerifiedAt: new Date(), marketplacePaymentVerifiedById: req.user.id };
+      if (order.paymentStatus === data.paymentStatus && order.paymentTransactionId === data.paymentTransactionId && order.marketplacePaymentNote === data.marketplacePaymentNote) fail(409, 'This review has already been recorded.');
+      const result = await tx.serviceOrder.update({ where: { id: order.id }, data, include: orderInclude });
+      await audit(tx, req, 'ServiceOrder', order.id, `MARKETPLACE_PAYMENT_${data.paymentStatus}`, JSON.stringify({ from: order.paymentStatus, to: data.paymentStatus, method, amountMinor, currency, reference, reason: data.marketplacePaymentNote }));
+      await marketplaceNotice(tx, order, `ORDER_PAYMENT_${data.paymentStatus}`, verified ? 'Payment verified' : `Payment rejected. ${note.trim()}`);
+      return result;
+    });
+    res.json(updated);
+  } catch (e) { next(e); }
+});
+
+router.get('/orders/:id/history', async (req, res, next) => {
+  try {
+    const order = await prisma.serviceOrder.findFirst({ where: { id: req.params.id, organizationId: req.organizationId, kind: 'MARKETPLACE' }, select: { id: true } });
+    if (!order) fail(404, 'Marketplace order not found.');
+    const rows = await prisma.auditLog.findMany({ where: { entity: 'ServiceOrder', entityId: order.id }, orderBy: { createdAt: 'desc' }, take: 100 });
+    const actors = await prisma.user.findMany({ where: { id: { in: [...new Set(rows.map(row => row.actorId).filter(Boolean))] } }, select: { id: true, fullName: true, role: true } });
+    const actorById = new Map(actors.map(actor => [actor.id, actor]));
+    res.json(rows.map(row => ({ ...row, actor: actorById.get(row.actorId) ?? null })));
+  } catch (e) { next(e); }
+});
+
+router.post('/orders/:id/issues', async (req, res, next) => {
+  try {
+    const issue = await prisma.$transaction(async tx => {
+      await warehouseLock(tx, req.organizationId);
+      const order = await tx.serviceOrder.findFirst({ where: { id: req.params.id, organizationId: req.organizationId, kind: 'MARKETPLACE' }, include: { marketplaceIssues: true } });
+      if (!order) fail(404, 'Marketplace order not found.');
+      return openOrderIssue(tx, req, order, req.body);
+    });
+    res.status(201).json(issue);
+  } catch (e) { next(e); }
+});
+
+router.patch('/orders/:id/issues/:issueId', async (req, res, next) => {
+  try {
+    const { status, resolution, amountMinor, reference } = req.body || {};
+    if (!['RESOLVED', 'DECLINED'].includes(status) || !validText(resolution, 1000)) fail(400, 'Choose a resolution and record the outcome.');
+    const result = await prisma.$transaction(async tx => {
+      await warehouseLock(tx, req.organizationId);
+      const order = await tx.serviceOrder.findFirst({ where: { id: req.params.id, organizationId: req.organizationId, kind: 'MARKETPLACE' }, include: { marketplaceIssues: true } });
+      if (!order) fail(404, 'Marketplace order not found.');
+      const issue = order.marketplaceIssues.find(row => row.id === req.params.issueId);
+      if (issue?.status !== 'OPEN') fail(409, 'This issue is no longer open.');
+      const refund = issue.type === 'REFUND' && status === 'RESOLVED';
+      if (refund) {
+        if (!validText(reference, 120) || !validAmount(amountMinor) || amountMinor <= 0) fail(400, 'Record the confirmed refund amount and external transaction reference.');
+        if (order.paymentStatus !== 'VERIFIED' || await refundTotal(tx, order.id) + amountMinor > order.amountMinor) fail(409, 'Refund exceeds the verified payment remaining.');
+        if (await tx.marketplaceOrderIssue.count({ where: { type: 'REFUND', status: 'RESOLVED', evidence: reference.trim(), order: { organizationId: req.organizationId } } })) fail(409, 'This external refund has already been recorded.');
+      }
+      const saved = await tx.marketplaceOrderIssue.update({ where: { id: issue.id }, data: { status, resolution: resolution.trim(), resolvedById: req.user.id, resolvedAt: new Date(), ...(refund ? { amountMinor, evidence: reference.trim() } : {}) } });
+      await audit(tx, req, 'ServiceOrder', order.id, 'MARKETPLACE_ISSUE_CLOSED', JSON.stringify({ issueId: issue.id, type: issue.type, from: issue.status, to: status, amountMinor: saved.amountMinor, resolution }));
+      await marketplaceNotice(tx, order, `ORDER_${issue.type}_${status}`, `${issue.type.toLowerCase()} request ${status.toLowerCase()}. ${resolution.trim()}`);
+      return saved;
+    });
+    res.json(result);
+  } catch (e) { next(e); }
+});
 
 router.get('/products/pending', async (req, res, next) => {
   try {
@@ -639,7 +790,7 @@ router.get('/sellers/:id/earnings', async (req, res, next) => {
     const earnings = await prisma.sellerEarnings.findUnique({ where: { sellerId } });
     // Recalculate from completed orders
     const orders = await prisma.serviceOrder.findMany({
-      where: { sellerId, kind: 'MARKETPLACE', status: 'COMPLETED' },
+      where: { sellerId, kind: 'MARKETPLACE', status: 'COMPLETED', paymentStatus: 'VERIFIED', deliveryConfirmedAt: { not: null } },
       select: { amountMinor: true, commissionMinor: true, fulfillmentFeeMinor: true, deliveryFeeMinor: true, sellerNetMinor: true, currency: true },
     });
     const totals = orders.reduce((acc, o) => {
@@ -676,16 +827,16 @@ router.post('/payouts', async (req, res, next) => {
     if (!validAmount(amountMinor) || amountMinor <= 0) fail(400, 'Enter a valid payout amount.');
     const seller = await prisma.sellerProfile.findFirst({ where: { id: sellerId, organizationId: req.organizationId } });
     if (!seller) fail(404, 'Seller not found.');
-    const earnings = await prisma.sellerEarnings.findUnique({ where: { sellerId } });
-    if (!earnings || earnings.netPayableMinor < amountMinor) fail(400, 'Insufficient payable balance.');
+    if (!currencies.includes(currency) || !validText(reference, 120)) fail(400, 'Enter the payout currency and confirmed transfer reference.');
     const payout = await prisma.$transaction(async (tx) => {
+      await warehouseLock(tx, req.organizationId);
+      if (seller.status !== 'APPROVED') fail(409, 'Payouts are suspended for this seller.');
+      if (await tx.sellerPayout.count({ where: { sellerId, currency, reference: reference.trim() } })) fail(409, 'This payout reference was already recorded.');
+      if (await payableBalance(tx, sellerId, currency) < amountMinor) fail(409, 'Insufficient verified payable balance in this currency.');
       const created = await tx.sellerPayout.create({
         data: { sellerId, amountMinor, currency, status: 'PAID', paidAt: new Date(), reference: reference?.trim() || null },
       });
-      await tx.sellerEarnings.update({
-        where: { sellerId },
-        data: { paidOutMinor: earnings.paidOutMinor + amountMinor },
-      });
+      await tx.sellerEarnings.updateMany({ where: { sellerId }, data: { paidOutMinor: { increment: amountMinor } } });
       await audit(tx, req, 'SellerPayout', created.id, 'SELLER_PAYOUT', `paid ${amountMinor} ${currency} to ${seller.displayName}`);
       return created;
     });

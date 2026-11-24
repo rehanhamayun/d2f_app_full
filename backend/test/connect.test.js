@@ -197,6 +197,36 @@ test('Connect domestic → traveller → destination workflow preserves privacy 
       const audit = await prisma.auditLog.findFirst({ where: { entityId: b.id, action: 'CONNECT_ASSIGNMENT_POLICY' } });
       assert.equal(JSON.parse(audit.detail).receivingApprovalRequired, false);
     });
+    await t.test('new registration saves civil times and requires both private documents and all four checks', async () => {
+      const depart = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+      const arrive = new Date(Date.now() + 21 * 86400000).toISOString().slice(0, 10);
+      const registration = { ...route, registrationVersion: 2, airline: 'Air France', flightNumber: 'AF123', capacityKg: 8,
+        departureLocal: `${depart}T16:00`, departureTimezone: 'America/New_York', destinationTimezone: 'Africa/Lome',
+        categories: ['DOCUMENTS'], complianceAcknowledged: true };
+      assert.equal((await call('/connect/trips', traveller, registration)).status, 400);
+      const modern = await ok('/connect/trips', traveller, { ...registration, arrivalLocal: `${arrive}T05:30` });
+      assert.equal(modern.airline, 'Air France');
+      assert.equal(modern.arrivalAt, `${arrive}T05:30:00.000Z`);
+      const path = `/connect/trips/${modern.id}`;
+      const review = { approved: true, reviewNote: 'Verified the two documents and permitted baggage', identityVerified: true, ticketVerified: true, baggageVerified: true, eligibilityVerified: true };
+      assert.equal((await call(`${path}/review`, admin, review)).status, 409);
+      const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jWZkAAAAASUVORK5CYII=', 'base64');
+      const requestImage = (user, kind, method = 'GET') => fetch(`${base}${path}/verification/${kind}`, {
+        method, headers: { Authorization: `Bearer ${tokens.get(user.id)}`, ...(method === 'PUT' ? { 'Content-Type': 'image/png' } : {}) },
+        ...(method === 'PUT' ? { body: png } : {}),
+      });
+      assert.equal((await requestImage(stranger, 'IDENTITY', 'PUT')).status, 404);
+      for (const kind of ['IDENTITY', 'TICKET']) assert.equal((await requestImage(traveller, kind, 'PUT')).status, 200);
+      assert.equal((await requestImage(stranger, 'IDENTITY')).status, 404);
+      assert.equal((await requestImage(originStaff, 'IDENTITY')).status, 403);
+      const document = await requestImage(admin, 'IDENTITY');
+      assert.equal(document.status, 200);
+      assert.equal(document.headers.get('cache-control'), 'private, no-store');
+      assert.equal((await call(`${path}/review`, admin, { ...review, baggageVerified: false })).status, 400);
+      assert.equal((await ok(`${path}/review`, admin, review)).status, 'APPROVED');
+      assert.equal((await requestImage(traveller, 'TICKET', 'PUT')).status, 409);
+      assert.equal((await ok('/connect/trips', traveller)).find(row => row.id === modern.id).verificationDocuments.length, 2);
+    });
   } finally {
     await new Promise(resolve => server.close(resolve));
     const parcels = await prisma.parcel.findMany({ where: { organizationId: org.id }, select: { id: true } }); const ids = parcels.map(p => p.id);

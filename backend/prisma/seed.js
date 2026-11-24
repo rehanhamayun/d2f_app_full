@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { seedShipForMe } from './ship_for_me_defaults.js';
 
 const prisma = new PrismaClient();
 
@@ -73,6 +74,8 @@ async function main() {
       locationId: omaha.id,
     },
   });
+
+  await seedShipForMe(prisma, org.id);
 
   if (process.env.NODE_ENV === 'production' && process.env.SEED_DEMO_DATA !== 'true') {
     console.log('D2F organization, locations and authorized accounts are ready.');

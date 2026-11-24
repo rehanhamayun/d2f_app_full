@@ -44,6 +44,7 @@ export function useRemote(path, token, refresh = 0) {
   const [state, setState] = useState({ data: null, loading: true, error: '' });
   const [version, setVersion] = useState(0);
   useEffect(() => {
+    if (!path) return;
     let active = true;
     setState(s => ({ ...s, loading: true, error: '' }));
     request(path, { token }).then(data => { if (active) setState({ data, loading: false, error: '' }); }).catch(e => { if (active) setState({ data: null, loading: false, error: e.message }); });

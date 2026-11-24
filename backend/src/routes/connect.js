@@ -1,4 +1,4 @@
-import { COUNTRY_ZONES, routeZone, localToInstant, tripTiming } from '../timezones.js';
+import { COUNTRY_ZONES, routeCountry, routeZone, localToInstant, tripTiming } from '../timezones.js';
 import { TERMS_VERSION, DECLARATION_WARNING, DECLARATION_CHECKS, DECLARATION_TERMS, guidanceFor, contentsHash, requireDeclaration } from '../connect_declaration.js';
 import { Router, raw } from 'express';
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
@@ -11,6 +11,9 @@ import { connectReceivingApprovalRequired, warehouseFacilityAuthorizationRequire
 
 const router = Router();
 const operations = user => ['ADMIN', 'STAFF'].includes(user.role);
+const verificationKinds = ['IDENTITY', 'TICKET'];
+const tripChecks = ['identityVerified', 'ticketVerified', 'baggageVerified', 'eligibilityVerified'];
+const tripDocuments = { select: { kind: true, updatedAt: true } };
 const active = booking => booking.assignments.find(a => ACTIVE_ASSIGNMENTS.includes(a.status));
 const bookingInclude = {
   parcel: { include: { customer: true, items: { orderBy: { position: 'asc' } }, events: { orderBy: { createdAt: 'asc' } } } },
@@ -19,11 +22,11 @@ const bookingInclude = {
   declarations: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] },
   paymentSubmissions: { select: { id: true, userId: true, method: true, transactionId: true, instructionsVersion: true, instructionsSnapshot: true, fileName: true, contentType: true, status: true, reviewNote: true, reviewedAt: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
 };
-const tripInclude = { traveller: { select: { id: true, fullName: true, email: true, phone: true } }, receivingLocation: true,
+const tripInclude = { verificationDocuments: tripDocuments, traveller: { select: { id: true, fullName: true, email: true, phone: true } }, receivingLocation: true,
   assignments: { include: { declarations: { orderBy: { createdAt: 'desc' } }, booking: { include: { parcel: true, payment: true, receivingLocation: true } } } } };
 const safeLocation = location => location && ({ id: location.id, name: location.name, address: location.address, city: location.city, country: location.country });
 const safeTrip = trip => ({ ...tripTiming(trip), id: trip.id, origin: trip.origin, destination: trip.destination, departureAt: trip.departureAt,
-  flightNumber: trip.flightNumber, capacityKg: trip.capacityKg, categories: trip.categories, status: trip.status,
+  arrivalAt: trip.arrivalAt, airline: trip.airline, flightNumber: trip.flightNumber, capacityKg: trip.capacityKg, categories: trip.categories, status: trip.status,
   receivingLocation: safeLocation(trip.receivingLocation) });
 const remaining = trip => Math.round((trip.capacityKg - trip.assignments.filter(a => ACTIVE_ASSIGNMENTS.includes(a.status)).reduce((sum, a) => sum + effectiveWeight(a.booking), 0)) * 1000) / 1000;
 function customerBooking(b) {
@@ -104,7 +107,7 @@ router.get('/operations', requireRole('STAFF', 'ADMIN'), wrap(async (req, res) =
   ]);
   res.json({ policy: { receivingApprovalRequired: connectReceivingApprovalRequired(), facilityAuthorizationRequired: warehouseFacilityAuthorizationRequired() }, bookings: bookings.map(staffBooking), rates, locations, trips: trips.map(t => {
     const revenueMinor = t.assignments.filter(a => a.status === 'CONFIRMED' && a.booking.payment).reduce((sum, a) => sum + a.booking.internationalFeeMinor, 0);
-    return { ...t, ...tripTiming(t), assignments: t.assignments.map(travellerAssignment), remainingKg: remaining(t), revenueMinor,
+    return { ...t, verificationReference: req.user.role === 'ADMIN' ? t.verificationReference : undefined, ...tripTiming(t), assignments: t.assignments.map(travellerAssignment), remainingKg: remaining(t), revenueMinor,
       profitMinor: revenueMinor - t.compensationMinor - t.expensesMinor };
   }) });
 }));
@@ -137,21 +140,27 @@ router.patch('/locations/:id', requireRole('ADMIN'), wrap(async (req, res) => {
 }));
 router.get('/trips', wrap(async (req, res) => {
   const trips = await prisma.connectTrip.findMany({ where: { organizationId: req.connectOrg, ...(!operations(req.user) ? { travellerId: req.user.id } : {}) }, include: tripInclude, orderBy: { departureAt: 'asc' } });
-  res.json(trips.map(t => ({ ...safeTrip(t), reviewNote: t.reviewNote, remainingKg: remaining(t), assignments: t.assignments.map(travellerAssignment) })));
+  res.json(trips.map(t => ({ ...safeTrip(t), verificationDocuments: t.verificationDocuments, reviewNote: t.reviewNote, remainingKg: remaining(t), assignments: t.assignments.map(travellerAssignment) })));
 }));
 router.post('/trips', requireRole('CUSTOMER'), wrap(async (req, res) => {
   const b = req.body || {};
+  const modern = b.registrationVersion === 2 || b.airline !== undefined || b.arrivalLocal !== undefined;
   if (!req.user.phone) fail(400, 'Add a phone number to your account first.');
   const origin = text(b.origin, 'departure city and country'); const destination = text(b.destination, 'destination city and country');
+  if (modern && [origin, destination].some(place => !place.includes(',') || !routeCountry(place.split(',').at(-1)))) fail(400, 'Select a city and supported country for each end of the trip.');
   if (routeKey(origin) === routeKey(destination)) fail(400, 'Choose different departure and destination locations.');
   if (!Array.isArray(b.categories) || !b.categories.length || b.categories.some(c => !CATEGORIES.includes(c))) fail(400, 'Choose permitted parcel categories.');
   const departureTimezone = routeZone(origin, b.departureTimezone);
   const destinationTimezone = routeZone(destination, b.destinationTimezone);
   if (!b.departureLocal && (typeof b.departureAt !== 'string' || !/(Z|[+-]\d\d:\d\d)$/.test(b.departureAt))) fail(400, 'Include a time zone offset or enter a local departure time and zone.');
-  const departure = b.departureLocal ? localToInstant(b.departureLocal, departureTimezone, b.departureOccurrence) : b.departureAt;
-  const data = { organizationId: req.connectOrg, travellerId: req.user.id, origin, destination, departureTimezone, destinationTimezone, departureAt: future(departure, 'a departure date'),
-    flightNumber: text(b.flightNumber, 'airline and flight number'), capacityKg: number(b.capacityKg, 'available baggage capacity', 0.1, 100),
-    categories: [...new Set(b.categories)], verificationReference: text(b.verificationReference, 'your identity and ticket verification reference', 500) };
+  const departure = future(b.departureLocal ? localToInstant(b.departureLocal, departureTimezone, b.departureOccurrence) : b.departureAt, 'a departure date');
+  if (modern && !b.arrivalLocal) fail(400, 'Choose the arrival date and time in the destination city.');
+  const arrivalAt = modern ? localToInstant(b.arrivalLocal, destinationTimezone, b.arrivalOccurrence) : null;
+  if (arrivalAt && (arrivalAt <= departure || arrivalAt - departure > 7 * 86400000)) fail(400, 'Arrival must be after departure and within seven days of travel.');
+  const airline = modern ? text(b.airline, 'your airline') : null;
+  const data = { organizationId: req.connectOrg, travellerId: req.user.id, origin, destination, departureTimezone, destinationTimezone, departureAt: departure, arrivalAt, airline,
+    flightNumber: text(b.flightNumber, modern ? 'your flight number' : 'airline and flight number'), capacityKg: number(b.capacityKg, 'available baggage capacity', 0.1, 100),
+    categories: [...new Set(b.categories)], verificationReference: modern ? null : text(b.verificationReference, 'your identity and ticket verification reference', 500) };
   if (b.complianceAcknowledged !== true) fail(400, 'Confirm that your ticket, baggage allowance and permitted goods require D2F verification.');
   res.status(201).json(await transaction(req, async tx => {
     const trip = await tx.connectTrip.create({ data });
@@ -159,6 +168,40 @@ router.post('/trips', requireRole('CUSTOMER'), wrap(async (req, res) => {
     return safeTrip(trip);
   }));
 }));
+const verificationImageTypes = ['image/jpeg', 'image/png', 'image/webp'];
+function validVerificationImage(bytes, type) {
+  if (!Buffer.isBuffer(bytes) || bytes.length < 16) return false;
+  if (type === 'image/jpeg') return bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+  if (type === 'image/png') return bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
+  return type === 'image/webp' && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP';
+}
+
+router.put('/trips/:id/verification/:kind', requireRole('CUSTOMER'), raw({ type: verificationImageTypes, limit: '4mb' }), wrap(async (req, res) => {
+  const { kind } = req.params;
+  const contentType = req.get('content-type')?.split(';')[0];
+  if (!verificationKinds.includes(kind) || !validVerificationImage(req.body, contentType)) fail(400, 'Upload a JPEG, PNG or WebP image (up to 4 MB).');
+  const result = await transaction(req, async tx => {
+    const trip = await getTrip(tx, req);
+    if (!['PENDING_REVIEW', 'REJECTED'].includes(trip.status)) fail(409, 'This trip is no longer accepting verification documents.');
+    const data = { contentType, bytes: req.body };
+    const saved = await tx.connectTripVerificationDocument.upsert({
+      where: { tripId_kind: { tripId: trip.id, kind } }, update: data,
+      create: { tripId: trip.id, kind, ...data }, select: { kind: true, updatedAt: true },
+    });
+    if (trip.status === 'REJECTED') await tx.connectTrip.update({ where: { id: trip.id }, data: { status: 'PENDING_REVIEW', verificationChecks: undefined } });
+    await audit(tx, req, 'ConnectTrip', trip.id, 'VERIFICATION_DOCUMENT_SAVED', kind);
+    return saved;
+  });
+  res.json(result);
+}));
+
+router.get('/trips/:id/verification/:kind', requireRole('CUSTOMER', 'ADMIN'), wrap(async (req, res) => {
+  const trip = await getTrip(prisma, req);
+  const row = await prisma.connectTripVerificationDocument.findUnique({ where: { tripId_kind: { tripId: trip.id, kind: req.params.kind } } });
+  if (!row) fail(404, 'Verification document not available.');
+  res.set({ 'Content-Type': row.contentType, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }).send(row.bytes);
+}));
+
 router.patch('/trips/:id/schedule', requireRole('ADMIN'), wrap(async (req, res) => {
   res.json(await transaction(req, async tx => {
     const t = await getTrip(tx, req);
@@ -166,9 +209,11 @@ router.patch('/trips/:id/schedule', requireRole('ADMIN'), wrap(async (req, res) 
     const departureTimezone = routeZone(t.origin, req.body.departureTimezone || t.departureTimezone);
     const destinationTimezone = routeZone(t.destination, req.body.destinationTimezone || t.destinationTimezone);
     const departureAt = req.body.departureLocal ? future(localToInstant(req.body.departureLocal, departureTimezone, req.body.departureOccurrence), 'a departure date') : t.departureAt;
+    const arrivalAt = req.body.arrivalLocal ? localToInstant(req.body.arrivalLocal, destinationTimezone, req.body.arrivalOccurrence) : t.arrivalAt;
+    if (arrivalAt && (arrivalAt <= departureAt || arrivalAt - departureAt > 7 * 86400000)) fail(400, 'Arrival must be after departure and within seven days.');
     const bookings = t.assignments.filter(a => ACTIVE_ASSIGNMENTS.includes(a.status));
     if (bookings.some(a => departureAt < a.booking.preferredDate)) fail(409, 'This departure is earlier than an assigned customer’s preferred date. Reconcile those bookings first.');
-    const updated = await tx.connectTrip.update({ where: { id: t.id }, data: { departureAt, departureTimezone, destinationTimezone } });
+    const updated = await tx.connectTrip.update({ where: { id: t.id }, data: { departureAt, arrivalAt, departureTimezone, destinationTimezone } });
     await audit(tx, req, 'ConnectTrip', t.id, 'SCHEDULE_UPDATED', JSON.stringify({ departureAt, departureTimezone, destinationTimezone }));
     for (const a of bookings) await event(tx, req, a.booking, 'SCHEDULE_UPDATED', 'D2F updated your assigned trip schedule. Review the departure time in D2F Connect.', false);
     return safeTrip(updated);
@@ -183,7 +228,13 @@ router.post('/trips/:id/review', requireRole('ADMIN'), wrap(async (req, res) => 
     const reviewNote = text(req.body?.reviewNote, 'verification review notes', 1000);
     let receivingLocationId = null;
     if (status === 'APPROVED') {
-      if (t.departureAt <= new Date() || req.body.complianceVerified !== true) fail(400, 'Verify identity, flight, customs eligibility and allowed goods before approval.');
+      if (t.departureAt <= new Date()) fail(400, 'The verification must be completed before the trip departs.');
+      if (t.airline) {
+        if (t.verificationDocuments.length !== verificationKinds.length) fail(409, 'The traveller must upload identity and ticket documents before approval.');
+        if (!tripChecks.every(check => req.body[check] === true)) fail(400, 'Verify identity, ticket, baggage allowance and transport eligibility before approval.');
+      } else if (!t.verificationReference || req.body.complianceVerified !== true) {
+        fail(400, 'Verify identity, flight, customs eligibility and allowed goods before approval.');
+      }
       if (req.body.receivingLocationId) {
         const l = await tx.location.findFirst({ where: { id: req.body.receivingLocationId, organizationId: req.connectOrg } });
         if (!usableReceivingLocation(l, t)) fail(400, 'Choose an approved receiving location in the departure city and country.');
@@ -191,7 +242,8 @@ router.post('/trips/:id/review', requireRole('ADMIN'), wrap(async (req, res) => 
       }
       // A verified trip may reserve capacity before a public receiving facility is selected.
     }
-    const trip = await tx.connectTrip.update({ where: { id: t.id }, data: { status, reviewNote, receivingLocationId } });
+    const trip = await tx.connectTrip.update({ where: { id: t.id }, data: { status, reviewNote, receivingLocationId,
+      ...(status === 'APPROVED' ? { verificationChecks: { actorId: req.user.id, checkedAt: new Date().toISOString(), ...(t.airline ? Object.fromEntries(tripChecks.map(check => [check, true])) : { legacyReview: true }) } } : {}) } });
     await audit(tx, req, 'ConnectTrip', t.id, 'TRIP_REVIEWED', `${status}: ${reviewNote}`);
     return safeTrip(trip);
   }));

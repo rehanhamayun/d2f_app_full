@@ -36,7 +36,7 @@ test('admin dashboard analytics and user management require Admin access', async
     );
 
   try {
-    const organization = await prisma.organization.findFirstOrThrow();
+    const organization = await prisma.organization.findUniqueOrThrow({ where: { id: 'org-d2f' } });
     const [admin, staff, customer] = await Promise.all([
       prisma.user.create({
         data: {

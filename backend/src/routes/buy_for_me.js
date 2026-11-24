@@ -6,6 +6,8 @@
 import { Router, raw } from 'express';
 import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { defaultRetailers } from '../retailers.js';
+import { resolveOrganizationId } from '../tracking.js';
 import { fail, warehouseLock } from '../warehouse.js';
 import {
   audit,
@@ -43,6 +45,15 @@ const paymentInstructions = () => process.env.D2F_ZELLE_ACCOUNT
 const customerOrder = order => ({
   ...order,
   paymentInstructions: order.status === 'ACCEPTED' ? paymentInstructions() : null,
+});
+
+router.get('/retailers', async (req, res, next) => {
+  try {
+    const customer = await prisma.customer.findUnique({ where: { userId: req.user.id }, select: { organizationId: true } });
+    const id = await resolveOrganizationId(prisma, { ...req.user, organizationId: req.user.organizationId || customer?.organizationId });
+    const { retailerLinks } = await prisma.organization.findUniqueOrThrow({ where: { id }, select: { retailerLinks: true } });
+    res.json((retailerLinks ?? defaultRetailers).filter(store => store.enabled));
+  } catch (error) { next(error); }
 });
 
 router.get('/requests', async (req, res, next) => {
@@ -264,8 +275,10 @@ router.post('/requests/:id/:decision', async (req, res, next) => {
       });
       if (!existing) fail(404, 'Request not found.');
       if (req.params.decision === 'accept') {
-        const { expectedAmountMinor, expectedCurrency } = req.body || {};
+        const { expectedAmountMinor, expectedCurrency, expectedUpdatedAt } = req.body || {};
         if (expectedAmountMinor !== undefined && (!validAmount(expectedAmountMinor) || expectedAmountMinor !== existing.amountMinor)) fail(409, 'Your quote changed. Review the latest product and shipping costs before accepting.');
+        if (expectedUpdatedAt != null && Date.parse(expectedUpdatedAt) !== existing.updatedAt.getTime()) fail(409, 'Your quote changed. Review the latest breakdown before accepting.');
+        if ((existing.pickupFeeMinor || existing.handlingFeeMinor) && expectedAmountMinor === undefined) fail(409, 'Open the latest D2F app to review and accept the complete quote.');
         if (expectedCurrency !== undefined && expectedCurrency !== existing.currency) fail(409, 'Your quote currency changed. Review the latest quote before accepting.');
       }
       if (!rule.from.includes(existing.status)) {

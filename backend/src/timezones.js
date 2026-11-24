@@ -36,9 +36,9 @@ const parts = (date, zone) => Object.fromEntries(new Intl.DateTimeFormat('en-CA'
 const wall = p => Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second || 0);
 export function localToInstant(value, zone, occurrence) {
   if (occurrence && !['EARLIER', 'LATER'].includes(occurrence)) throw Object.assign(new Error('Choose the first or second occurrence of this clock time.'), { status: 400 });
-  if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d)?$/.test(value)) throw Object.assign(new Error('Enter a local departure date and time.'), { status: 400 });
+  if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d)?$/.test(value)) throw Object.assign(new Error('Enter a local date and time.'), { status: 400 });
   const target = new Date(value + 'Z');
-  if (!Number.isFinite(target.getTime()) || target.toISOString().slice(0,16) !== value.slice(0,16)) throw Object.assign(new Error('Enter a valid departure date.'), { status: 400 });
+  if (!Number.isFinite(target.getTime()) || target.toISOString().slice(0,16) !== value.slice(0,16)) throw Object.assign(new Error('Enter a valid local date.'), { status: 400 });
   const offsets = new Set();
   for (let h = -36; h <= 36; h += 6) {
     const sample = new Date(target.getTime() + h * 3600000);
@@ -47,7 +47,7 @@ export function localToInstant(value, zone, occurrence) {
   const candidates = [...offsets].map(offset => new Date(target.getTime() - offset)).filter(d => wall(parts(d, zone)) === target.getTime());
   candidates.sort((a, b) => a - b);
   if (candidates.length === 2 && occurrence) return candidates[occurrence === 'EARLIER' ? 0 : 1];
-  if (candidates.length !== 1) throw Object.assign(new Error(candidates.length ? 'This time occurs twice when daylight saving ends. Choose an unambiguous departure time or submit an explicit UTC offset.' : 'This local time does not exist due to daylight saving. Choose another time.'), { status: 400 });
+  if (candidates.length !== 1) throw Object.assign(new Error(candidates.length ? 'This time occurs twice when daylight saving ends. Choose an unambiguous time or submit an explicit UTC offset.' : 'This local time does not exist due to daylight saving. Choose another time.'), { status: 400 });
   return candidates[0];
 }
 export function tripTiming(t) {

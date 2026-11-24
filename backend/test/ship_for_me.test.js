@@ -33,11 +33,16 @@ test('Ship For Me requires the displayed terms version and remembers acceptance'
     await t.test('acceptance enables registration and survives reloading', async () => {
       const input = { retailerName: 'QA retailer', itemDescription: 'Test shoes', declaredValueMinor: 2500, declaredCurrency: 'USD' };
       assert.equal((await req('/requests', 'POST', input)).status, 403);
-      assert.equal((await req('/terms/accept', 'POST', { agreementId: agreement.id, version: agreement.version })).status, 200);
+      const accepted = await req('/terms/accept', 'POST', { agreementId: agreement.id, version: agreement.version });
+      assert.equal(accepted.status, 200);
+      assert.equal((await req('/terms/accept', 'POST', { agreementId: agreement.id, version: agreement.version })).body.acceptedAt, accepted.body.acceptedAt);
+      const originalReference = (await req('/warehouse-address')).body.customerWarehouseId;
       assert.equal((await req('/terms')).body.accepted, true);
       const created = await req('/requests', 'POST', input);
       assert.equal(created.status, 201, JSON.stringify(created.body));
       assert.equal(created.body.agreementVersion, agreement.version);
+      assert.equal(created.body.customerWarehouseId, originalReference);
+      assert.equal((await req('/warehouse-address')).body.customerWarehouseId, originalReference);
       assert.equal(created.body.status, 'DRAFT');
       assert.equal((await req('/requests')).body.length, 1);
     });

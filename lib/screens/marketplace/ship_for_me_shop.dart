@@ -23,7 +23,8 @@ class _ShipForMeShopState extends ConsumerState<ShipForMeShop> {
   bool _loadStarted = false;
   Map<String, dynamic>? _warehouseAddress;
   Map<String, dynamic>? _terms;
-  bool _termsAccepted = false;
+  bool _termsAccepted = false, _loadingTerms = false;
+  String? _termsError;
 
   void _maybeLoad() {
     if (_loadStarted) return;
@@ -82,6 +83,8 @@ class _ShipForMeShopState extends ConsumerState<ShipForMeShop> {
   }
 
   Future<void> _loadTerms() async {
+    if (_loadingTerms) return;
+    setState(() { _loadingTerms = true; _termsError = null; });
     try {
       final terms = await Api.I.getShipForMeTerms();
       if (!mounted) return;
@@ -89,8 +92,12 @@ class _ShipForMeShopState extends ConsumerState<ShipForMeShop> {
         _terms = terms;
         _termsAccepted = terms['accepted'] == true;
       });
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _termsError = e.message);
     } catch (_) {
-      // Terms may not be configured
+      if (mounted) setState(() => _termsError = 'Could not load terms. Retry or contact D2F support.');
+    } finally {
+      if (mounted) setState(() => _loadingTerms = false);
     }
   }
 
@@ -107,10 +114,9 @@ class _ShipForMeShopState extends ConsumerState<ShipForMeShop> {
         ),
       ),
     );
-    if (result == true) {
-      setState(() => _termsAccepted = true);
-      _load();
-    }
+    if (!mounted) return;
+    await _loadTerms();
+    if (mounted && result == true) _load();
   }
 
   Future<void> _newRequest() async {
@@ -504,8 +510,8 @@ class _ShipForMeShopState extends ConsumerState<ShipForMeShop> {
               ),
               const SizedBox(height: 2),
               Text(
-                _terms == null
-                    ? 'D2F terms are unavailable. Retry or contact D2F support before registering a purchase.'
+                _loadingTerms ? 'Loading the current terms…' : _terms == null
+                    ? (_termsError ?? 'The current Ship For Me terms are required.')
                     : 'Accept the Ship For Me terms before registering a purchase.',
                 style: const TextStyle(
                   fontSize: 11,
@@ -517,7 +523,7 @@ class _ShipForMeShopState extends ConsumerState<ShipForMeShop> {
           ),
         ),
         TextButton(
-          onPressed: _terms == null ? _loadTerms : _acceptTerms,
+          onPressed: _loadingTerms ? null : _terms == null ? _loadTerms : _acceptTerms,
           child: Text(
             _terms == null ? 'Retry' : 'Accept terms',
             style: TextStyle(

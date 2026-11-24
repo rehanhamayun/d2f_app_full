@@ -79,21 +79,6 @@ class _ShipForMeTermsScreenState extends State<ShipForMeTermsScreen> {
                   Text(widget.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: AppColors.navy, letterSpacing: -.3)),
                   const SizedBox(height: 16),
                   Text(widget.content, style: const TextStyle(fontSize: 12, height: 1.7, color: AppColors.textGrey)),
-                  const SizedBox(height: 24),
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(color: AppColors.coralSoft, borderRadius: BorderRadius.circular(14)),
-                    child: const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(Icons.warning_amber_rounded, size: 20, color: AppColors.coral),
-                        SizedBox(height: 8),
-                        Text('Important', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: AppColors.coral)),
-                        SizedBox(height: 6),
-                        Text('By accepting, you agree to D2F’s prohibited-items policy, inspection authorization, customs obligations, storage fees, and liability limits. Prohibited shipments will be blocked and may be returned at your cost.', style: TextStyle(fontSize: 11, height: 1.6, color: AppColors.textGrey)),
-                      ],
-                    ),
-                  ),
                   const SizedBox(height: 30),
                 ],
               ),
@@ -107,22 +92,14 @@ class _ShipForMeTermsScreenState extends State<ShipForMeTermsScreen> {
                   children: [
                     Checkbox(
                       value: _accepted,
-                      onChanged: (_) => setState(() => _accepted = !_accepted),
+                      onChanged: _busy ? null : (value) => setState(() => _accepted = value ?? false),
                       activeColor: AppColors.coral,
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text.rich(
-                        TextSpan(
-                          text: 'I accept the Ship For Me terms and conditions (v${widget.version}) ',
-                          style: const TextStyle(fontSize: 12, color: AppColors.textGrey),
-                          children: [
-                            TextSpan(
-                              text: '(opens terms)',
-                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.coral),
-                            ),
-                          ],
-                        ),
+                      child: Text(
+                        'I accept the Ship For Me terms and conditions (${widget.version}).',
+                        style: const TextStyle(fontSize: 12, color: AppColors.textGrey),
                       ),
                     ),
                   ],

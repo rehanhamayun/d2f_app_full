@@ -6,10 +6,16 @@ $image = [System.Drawing.Image]::FromFile($job.image)
 $document = New-Object System.Drawing.Printing.PrintDocument
 try {
   $document.PrinterSettings.PrinterName = $job.printer
-  if (-not $document.PrinterSettings.IsValid) { throw 'Printer queue is invalid.' }
+  if (-not $document.PrinterSettings.IsValid) { exit 20 }
+  $queue = Get-Printer | Where-Object Name -CEQ $job.printer | Select-Object -First 1
+  if ($queue -and $queue.PrinterStatus -match 'Offline|Paused|NotAvailable|PaperOut') { exit 21 }
   $document.PrinterSettings.Copies = 1
   $document.DocumentName = 'D2F ' + $job.job
-  $document.DefaultPageSettings.PaperSize = New-Object System.Drawing.Printing.PaperSize('D2F 4x6', 400, 600)
+  $roll = $document.PrinterSettings.PaperSizes | Where-Object {
+    [Math]::Abs($_.Width - 400) -le 10 -and [Math]::Abs($_.Height - 600) -le 10
+  } | Select-Object -First 1
+  if (-not $roll) { exit 22 }
+  $document.DefaultPageSettings.PaperSize = $roll
   $document.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
   $document.DefaultPageSettings.Landscape = $false
   $document.PrintController = New-Object System.Drawing.Printing.StandardPrintController

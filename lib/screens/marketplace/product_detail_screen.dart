@@ -10,6 +10,7 @@ import '../../widgets/auth_widgets.dart';
 import '../../widgets/product_image.dart';
 import 'checkout_screen.dart';
 import 'marketplace_orders_screen.dart';
+import 'storefronts.dart';
 
 /// Full-screen product view. Photos load with the session token; ordering
 /// routes into the checkout flow.
@@ -476,7 +477,7 @@ class _SellerCard extends StatelessWidget {
         .take(2)
         .map((part) => part.isEmpty ? '' : part[0].toUpperCase())
         .join();
-    return Container(
+    return InkWell(onTap: () => Navigator.push<void>(context, MaterialPageRoute(builder: (_) => MarketplaceStorefront(id: s.id))), child: Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -540,7 +541,7 @@ class _SellerCard extends StatelessWidget {
           ),
         ],
       ),
-    );
+    ));
   }
 }
 

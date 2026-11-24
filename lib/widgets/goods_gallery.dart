@@ -330,6 +330,8 @@ class GoodsItemTile extends StatelessWidget {
           item.widthCm != null &&
           item.heightCm != null)
         '${_cm(item.lengthCm)}×${_cm(item.widthCm)}×${_cm(item.heightCm)} cm',
+      if (RegExp(r'\brice bags?\b', caseSensitive: false).hasMatch(item.name))
+        '${item.quantity} rice ${item.quantity == 1 ? 'bag' : 'bags'}',
       if (item.packageCode != null) _codeLabel(item.packageCode!),
     ];
     return parts.isEmpty ? null : parts.join(' · ');

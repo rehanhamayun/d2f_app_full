@@ -1,3 +1,4 @@
+import '../../services/marketplace_invoice.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,9 +7,10 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/api.dart';
 import '../../core/theme.dart';
 import '../../models/marketplace.dart';
-import '../../models/models.dart';
+import '../../models/models.dart' hide statusLabel;
 import '../../providers/auth_provider.dart';
 import '../../widgets/order_timeline.dart';
+import '../../widgets/auth_widgets.dart';
 import '../../widgets/product_image.dart';
 
 /// The buyer's marketplace orders with live status, cancellation and a
@@ -432,6 +434,34 @@ class _OrderDetailSheetState extends State<_OrderDetailSheet> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _issue(String type) async {
+    var reason = '';
+    final confirmed = await showDialog<bool>(context: context, builder: (dialog) => AlertDialog(
+      title: Text('Request ${type.toLowerCase()} review'),
+      content: TextField(onChanged: (value) => reason = value.trim(), maxLength: 1000, maxLines: 3,
+        decoration: const InputDecoration(labelText: 'Tell D2F what happened')),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(dialog), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(dialog, true), child: const Text('Submit')),
+      ],
+    ));
+    if (confirmed != true || !mounted) return;
+    if (reason.isEmpty) {
+      authMessage(context, 'Add a reason for your request.');
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await Api.I.openMarketplaceIssue(widget.initialOrder.id, type, reason);
+      await widget.onChanged();
+      if (mounted) Navigator.pop(context);
+    } on ApiException catch (e) {
+      if (mounted) authMessage(context, e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final o = _order;
@@ -481,6 +511,17 @@ class _OrderDetailSheetState extends State<_OrderDetailSheet> {
                   _detailRow('Seller', o.seller?.displayName ?? 'D2F Direct'),
                   _detailRow('Quantity', '${o.quantity}'),
                   _detailRow('Total', formatMoney(o.amountMinor, o.currency)),
+                  _detailRow('Payment', statusLabel(o.paymentStatus ?? 'NOT_SUBMITTED')),
+                  if (o.marketplacePaymentNote != null) _detailRow('Payment rejection reason', o.marketplacePaymentNote!),
+                  _detailRow('Delivery method', o.deliveryMethodLabel),
+                  _copyRow('Order ID', o.id),
+                  if (o.marketplaceInvoice != null) OutlinedButton.icon(
+                    onPressed: () async {
+                      try { await printMarketplaceInvoice(o); }
+                      catch (_) { if (context.mounted) authMessage(context, 'Could not open the invoice.'); }
+                    },
+                    icon: const Icon(Icons.receipt_long_outlined), label: const Text('Print or save invoice PDF'),
+                  ),
                   if (o.delivery != null) _detailRow('Deliver to', o.delivery!),
                   if ((o.deliveryAddress ?? '').isNotEmpty) _detailRow('Address', o.deliveryAddress!),
                   if ((o.notes ?? '').isNotEmpty) _detailRow('Your note', o.notes!),
@@ -513,6 +554,19 @@ class _OrderDetailSheetState extends State<_OrderDetailSheet> {
                     const SizedBox.shrink()
                   else
                     const _SupportNote(),
+                  if (o.status != 'REQUESTED') ...[
+                    for (final issue in o.marketplaceIssues)
+                      _detailRow('${statusLabel(issue['type'] as String)} · ${issue['status']}', [issue['reason'], issue['resolution']].whereType<String>().join(' · ')),
+                    Wrap(spacing: 10, children: [
+                      for (final (kind, label) in [
+                        ('DISPUTE', 'Raise a dispute'),
+                        if (o.paymentStatus == 'VERIFIED') ('REFUND', 'Request refund'),
+                        if (['DELIVERED', 'COMPLETED'].contains(o.status)) ('RETURN', 'Request return'),
+                      ])
+                        if (!o.marketplaceIssues.any((issue) => issue['type'] == kind && issue['status'] == 'OPEN'))
+                          OutlinedButton(onPressed: _busy ? null : () => _issue(kind), child: Text(label)),
+                    ]),
+                  ],
                   const SizedBox(height: 24),
                 ],
               ),

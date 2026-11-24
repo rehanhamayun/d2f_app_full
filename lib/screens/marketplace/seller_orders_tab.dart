@@ -271,9 +271,7 @@ class _SellerOrderCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final o = order;
-    final proceeds = o.amountMinor != null
-        ? o.amountMinor! - (o.commissionMinor ?? 0)
-        : null;
+    final proceeds = o.sellerNetMinor;
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(18),
@@ -389,6 +387,8 @@ class _SellerOrderSheetState extends State<_SellerOrderSheet> {
     String action, {
     String? reason,
     String? trackingRef,
+    String? shipmentEvidence,
+    String? carrier,
   }) async {
     setState(() => _busy = true);
     try {
@@ -397,6 +397,8 @@ class _SellerOrderSheetState extends State<_SellerOrderSheet> {
         action,
         reason: reason,
         trackingRef: trackingRef,
+        shipmentEvidence: shipmentEvidence,
+        shippingCarrier: carrier,
       );
       if (!mounted) return;
       setState(() {
@@ -456,35 +458,37 @@ class _SellerOrderSheetState extends State<_SellerOrderSheet> {
   }
 
   Future<void> _shipDialog() async {
-    final controller = TextEditingController(text: _order.trackingRef ?? '');
-    final result = await showDialog<String?>(
+    final external = _order.effectiveDeliveryMethod == 'EXTERNAL_CARRIER';
+    final form = GlobalKey<FormState>();
+    final tracking = TextEditingController(text: _order.trackingRef);
+    final evidence = TextEditingController(text: _order.shipmentEvidence);
+    final carrier = TextEditingController(text: _order.shippingCarrier);
+    final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Mark as shipped'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Carrier reference (optional)',
-            hintText: 'e.g. DHL-884421 or GX-220-001',
-            filled: true,
-            fillColor: AppColors.cream,
-          ),
-        ),
+        title: Text(_order.effectiveDeliveryMethod == 'CUSTOMER_PICKUP' ? 'Ready for pickup' : 'Record dispatch'),
+        content: Form(key: form, child: SingleChildScrollView(child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (external) ...[
+              TextFormField(controller: carrier, decoration: const InputDecoration(labelText: 'Carrier name'), validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null),
+              TextFormField(controller: tracking, decoration: const InputDecoration(labelText: 'External tracking number'), validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null),
+            ],
+            TextFormField(controller: evidence, maxLength: 500, decoration: InputDecoration(labelText: _order.effectiveDeliveryMethod == 'CUSTOMER_PICKUP' ? 'Pickup reservation reference' : 'Dispatch proof reference'),
+              validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null),
+          ],
+        ))),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, ''),
-            child: const Text('Skip'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('Mark shipped'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () { if (form.currentState?.validate() == true) Navigator.pop(ctx, true); }, child: const Text('Save')),
         ],
       ),
     );
-    if (result == null) return;
-    await _act('ship', trackingRef: result.isEmpty ? null : result);
+    final references = (tracking.text.trim(), evidence.text.trim(), carrier.text.trim());
+    WidgetsBinding.instance.addPostFrameCallback((_) { tracking.dispose(); evidence.dispose(); carrier.dispose(); });
+    if (saved == true && mounted) {
+      await _act('ship', trackingRef: external ? references.$1 : null, shipmentEvidence: references.$2, carrier: external ? references.$3 : null);
+    }
   }
 
   @override
@@ -605,6 +609,15 @@ class _SellerOrderSheetState extends State<_SellerOrderSheet> {
                     if (o.delivery != null)
                       _detailRow('City · Country', o.delivery!),
                   ],
+                  _detailRow('Order ID', o.id),
+                  _detailRow('Payment', statusLabel(o.paymentStatus ?? 'NOT_SUBMITTED')),
+                  _detailRow('Delivery method', o.deliveryMethodLabel),
+                  _detailRow('D2F fulfillment fee', formatMoney(o.fulfillmentFeeMinor ?? 0, o.currency)),
+                  _detailRow('Delivery fee', formatMoney(o.deliveryFeeMinor ?? 0, o.currency)),
+                  _detailRow('Payment processing fee', formatMoney(0, o.currency)),
+                  _detailRow('Seller payout before refunds', formatMoney(o.sellerNetMinor, o.currency)),
+                  if (o.parcelTrackingId != null) _detailRow('D2F tracking number', o.parcelTrackingId!),
+                  if (o.shipmentEvidence != null) _detailRow('Shipment proof', o.shipmentEvidence!),
                   if ((o.trackingRef ?? '').isNotEmpty)
                     _detailRow('Carrier reference', o.trackingRef!),
                   const SizedBox(height: 14),
@@ -674,7 +687,7 @@ class _SellerOrderSheetState extends State<_SellerOrderSheet> {
           SizedBox(
             height: 52,
             child: FilledButton.icon(
-              onPressed: () => _act('advance'),
+              onPressed: o.paymentStatus == 'VERIFIED' && !o.hasOpenIssue ? () => _act('advance') : null,
               icon: const Icon(Icons.inventory_2_outlined, color: Colors.white),
               label: const Text(
                 'Start preparing',
@@ -708,7 +721,7 @@ class _SellerOrderSheetState extends State<_SellerOrderSheet> {
           SizedBox(
             height: 52,
             child: FilledButton.icon(
-              onPressed: _shipDialog,
+              onPressed: o.paymentStatus == 'VERIFIED' && !o.hasOpenIssue && o.effectiveDeliveryMethod != 'D2F_DELIVERY' ? _shipDialog : null,
               icon: const Icon(
                 Icons.local_shipping_outlined,
                 color: Colors.white,
@@ -741,31 +754,9 @@ class _SellerOrderSheetState extends State<_SellerOrderSheet> {
           ),
         ];
       case 'SHIPPED':
-        return [
-          SizedBox(
-            height: 52,
-            child: FilledButton.icon(
-              onPressed: () => _act('complete'),
-              icon: const Icon(
-                Icons.check_circle_outline_rounded,
-                color: Colors.white,
-              ),
-              label: const Text(
-                'Mark completed',
-                style: TextStyle(
-                  fontWeight: FontWeight.w900,
-                  color: Colors.white,
-                ),
-              ),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.green,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-            ),
-          ),
-        ];
+        return const [Text('D2F confirms delivery or customer pickup after reviewing handover evidence.')];
+      case 'DELIVERED':
+        return const [Text('Delivery confirmed. D2F records completion after review.')];
       default:
         return const [];
     }

@@ -79,6 +79,8 @@ class GoodsDraft {
 
   String get nameValue => name.text.trim();
 
+  bool get isRiceBag => RegExp(r'\brice bags?\b', caseSensitive: false).hasMatch(nameValue);
+
   String get detailsValue => details.text.trim();
 
   String get sizeText => size.text.trim();
@@ -1932,6 +1934,33 @@ class _GoodsRow extends StatelessWidget {
                 : null,
           ),
           const SizedBox(height: 14),
+          ValueListenableBuilder(
+            valueListenable: draft.name,
+            builder: (context, _, _) => TextFormField(
+            key: ValueKey('goods-qty-$index'),
+            controller: draft.quantity,
+            keyboardType: TextInputType.number,
+            textInputAction: TextInputAction.next,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(3),
+            ],
+            onChanged: (_) => onInvalidate(),
+            decoration: InputDecoration(
+              labelText: draft.isRiceBag ? 'Quantity of rice bags' : 'Items inside this package',
+              hintText: '1',
+              suffixText: draft.isRiceBag ? 'bags' : null,
+              helperText: draft.isRiceBag ? 'Count the rice bags inside this package.' : 'Count the contents, not the boxes.',
+              prefixIcon: const Icon(Icons.format_list_numbered_rounded),
+            ),
+            validator: (value) =>
+                value != null &&
+                    value.isNotEmpty &&
+                    (int.tryParse(value) ?? 0) < 1
+                ? 'Enter 1–999 items, or leave blank for 1.'
+                : null,
+          ),),
+          const SizedBox(height: 14),
           DropdownButtonFormField<String>(
             key: ValueKey('goods-type-$index'),
             isExpanded: true,
@@ -1947,30 +1976,6 @@ class _GoodsRow extends StatelessWidget {
             onChanged: (value) {
               if (value != null) onTypeChanged(value);
             },
-          ),
-          const SizedBox(height: 14),
-          TextFormField(
-            key: ValueKey('goods-qty-$index'),
-            controller: draft.quantity,
-            keyboardType: TextInputType.number,
-            textInputAction: TextInputAction.next,
-            inputFormatters: [
-              FilteringTextInputFormatter.digitsOnly,
-              LengthLimitingTextInputFormatter(3),
-            ],
-            onChanged: (_) => onInvalidate(),
-            decoration: const InputDecoration(
-              labelText: 'Items inside this package',
-              hintText: '1',
-              helperText: 'Count the contents, not the boxes.',
-              prefixIcon: Icon(Icons.format_list_numbered_rounded),
-            ),
-            validator: (value) =>
-                value != null &&
-                    value.isNotEmpty &&
-                    (int.tryParse(value) ?? 0) < 1
-                ? 'Enter 1–999 items, or leave blank for 1.'
-                : null,
           ),
           const SizedBox(height: 14),
           TextFormField(

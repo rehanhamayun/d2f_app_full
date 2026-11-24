@@ -70,13 +70,13 @@ app.use('/admin', adminRouter);
 app.use('/warehouse', warehouseRouter);
 app.use('/label-print', labelPrintRouter);
 app.use('/operational-notes', operationalNotesRouter);
+app.use('/admin/commerce/services', adminServicesRouter);
 app.use('/admin/commerce', commerceRouter);
 app.use('/marketplace', marketplaceRouter);
 app.use('/seller', sellerRouter);
 app.use('/buy-for-me', buyForMeRouter);
 app.use('/ship-for-me', shipForMeRouter);
 app.use('/payments', paymentsRouter);
-app.use('/admin/commerce/services', adminServicesRouter);
 app.use('/notifications', notificationsRouter);
 // Tracking-number possession reveals progress only, never people, contact
 // details, internal notes, actor identity, or the staff parcel record.

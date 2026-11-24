@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/api.dart';
 import '../../core/theme.dart';
@@ -33,7 +34,9 @@ class _ShipForMeWarehouseScreenState extends State<ShipForMeWarehouseScreen> {
     }
   }
 
-  void _copy(String text) {
+  Future<void> _copy(String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied to clipboard')));
   }
 
@@ -112,7 +115,8 @@ class _ShipForMeWarehouseScreenState extends State<ShipForMeWarehouseScreen> {
                         height: 50,
                         child: OutlinedButton.icon(
                           onPressed: () => _copy(
-                            '${_address!['addressLine1']}, ${_address!['city']}, ${_address!['postalCode']}, ${_address!['country']}',
+                            [for (final field in ['label', 'addressLine1', 'addressLine2', 'city', 'stateProvince', 'postalCode', 'country', 'customerWarehouseId'])
+                              if ((_address![field] as String? ?? '').isNotEmpty) _address![field] as String].join(', '),
                           ),
                           icon: const Icon(Icons.copy_rounded, size: 18, color: AppColors.blue),
                           label: const Text('Copy full address', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.blue)),

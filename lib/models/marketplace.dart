@@ -56,6 +56,7 @@ class SellerSummary {
   final String? country;
   final String? headline;
   final String? category;
+  final bool localDeliveryEnabled;
   const SellerSummary({
     required this.id,
     required this.displayName,
@@ -63,6 +64,7 @@ class SellerSummary {
     this.country,
     this.headline,
     this.category,
+    this.localDeliveryEnabled = false,
   });
   factory SellerSummary.fromJson(Map<String, dynamic> json) => SellerSummary(
     id: json['id'] as String,
@@ -71,6 +73,7 @@ class SellerSummary {
     country: json['country'] as String?,
     headline: json['headline'] as String?,
     category: json['category'] as String?,
+    localDeliveryEnabled: json['localDeliveryEnabled'] == true,
   );
   String get location => [
     city,
@@ -249,8 +252,13 @@ class MarketplaceOrder {
   final int? budgetMinor;
   final int? productCostMinor;
   final int? shippingCostMinor;
+  final int pickupFeeMinor, handlingFeeMinor;
   final String? paymentStatus;
   final String? paymentTransactionId;
+  final String? deliveryMethod, shipmentEvidence, marketplacePaymentNote;
+  final int? fulfillmentFeeMinor, deliveryFeeMinor, sellerNetMinor;
+  final Map<String, dynamic>? marketplaceInvoice;
+  final List<Map<String, dynamic>> marketplaceIssues;
   final String? paymentInstructions;
   final String? deliveryService;
   final String? shippingCarrier;
@@ -290,8 +298,18 @@ class MarketplaceOrder {
     this.budgetMinor,
     this.productCostMinor,
     this.shippingCostMinor,
+    this.pickupFeeMinor = 0,
+    this.handlingFeeMinor = 0,
     this.paymentStatus,
     this.paymentTransactionId,
+    this.deliveryMethod,
+    this.shipmentEvidence,
+    this.marketplacePaymentNote,
+    this.fulfillmentFeeMinor,
+    this.deliveryFeeMinor,
+    this.sellerNetMinor,
+    this.marketplaceInvoice,
+    this.marketplaceIssues = const [],
     this.paymentInstructions,
     this.deliveryService,
     this.shippingCarrier,
@@ -335,8 +353,18 @@ class MarketplaceOrder {
       budgetMinor: (json['budgetMinor'] as num?)?.toInt(),
       productCostMinor: (json['productCostMinor'] as num?)?.toInt(),
       shippingCostMinor: (json['shippingCostMinor'] as num?)?.toInt(),
+      pickupFeeMinor: (json['pickupFeeMinor'] as num?)?.toInt() ?? 0,
+      handlingFeeMinor: (json['handlingFeeMinor'] as num?)?.toInt() ?? 0,
       paymentStatus: json['paymentStatus'] as String?,
       paymentTransactionId: json['paymentTransactionId'] as String?,
+      deliveryMethod: json['deliveryMethod'] as String?,
+      shipmentEvidence: json['shipmentEvidence'] as String?,
+      marketplacePaymentNote: json['marketplacePaymentNote'] as String?,
+      fulfillmentFeeMinor: (json['fulfillmentFeeMinor'] as num?)?.toInt(),
+      deliveryFeeMinor: (json['deliveryFeeMinor'] as num?)?.toInt(),
+      sellerNetMinor: (json['sellerNetMinor'] as num?)?.toInt(),
+      marketplaceInvoice: (json['marketplaceInvoice'] as Map?)?.cast<String, dynamic>(),
+      marketplaceIssues: (json['marketplaceIssues'] as List? ?? []).cast<Map<String, dynamic>>(),
       paymentInstructions: json['paymentInstructions'] as String?,
       deliveryService: json['deliveryService'] as String?,
       shippingCarrier: json['shippingCarrier'] as String?,
@@ -363,6 +391,16 @@ class MarketplaceOrder {
       commissionMinor: (json['commissionMinor'] as num?)?.toInt(),
     );
   }
+
+  String get effectiveDeliveryMethod =>
+      deliveryMethod ?? (deliveryPreference == 'SELLER' ? 'SELLER_DELIVERY' : 'D2F_DELIVERY');
+  String get deliveryMethodLabel => switch (effectiveDeliveryMethod) {
+    'SELLER_DELIVERY' => 'Seller delivery',
+    'EXTERNAL_CARRIER' => 'External carrier',
+    'CUSTOMER_PICKUP' => 'Customer pickup',
+    _ => 'D2F delivery',
+  };
+  bool get hasOpenIssue => marketplaceIssues.any((issue) => issue['status'] == 'OPEN');
 
   String get reference =>
       'D2F-${id.replaceAll('-', '').substring(0, 8).toUpperCase()}';

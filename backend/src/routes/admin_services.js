@@ -6,11 +6,38 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { fail, warehouseLock } from '../warehouse.js';
 import { audit, validAmount, validOptionalText, validText, currencies } from '../shopfront.js';
 import { createNotification } from '../notifications.js';
+import { defaultRetailers, validRetailerUrl } from '../retailers.js';
 import { resolveOrganizationId } from '../tracking.js';
 
 const router = Router();
 router.use(authenticate, requireRole('ADMIN'), async (req, res, next) => {
   try { req.organizationId = await resolveOrganizationId(prisma, req.user); next(); } catch (e) { next(e); }
+});
+
+router.get('/retailers', async (req, res, next) => {
+  try {
+    const { retailerLinks } = await prisma.organization.findUniqueOrThrow({ where: { id: req.organizationId }, select: { retailerLinks: true } });
+    res.json(retailerLinks ?? defaultRetailers);
+  } catch (e) { next(e); }
+});
+
+router.put('/retailers', async (req, res, next) => {
+  try {
+    const { stores, previous } = req.body || {};
+    if (!Array.isArray(stores) || stores.length > 100 || stores.some(store => !store || !['US', 'FR'].includes(store.country) ||
+      !validText(store.name, 60) || !validRetailerUrl(store.url) || (store.logoUrl && !validRetailerUrl(store.logoUrl)) || typeof store.enabled !== 'boolean')) {
+      fail(400, 'Enter a name, country and HTTPS retailer link for every store.');
+    }
+    const retailerLinks = stores.map(({ name, country, url, logoUrl, enabled }) => ({ name: name.trim(), country, url: url.trim(), logoUrl: logoUrl?.trim() || null, enabled }));
+    await prisma.$transaction(async tx => {
+      await warehouseLock(tx, req.organizationId);
+      const current = await tx.organization.findUniqueOrThrow({ where: { id: req.organizationId }, select: { retailerLinks: true } });
+      if (JSON.stringify(current.retailerLinks ?? defaultRetailers) !== JSON.stringify(previous)) fail(409, 'Retailers changed. Reopen the editor to load the latest list.');
+      await tx.organization.update({ where: { id: req.organizationId }, data: { retailerLinks } });
+      await audit(tx, req, 'Organization', req.organizationId, 'RETAILERS_UPDATE', `${stores.length} retailer links`);
+    });
+    res.json(retailerLinks);
+  } catch (e) { next(e); }
 });
 
 const validBps = (v) => Number.isSafeInteger(v) && v >= 0 && v <= 5000;
@@ -50,8 +77,8 @@ router.post('/agreements', async (req, res, next) => {
     const ef = effectiveFrom ? new Date(effectiveFrom) : new Date();
     if (Number.isNaN(ef.getTime())) fail(400, 'Enter a valid effective date.');
     const result = await prisma.$transaction(async (tx) => {
-      // If activating this version, deactivate others of same service type
-      if (isActive) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('customer-agreements', 0))`;
+      if (isActive && ef <= new Date()) {
         await tx.customerAgreement.updateMany({
           where: { serviceType, isActive: true },
           data: { isActive: false },
@@ -65,7 +92,7 @@ router.post('/agreements', async (req, res, next) => {
       return created;
     });
     res.status(201).json(result);
-  } catch (e) { next(e); }
+  } catch (e) { if (e.code === 'P2002') return next(Object.assign(new Error('Choose a new terms version.'), { status: 409 })); next(e); }
 });
 
 router.patch('/agreements/:id', async (req, res, next) => {
@@ -77,21 +104,21 @@ router.patch('/agreements/:id', async (req, res, next) => {
     if (isActive !== undefined) { if (typeof isActive !== 'boolean') fail(400, 'isActive must be boolean.'); data.isActive = isActive; }
     if (effectiveFrom !== undefined) { const ef = new Date(effectiveFrom); if (Number.isNaN(ef.getTime())) fail(400, 'Invalid date.'); data.effectiveFrom = ef; }
     if (Object.keys(data).length === 0) fail(400, 'No changes provided.');
-    if (data.isActive === true) {
-      const existing = await prisma.customerAgreement.findUnique({ where: { id: req.params.id } });
-      if (existing) {
-        await prisma.customerAgreement.updateMany({
+    const result = await prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('customer-agreements', 0))`;
+      const existing = await tx.customerAgreement.findUnique({ where: { id: req.params.id }, select: agreementSelect });
+      if (!existing) fail(404, 'Terms version not found.');
+      if (existing._count.acceptances && (data.content || data.title || data.effectiveFrom)) fail(409, 'Publish a new version to change accepted terms.');
+      if (data.isActive === true && (data.effectiveFrom ?? existing.effectiveFrom) <= new Date()) {
+        await tx.customerAgreement.updateMany({
           where: { serviceType: existing.serviceType, isActive: true, id: { not: req.params.id } },
           data: { isActive: false },
         });
       }
-    }
-    const result = await prisma.customerAgreement.update({
-      where: { id: req.params.id },
-      data,
-      select: agreementSelect,
+      const updated = await tx.customerAgreement.update({ where: { id: req.params.id }, data, select: agreementSelect });
+      await audit(tx, req, 'CustomerAgreement', req.params.id, 'AGREEMENT_UPDATE', updated.version);
+      return updated;
     });
-    await audit(prisma, req, 'CustomerAgreement', req.params.id, 'AGREEMENT_UPDATE', JSON.stringify(data));
     res.json(result);
   } catch (e) { next(e); }
 });

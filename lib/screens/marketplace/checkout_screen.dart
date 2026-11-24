@@ -21,7 +21,16 @@ class CheckoutScreen extends ConsumerStatefulWidget {
   ConsumerState<CheckoutScreen> createState() => _CheckoutScreenState();
 }
 
-enum _Delivery { d2f, seller }
+enum _Delivery {
+  d2f('D2F_DELIVERY', 'D2F delivery', Icons.local_shipping_outlined, 'D2F arranges delivery.'),
+  seller('SELLER_DELIVERY', 'Seller delivery', Icons.storefront_outlined, 'The seller arranges delivery.'),
+  carrier('EXTERNAL_CARRIER', 'External carrier', Icons.inventory_2_outlined, 'The seller shares the carrier and tracking number.'),
+  pickup('CUSTOMER_PICKUP', 'Customer pickup', Icons.pin_drop_outlined, 'The seller confirms the pickup location and time.');
+
+  const _Delivery(this.code, this.label, this.icon, this.description);
+  final String code, label, description;
+  final IconData icon;
+}
 
 class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   late int _quantity;
@@ -40,6 +49,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   void initState() {
     super.initState();
     _quantity = widget.quantity;
+    _delivery = _d2fAvailable ? _Delivery.d2f : _Delivery.seller;
     final user = ref.read(authControllerProvider).valueOrNull;
     _name.text = user?.fullName ?? '';
     _phone.text = user?.phone ?? '';
@@ -56,6 +66,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     super.dispose();
   }
 
+  bool get _d2fAvailable => widget.product.seller?.localDeliveryEnabled ?? true;
+
   int get _total => widget.product.priceMinor * _quantity;
 
   Future<void> _submit() async {
@@ -66,6 +78,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         productId: widget.product.id,
         quantity: _quantity,
         deliveryPreference: _delivery == _Delivery.d2f ? 'D2F' : 'SELLER',
+        deliveryMethod: _delivery.code,
         recipientName: _name.text,
         recipientPhone: _phone.text,
         deliveryAddress: _address.text,
@@ -108,25 +121,20 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
             const SizedBox(height: 18),
             const Text('Delivery preference', style: AppTheme.sectionTitle),
             const SizedBox(height: 10),
-            _DeliveryOption(
-              selected: _delivery == _Delivery.d2f,
-              icon: Icons.flight_takeoff_rounded,
-              tint: AppColors.blueSoft,
-              color: AppColors.blue,
-              title: 'D2F arranges delivery',
-              subtitle: 'We collect, ship by air or sea and deliver to your door. Best for international orders.',
-              onTap: () => setState(() => _delivery = _Delivery.d2f),
-            ),
-            const SizedBox(height: 10),
-            _DeliveryOption(
-              selected: _delivery == _Delivery.seller,
-              icon: Icons.local_shipping_outlined,
-              tint: AppColors.tealSoft,
-              color: AppColors.teal,
-              title: 'Seller ships',
-              subtitle: 'The seller arranges delivery directly — often fastest for local orders.',
-              onTap: () => setState(() => _delivery = _Delivery.seller),
-            ),
+            for (final method in _Delivery.values)
+              if (method != _Delivery.d2f || _d2fAvailable)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _DeliveryOption(
+                    selected: _delivery == method,
+                    icon: method.icon,
+                    tint: AppColors.blueSoft,
+                    color: AppColors.blue,
+                    title: method.label,
+                    subtitle: method.description,
+                    onTap: () => setState(() => _delivery = method),
+                  ),
+                ),
             const SizedBox(height: 18),
             const Text('Who receives it?', style: AppTheme.sectionTitle),
             const SizedBox(height: 10),
@@ -145,7 +153,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
               validator: (v) => (v == null || v.trim().length < 5) ? 'Enter a reachable phone number.' : null,
             ),
             const SizedBox(height: 12),
-            _field(
+            if (_delivery != _Delivery.pickup) _field(
               controller: _address,
               label: 'Delivery address',
               hint: 'Street, house number, abbey, landmark…',

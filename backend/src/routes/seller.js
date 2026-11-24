@@ -4,6 +4,7 @@
 // commission rate. Sellers see their own commercial trail; buyers never see
 // commission details.
 
+import { deliveryRequirement, marketplaceDeliveryMethod, marketplaceInvoice, requirePaid } from '../marketplace_orders.js';
 import { Router, raw } from 'express';
 import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
@@ -487,7 +488,7 @@ router.post('/orders/:id/decline', (req, res, next) => advance(req, res, next, {
 router.post('/orders/:id/cancel', (req, res, next) => advance(req, res, next, { from: ['ACCEPTED', 'PROCESSING'], to: 'CANCELLED', action: 'MARKETPLACE_ORDER_CANCEL', requireNote: true, noteField: 'reason' }));
 router.post('/orders/:id/advance', (req, res, next) => advance(req, res, next, { from: ['ACCEPTED'], to: 'PROCESSING', action: 'MARKETPLACE_ORDER_PROCESSING', optionalField: 'trackingRef' }));
 router.post('/orders/:id/ship', (req, res, next) => advance(req, res, next, { from: ['PROCESSING'], to: 'SHIPPED', action: 'MARKETPLACE_ORDER_SHIP', optionalField: 'trackingRef' }));
-router.post('/orders/:id/complete', (req, res, next) => advance(req, res, next, { from: ['SHIPPED'], to: 'COMPLETED', action: 'MARKETPLACE_ORDER_COMPLETE' }));
+router.post('/orders/:id/complete', (_req, _res, next) => next(Object.assign(new Error('D2F confirms delivery and completion after reviewing the handover proof.'), { status: 403 })));
 
 async function advance(req, res, next, { from, to, action, requireNote = false, noteField = 'note', optionalField }) {
   try {
@@ -497,15 +498,27 @@ async function advance(req, res, next, { from, to, action, requireNote = false, 
     if (optionalField === 'trackingRef' && trackingRef && trackingRef.length > 120) fail(400, 'Tracking reference is too long.');
     const result = await prisma.$transaction(async (tx) => {
       const profile = await requireApproved(tx, req.user.id);
-      const order = await tx.serviceOrder.findFirst({ where: { id: req.params.id, sellerId: profile.id, kind: 'MARKETPLACE' }, select: { ...sellerOrderSelect, customer: { select: { userId: true } } } });
+      await warehouseLock(tx, profile.organizationId);
+      const order = await tx.serviceOrder.findFirst({ where: { id: req.params.id, sellerId: profile.id, kind: 'MARKETPLACE' }, select: { ...sellerOrderSelect, marketplaceIssues: { select: { type: true, status: true, amountMinor: true } }, customerId: true, customer: { select: { userId: true } } } });
       if (!order) fail(404, 'Order not found.');
       if (!from.includes(order.status)) fail(409, 'This order already moved on. Refresh and try again.');
       const data = { status: to };
+      if (to === 'ACCEPTED' && !order.marketplaceInvoice) data.marketplaceInvoice = await marketplaceInvoice(tx, { ...order, organizationId: profile.organizationId, customerId: order.customerId, sellerId: profile.id });
+      if (['PROCESSING', 'SHIPPED'].includes(to)) requirePaid(order);
+      if (to === 'CANCELLED' && order.paymentStatus === 'VERIFIED') fail(409, 'Ask D2F to cancel a paid order and record the refund.');
+      if (to === 'SHIPPED') {
+        if (marketplaceDeliveryMethod(order) === 'D2F_DELIVERY') fail(403, 'D2F records dispatch for this delivery method.');
+        const proof = req.body?.shipmentEvidence;
+        const carrier = req.body?.shippingCarrier;
+        deliveryRequirement(order, { carrier, externalRef: trackingRef, shipmentEvidence: proof });
+        data.shipmentEvidence = proof.trim();
+        if (typeof carrier === 'string' && validText(carrier, 120)) data.shippingCarrier = carrier.trim();
+      }
       if (to === 'CANCELLED') data.notes = [order.notes, note ? `Seller: ${note}` : null].filter(Boolean).join('\n') || null;
       if (trackingRef) data.trackingRef = trackingRef;
       const updated = await tx.serviceOrder.update({ where: { id: order.id }, data, select: sellerOrderSelect });
       if (to === 'CANCELLED') await releaseStock(tx, order.productId, order.quantity);
-      await audit(tx, req, 'ServiceOrder', order.id, action, trackingRef ? `trackingRef=${trackingRef}` : note || `${order.status} → ${to}`);
+      await audit(tx, req, 'ServiceOrder', order.id, action, JSON.stringify({ from: order.status, to, reason: note || undefined, trackingRef: trackingRef || undefined }));
       return updated;
     });
     res.json(redactUnaccepted([result])[0]);

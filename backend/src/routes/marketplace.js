@@ -3,6 +3,7 @@
 // confirms; payment is coordinated offline, so no card data ever touches
 // this API. Commission is agreed at seller approval and snapshotted here.
 
+import { marketplaceDeliveryMethods, openOrderIssue } from '../marketplace_orders.js';
 import { Router, raw } from 'express';
 import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
@@ -62,7 +63,7 @@ const browseSelect = {
   featured: true,
   createdAt: true,
   images: { orderBy: { position: 'asc' }, take: 1, select: { id: true } },
-  seller: { select: { id: true, displayName: true, city: true, country: true } },
+  seller: { select: { id: true, displayName: true, city: true, country: true, localDeliveryEnabled: true } },
 };
 
 const withAvailability = (product) => ({
@@ -138,6 +139,37 @@ router.get('/products', async (req, res, next) => {
   }
 });
 
+const storefrontSelect = { id: true, displayName: true, businessName: true, headline: true, bio: true, category: true, city: true, country: true, whatsappNumber: true, localDeliveryEnabled: true, profilePictureName: true };
+
+router.get('/storefronts', async (req, res, next) => {
+  try {
+    const organizationId = await resolveShopOrganization(req);
+    const country = typeof req.query.country === 'string' ? req.query.country : null;
+    res.json(await prisma.sellerProfile.findMany({ where: { organizationId, status: 'APPROVED', ...(country ? { country: { equals: country, mode: 'insensitive' } } : {}) }, select: storefrontSelect, orderBy: [{ storefrontOrder: 'asc' }, { displayName: 'asc' }], take: 100 }));
+  } catch (e) { next(e); }
+});
+
+router.get('/storefronts/:id', async (req, res, next) => {
+  try {
+    const organizationId = await resolveShopOrganization(req);
+    const shop = await prisma.sellerProfile.findFirst({ where: { organizationId, id: req.params.id, status: 'APPROVED' }, select: storefrontSelect });
+    if (!shop) fail(404, 'Storefront not found.');
+    const products = await prisma.product.findMany({ where: { ...browseWhere(organizationId), sellerId: shop.id }, select: browseSelect, orderBy: { createdAt: 'desc' }, take: 100 });
+    res.json({ ...shop, products: products.map(withAvailability) });
+  } catch (e) { next(e); }
+});
+
+router.get('/storefronts/:id/logo', async (req, res, next) => {
+  try {
+    const organizationId = await resolveShopOrganization(req);
+    const shop = await prisma.sellerProfile.findFirst({ where: { organizationId, id: req.params.id, status: 'APPROVED' }, select: { profilePicture: true } });
+    if (!shop?.profilePicture) fail(404, 'Storefront logo not found.');
+    const bytes = Buffer.from(shop.profilePicture);
+    const type = bytes[0] === 137 ? 'image/png' : bytes.toString('ascii', 0, 4) === 'RIFF' ? 'image/webp' : 'image/jpeg';
+    res.set({ 'Content-Type': type, 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff' }).send(bytes);
+  } catch (e) { next(e); }
+});
+
 router.get('/products/:id', async (req, res, next) => {
   try {
     const organizationId = await resolveShopOrganization(req);
@@ -154,6 +186,8 @@ router.get('/products/:id', async (req, res, next) => {
             city: true,
             country: true,
             category: true,
+            localDeliveryEnabled: true,
+            whatsappNumber: true,
             createdAt: true,
           },
         },
@@ -195,11 +229,11 @@ router.get('/orders', requireRole('CUSTOMER'), async (req, res, next) => {
     if (!customer) return res.json([]);
     const orders = await prisma.serviceOrder.findMany({
       where: { customerId: customer.id, kind: 'MARKETPLACE' },
-      select: customerOrderSelect,
+      select: { ...customerOrderSelect, marketplacePaymentNote: true },
       orderBy: { createdAt: 'desc' },
       take: ORDER_PAGE_SIZE,
     });
-    res.json(orders);
+    res.json(orders.map(order => ({ ...order, marketplacePaymentNote: order.paymentStatus === 'REJECTED' ? order.marketplacePaymentNote : null })));
   } catch (error) {
     next(error);
   }
@@ -211,6 +245,7 @@ router.post('/orders', requireRole('CUSTOMER'), async (req, res, next) => {
       productId,
       quantity = 1,
       deliveryPreference = 'D2F',
+      deliveryMethod,
       recipientName,
       recipientPhone,
       deliveryAddress,
@@ -220,8 +255,9 @@ router.post('/orders', requireRole('CUSTOMER'), async (req, res, next) => {
     } = req.body || {};
     if (typeof productId !== 'string' || productId.length > 64) fail(400, 'Choose a product.');
     if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 99) fail(400, 'Choose a quantity between 1 and 99.');
+    if (deliveryMethod !== undefined && !marketplaceDeliveryMethods.includes(deliveryMethod)) fail(400, 'Choose an available delivery method.');
     if (!deliveryPreferences.includes(deliveryPreference)) fail(400, 'Choose how this order should reach you.');
-    if (!validText(recipientPhone, 40) || !validText(deliveryAddress, 300) || !validText(deliveryCity, 120) || !validText(deliveryCountry, 120)) {
+    if (!validText(recipientPhone, 40) || (deliveryMethod !== 'CUSTOMER_PICKUP' && !validText(deliveryAddress, 300)) || !validText(deliveryCity, 120) || !validText(deliveryCountry, 120)) {
       fail(400, 'Tell us who receives the order and where it goes.');
     }
     if (recipientName != null && !validText(recipientName, 120)) fail(400, 'Enter a valid recipient name.');
@@ -239,19 +275,26 @@ router.post('/orders', requireRole('CUSTOMER'), async (req, res, next) => {
           priceMinor: true,
           currency: true,
           stockCount: true,
-          seller: { select: { id: true, status: true, commissionBps: true, displayName: true } },
+          fulfillment: true,
+          seller: { select: { id: true, status: true, commissionBps: true, displayName: true, country: true, localDeliveryEnabled: true } },
         },
       });
       if (!product) fail(404, 'That product is no longer available.');
+      const selectedMethod = deliveryMethod ?? (deliveryPreference === 'D2F' ? 'D2F_DELIVERY' : 'SELLER_DELIVERY');
+      if (deliveryMethod === 'D2F_DELIVERY' && product.seller &&
+        (!product.seller.localDeliveryEnabled || product.seller.country.toLowerCase() !== deliveryCountry.trim().toLowerCase())) {
+        fail(400, 'D2F local delivery is unavailable at this address. Choose another delivery method.');
+      }
+      const effectivePreference = selectedMethod === 'D2F_DELIVERY' ? 'D2F' : 'SELLER';
       const amountMinor = product.priceMinor * quantity;
       if (!validAmount(amountMinor)) fail(400, 'Order total is too large.');
       if (!(await reserveStock(tx, product.id, quantity))) {
         fail(409, 'That product sold out. Reduce the quantity or try another listing.');
       }
-      const settings = await prisma.commissionSettings.findFirst();
+      const settings = await tx.commissionSettings.findFirst();
       const { commissionBps, commissionMinor, fulfillmentFeeBps, fulfillmentFeeMinor, deliveryFeeBps, deliveryFeeMinor, sellerNetMinor } = calculateFees(amountMinor, {
         seller: product.seller,
-        deliveryPreference,
+        deliveryPreference: effectivePreference,
         fulfillment: product.fulfillment,
         settings,
       });
@@ -268,10 +311,11 @@ router.post('/orders', requireRole('CUSTOMER'), async (req, res, next) => {
           currency: product.currency,
           status: 'REQUESTED',
           source: 'APP',
-          deliveryPreference,
+          deliveryPreference: effectivePreference,
+          deliveryMethod: selectedMethod,
           recipientName: recipientName?.trim() || req.user.fullName,
           recipientPhone: recipientPhone.trim(),
-          deliveryAddress: deliveryAddress.trim(),
+          deliveryAddress: typeof deliveryAddress === 'string' ? deliveryAddress.trim() || null : null,
           deliveryCity: deliveryCity.trim(),
           deliveryCountry: deliveryCountry.trim(),
           notes: notes?.trim() || null,
@@ -299,11 +343,13 @@ router.post('/orders/:id/cancel', requireRole('CUSTOMER'), async (req, res, next
     const result = await prisma.$transaction(async (tx) => {
       const customer = await tx.customer.findUnique({ where: { userId: req.user.id }, select: { id: true } });
       if (!customer) fail(404, 'Order not found.');
+      const organizationId = await resolveShopOrganization(req);
+      await warehouseLock(tx, organizationId);
       const order = await tx.serviceOrder.findFirst({
-        where: { id: req.params.id, customerId: customer.id, kind: 'MARKETPLACE' },
+        where: { id: req.params.id, customerId: customer.id, organizationId, kind: 'MARKETPLACE' },
       });
       if (!order) fail(404, 'Order not found.');
-      if (order.status !== 'REQUESTED') fail(409, 'The order is already being prepared — contact D2F to change or cancel it.');
+      if (order.status !== 'REQUESTED' || order.paymentStatus === 'VERIFIED') fail(409, 'The order is already being prepared — contact D2F to change or cancel it.');
       const updated = await tx.serviceOrder.update({
         where: { id: order.id },
         data: { status: 'CANCELLED' },
@@ -317,6 +363,20 @@ router.post('/orders/:id/cancel', requireRole('CUSTOMER'), async (req, res, next
   } catch (error) {
     next(error);
   }
+});
+
+router.post('/orders/:id/issues', requireRole('CUSTOMER'), async (req, res, next) => {
+  try {
+    const organizationId = await resolveShopOrganization(req);
+    const issue = await prisma.$transaction(async tx => {
+      await warehouseLock(tx, organizationId);
+      const order = await tx.serviceOrder.findFirst({ where: { id: req.params.id, organizationId, kind: 'MARKETPLACE', customer: { userId: req.user.id } }, include: { marketplaceIssues: true } });
+      if (!order) fail(404, 'Order not found.');
+      const { id, type, status } = await openOrderIssue(tx, req, order, req.body);
+      return { id, type, status };
+    });
+    res.status(201).json(issue);
+  } catch (e) { next(e); }
 });
 
 // Customers can browse with any signed-in role but orders require a customer

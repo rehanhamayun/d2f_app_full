@@ -56,20 +56,45 @@ router.get('/containers', async (req, res, next) => {
 });
 router.post('/containers', async (req, res, next) => {
   try {
-    const { code, originId, destinationId, method = 'SEA', sealNumber, notes } = req.body || {};
+    const { code, originId, destinationId, method = 'SEA', sealNumber, notes, onwardCountries = [] } = req.body || {};
     if (!text(code, 40) || !/^[A-Z0-9-]+$/i.test(code.trim()) || typeof originId !== 'string' || typeof destinationId !== 'string' || originId === destinationId || !['AIR', 'SEA', 'ROAD'].includes(method) || (sealNumber != null && !text(sealNumber, 80)) || (notes != null && !text(notes, 2000))) fail(400, 'Enter a container reference, two different locations and a shipping method.');
+    if (!Array.isArray(onwardCountries) || onwardCountries.some(c => !SERVICE_COUNTRIES.includes(c))) fail(400, 'Choose supported onward countries.');
     const result = await prisma.$transaction(async tx => {
       await warehouseLock(tx, req.organizationId);
       const locations = await tx.location.findMany({ where: { id: { in: [originId, destinationId] }, organizationId: req.organizationId } });
       if (locations.length !== 2) fail(400, 'Choose locations belonging to your organization.');
-      const origin = locations.find((location) => location.id === originId);
+      const origin = locations.find(location => location.id === originId);
+      const destination = locations.find(location => location.id === destinationId);
+      if (onwardCountries.includes(destination.country)) fail(400, 'Choose onward countries beyond the container leg destination.');
       if (!isFacilityAuthorized(req.user, origin)) fail(403, facilityDeniedMessage(origin));
-      const container = await tx.container.create({ data: { organizationId: req.organizationId, code: code.trim().toUpperCase(), originId, destinationId, method, sealNumber: sealNumber?.trim() || null, notes: notes?.trim() || null }, include: containerInclude });
+      const container = await tx.container.create({ data: { organizationId: req.organizationId, code: code.trim().toUpperCase(), originId, destinationId, method, onwardCountries: [...new Set(onwardCountries)], sealNumber: sealNumber?.trim() || null, notes: notes?.trim() || null }, include: containerInclude });
       await containerAudit(tx, req.user, container.id, 'CREATED', 'Container opened for loading');
       return container;
     });
     res.status(201).json(result);
   } catch (e) { if (e.code === 'P2002') return res.status(409).json({ error: 'This container reference already exists.' }); next(e); }
+});
+router.patch('/containers/:id/route', async (req, res, next) => {
+  try {
+    const { onwardCountries, notes } = req.body || {};
+    if (!Array.isArray(onwardCountries) || onwardCountries.some(country => !SERVICE_COUNTRIES.includes(country))) fail(400, 'Choose supported onward countries.');
+    if (notes != null && !text(notes, 2000)) fail(400, 'Keep onward instructions under 2,000 characters.');
+    const updated = await prisma.$transaction(async tx => {
+      await warehouseLock(tx, req.organizationId);
+      const container = await tx.container.findFirst({ where: { id: req.params.id, organizationId: req.organizationId }, include: { ...containerInclude, parcels: { select: { destination: true, trackingId: true } } } });
+      if (!container) fail(404, 'Container not found.');
+      if (container.status !== 'LOADING') fail(409, 'The route is frozen after the container departs.');
+      if (!isFacilityAuthorized(req.user, container.origin)) fail(403, facilityDeniedMessage(container.origin));
+      if (onwardCountries.includes(container.destination.country)) fail(400, 'Choose onward countries beyond the container leg destination.');
+      const invalid = container.parcels.find(parcel => !destinationMatchesLocation(parcel.destination, container.destination) && !onwardCountries.includes(countryInLocation(parcel.destination)));
+      if (invalid) fail(409, `Remove ${invalid.trackingId} before removing its onward country.`);
+      const countries = [...new Set(onwardCountries)];
+      const result = await tx.container.update({ where: { id: container.id }, data: { onwardCountries: countries, notes: notes?.trim() || null }, include: containerInclude });
+      await containerAudit(tx, req.user, container.id, 'ROUTE_UPDATED', countries.length ? `Onward to ${countries.join(', ')}` : 'Direct route');
+      return result;
+    });
+    res.json(updated);
+  } catch (e) { next(e); }
 });
 router.get('/containers/:id', async (req, res, next) => {
   try {
@@ -110,7 +135,7 @@ router.post('/containers/:id/parcels', async (req, res, next) => {
       const packages = await tx.parcelItem.findMany({ where: { parcelId: parcel.id, notCollectedReason: null } });
       if (packages.some(p => !p.warehouseReceivedAt)) fail(409, 'All collected packages require warehouse verification before loading.');
       if (!parcel.warehouseReceivedAt) fail(409, 'Warehouse staff must scan and verify receipt before container loading.');
-      if (!destinationMatchesLocation(parcel.destination, container.destination)) fail(409, 'Parcel destination does not match the container destination.');
+      if (!destinationMatchesLocation(parcel.destination, container.destination) && !container.onwardCountries.includes(countryInLocation(parcel.destination))) fail(409, 'This parcel destination is outside the container route. Choose a direct container or one with the correct onward transfer.');
       if (parcel.locationId !== container.originId) fail(409, 'The parcel must be received at the container origin before it can be loaded.');
       const parcelOriginCountry = countryInLocation(parcel.origin);
       if (parcelOriginCountry && parcelOriginCountry !== container.origin.country) fail(409, 'Parcel origin does not match the container origin country.');
@@ -169,7 +194,10 @@ router.post('/containers/:id/events', async (req, res, next) => {
       const departing = action === 'DEPARTED';
       const expected = departing ? (container.method === 'SEA' ? ['LOADED_IN_CONTAINER'] : ['RECEIVED', 'PROCESSING'])
         : { DEPARTED: ['IN_TRANSIT'], ARRIVED_PORT: ['ARRIVED_PORT'], CUSTOMS_CLEARANCE: ['CUSTOMS_CLEARANCE'], CUSTOMS_CLEARED: ['CUSTOMS_CLEARED'] }[container.status];
-      if (container.parcels.some(p => !expected.includes(p.status))) fail(409, 'A parcel has an incompatible status. Review the container before continuing.');
+      const incompatible = container.parcels.find(p => !expected.includes(p.status) &&
+        !(departing && container.method === 'SEA' && ['RECEIVED', 'PROCESSING', 'READY_FOR_LOADING'].includes(p.status)
+          && p.warehouseReceivedAt && p.locationId === container.originId));
+      if (incompatible) fail(409, `Parcel ${incompatible.trackingId} is ${incompatible.status.replaceAll('_', ' ').toLowerCase()}. Verify its loaded status before confirming this event.`);
       const location = locationLabel(eventFacility);
       const labels = { DEPARTED: 'Departure confirmed', ARRIVED_PORT: 'Destination port arrival confirmed', CUSTOMS_CLEARANCE: 'Customs clearance started', CUSTOMS_CLEARED: 'Customs release confirmed', ARRIVED: 'Destination warehouse receipt confirmed' };
       const note = `${labels[action]} · ${location} · Container ${container.code}`;
@@ -178,12 +206,49 @@ router.post('/containers/:id/events', async (req, res, next) => {
         : (container.destination.country === 'Togo' ? 'ARRIVED_LOME' : 'ARRIVED_DESTINATION');
       const manifest = departing ? await manifestFor(tx, container) : undefined;
       if (manifest) manifest.provisional = false;
-      await tx.parcel.updateMany({ where: { containerId: container.id, organizationId: req.organizationId }, data: { status, locationId: departing ? container.originId : container.destinationId } });
-      await tx.trackingEvent.createMany({ data: container.parcels.map(p => ({ parcelId: p.id, status, location, note, originalNote: note, facilityId: eventFacility.id, actorId: req.user.id })) });
+      const onward = action === 'ARRIVED'
+        ? container.parcels.filter(p => container.onwardCountries.includes(countryInLocation(p.destination)))
+        : [];
+      const onwardIds = new Set(onward.map(p => p.id));
+      await tx.parcel.updateMany({ where: { containerId: container.id, id: { notIn: [...onwardIds] } }, data: { status, locationId: eventFacility.id } });
+      if (onward.length) await tx.parcel.updateMany({ where: { id: { in: [...onwardIds] } }, data: { status: 'IN_TRANSIT', locationId: eventFacility.id } });
+      await tx.trackingEvent.createMany({ data: container.parcels.map(p => {
+        const transfer = onwardIds.has(p.id);
+        const message = transfer ? `Received at ${location} for onward transfer to ${p.destination}.` : note;
+        return { parcelId: p.id, status: transfer ? 'IN_TRANSIT' : status, location, note: message, originalNote: message, facilityId: eventFacility.id, actorId: req.user.id };
+      }) });
       await containerAudit(tx, req.user, container.id, action, note);
       return tx.container.update({ where: { id: container.id }, data: { status: action, ...(manifest ? { manifest } : {}) }, include: containerInclude });
-    }, { timeout: 20000 });
+    }, { maxWait: 10000, timeout: 30000 });
     res.status(201).json(result);
+  } catch (e) { next(e); }
+});
+router.post('/containers/:id/parcels/:parcelId/onward', async (req, res, next) => {
+  try {
+    const { action, locationId, confirmed } = req.body || {};
+    if (confirmed !== true || !['DISPATCH', 'RECEIVE'].includes(action)) fail(400, 'Confirm the physical onward transfer action.');
+    const parcel = await prisma.$transaction(async tx => {
+      await warehouseLock(tx, req.organizationId);
+      const container = await tx.container.findFirst({ where: { id: req.params.id, organizationId: req.organizationId }, include: containerInclude });
+      if (container?.status !== 'ARRIVED') fail(409, 'Confirm the container warehouse receipt before recording onward transfer.');
+      const p = await tx.parcel.findFirst({ where: { id: req.params.parcelId, containerId: container.id, organizationId: req.organizationId } });
+      if (!p || !container.onwardCountries.includes(countryInLocation(p.destination))) fail(404, 'Parcel is not on this onward route.');
+      if (p.status !== 'IN_TRANSIT' || p.locationId !== container.destinationId) fail(409, 'This parcel is no longer awaiting onward transfer. Refresh the record.');
+      const dispatching = action === 'DISPATCH';
+      if (dispatching === Boolean(p.onwardDispatchedAt)) fail(409, dispatching ? 'Onward dispatch is already recorded.' : 'Record onward dispatch before confirming receipt.');
+      const facility = dispatching ? container.destination : await tx.location.findFirst({ where: { id: typeof locationId === 'string' ? locationId : '', organizationId: req.organizationId } });
+      if (!facility || (!dispatching && !destinationMatchesLocation(p.destination, facility))) fail(400, `Choose the receiving facility for ${p.destination}.`);
+      if (!isFacilityAuthorized(req.user, facility)) fail(403, facilityDeniedMessage(facility));
+      const status = dispatching ? 'IN_TRANSIT' : 'ARRIVED_DESTINATION';
+      const location = locationLabel(facility);
+      const note = dispatching ? `Onward dispatch from ${location} to ${p.destination}.` : `Onward parcel received at ${location}.`;
+      const result = await tx.parcel.update({ where: { id: p.id }, data: dispatching ? { onwardDispatchedAt: new Date() } : { status, locationId: facility.id } });
+      if (!dispatching) await tx.parcelTransfer.create({ data: { parcelId: p.id, fromLocationId: container.destinationId, toLocationId: facility.id, actorId: req.user.id } });
+      await tx.trackingEvent.create({ data: { parcelId: p.id, status, location, note, originalNote: note, actorId: req.user.id, facilityId: facility.id } });
+      await containerAudit(tx, req.user, container.id, `ONWARD_${action}`, `${p.trackingId} · ${note}`);
+      return result;
+    });
+    res.status(201).json(parcel);
   } catch (e) { next(e); }
 });
 export default router;

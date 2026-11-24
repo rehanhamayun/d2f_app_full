@@ -69,8 +69,11 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
       destination,
       method = 'SEA',
       notes,
+      orderType,
       clientRequestId,
     } = req.body || {};
+
+    if (orderType != null && !['BUY_FOR_ME', 'SHIP_FOR_ME'].includes(orderType)) fail(400, 'Choose Buy for me or Ship for me.');
 
     // Validation
     const missing = [];
@@ -180,6 +183,7 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
           method,
           serviceType: method === 'AIR' ? 'AIR_CARGO' : method,
           notes: notes?.trim() || null,
+          orderType: orderType ?? null,
           status: 'RECEIVED',
           warehouseReceivedAt: new Date(),
           warehouseReceivedById: req.user.id,
@@ -435,6 +439,7 @@ router.post('/:id/events', requireRole('STAFF', 'ADMIN'), async (req, res, next)
         throw conflict;
       }
 
+      if (current.container?.status === 'ARRIVED' && current.status === 'IN_TRANSIT' && current.locationId === current.container.destinationId) fail(409, 'Record onward transfer from the container workspace.');
       const facility = await resolveFacility(tx, organizationId, { locationId, location });
       if (PHYSICAL_STATUSES.has(status) && !facility) {
         fail(400, 'Select a valid D2F facility for this physical update.');
@@ -730,7 +735,7 @@ router.get('/:idOrTracking/images/:imageId/raw', requireRole('STAFF', 'ADMIN'), 
 router.patch('/:id', requireRole('ADMIN'), async (req, res, next) => {
   try {
     const body = req.body;
-    const fields = ['customerId', 'recipientName', 'recipientPhone', 'recipientAddress', 'pickupAddress', 'packageType', 'weightKg', 'origin', 'destination', 'method', 'notes', 'deliveryMode', 'pickupScheduledAt'];
+    const fields = ['customerId', 'recipientName', 'recipientPhone', 'recipientAddress', 'pickupAddress', 'packageType', 'weightKg', 'origin', 'destination', 'method', 'notes', 'orderType', 'deliveryMode', 'pickupScheduledAt'];
     if (!body || Array.isArray(body) || typeof body !== 'object' || Object.keys(body).some(key => ![...fields, 'rescheduleReason', 'updatedAt'].includes(key))) {
       return res.status(400).json({ error: 'Only parcel input details can be edited.' });
     }
@@ -755,6 +760,9 @@ router.patch('/:id', requireRole('ADMIN'), async (req, res, next) => {
           return res.status(400).json({ error: `Invalid ${field}.` });
         }
         data[field] = value.trim() || null;
+      } else if (field === 'orderType') {
+        if (value !== null && !['BUY_FOR_ME', 'SHIP_FOR_ME'].includes(value)) fail(400, 'Choose Buy for me or Ship for me.');
+        data.orderType = value;
       } else if (field === 'weightKg') {
         if (!['number', 'string'].includes(typeof value) || !Number.isFinite(Number(value)) || Number(value) <= 0 || Number(value) > 10000) {
           return res.status(400).json({ error: 'Weight must be greater than zero and at most 10,000 kg.' });

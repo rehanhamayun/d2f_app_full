@@ -1,3 +1,5 @@
+import { MarketplaceOrderControls, fulfillmentMethods } from './marketplace-order.jsx';
+import { Retailers } from './service-settings.jsx';
 import { useCallback, useEffect, useState } from 'react';
 import { Plus, ShoppingBag, ShoppingCart, ArrowRight, Check, ExternalLink, Star, Store, Warehouse } from 'lucide-react';
 import { getApiBaseUrl, request } from './api.js';
@@ -36,6 +38,7 @@ export function purchaseNextStep(o) {
 export function Commerce({ kind, token, notify, refreshKey }) {
   const marketplace = kind === 'MARKETPLACE';
   const [tab, setTab] = useState('orders');
+  const [retailers, setRetailers] = useState(false);
   const [search, setSearch] = useState(''), [statusFilter, setStatusFilter] = useState('');
   const [offset, setOffset] = useState(0), [createOrder, setCreateOrder] = useState(false), [product, setProduct] = useState(null), [selected, setSelected] = useState(null);
   const remote = useRemote(`/admin/commerce/${kind.toLowerCase()}?offset=${offset}`, token, refreshKey);
@@ -54,6 +57,7 @@ export function Commerce({ kind, token, notify, refreshKey }) {
 
   return <>
     <Heading label="BUSINESS SERVICES" title={marketplace ? 'Marketplace' : 'Buy For Me'} text={marketplace ? 'Sellers, catalog and orders in one place — commission is agreed before the first sale.' : 'Keep purchase requests, quotes and shipping records in one place.'}>
+      {!marketplace && <button className="button secondary" onClick={() => setRetailers(true)}>Manage retailer links</button>}
       {marketplace && <button className="button secondary" onClick={() => setProduct({})}><Plus size={16} /> Add product</button>}
       <button className="button primary" onClick={() => setCreateOrder(true)}><Plus size={16} /> {marketplace ? 'Record order' : 'Add request'}</button>
     </Heading>
@@ -72,6 +76,7 @@ export function Commerce({ kind, token, notify, refreshKey }) {
     {marketplace && tab === 'sellers' && <SellersPanel token={token} notify={notify} refreshKey={refreshKey} />}
     {marketplace && tab === 'commission' && <CommissionPanel token={token} refreshKey={refreshKey} />}
 
+    {retailers && <Retailers token={token} onClose={() => setRetailers(false)} notify={notify} />}
     {product && <ProductForm token={token} product={product} onClose={closeProduct} onSaved={() => { setProduct(null); changed('Product saved.'); }} />}
     {createOrder && <OrderForm token={token} kind={kind} products={remote.data?.products || []} onClose={closeOrder} onSaved={() => { setCreateOrder(false); setOffset(0); changed(marketplace ? 'Order recorded.' : 'Purchase request added.'); }} />}
     {order && <OrderDetail token={token} order={order} transitions={remote.data.transitions} onClose={closeDetail} onSaved={() => changed('Request updated.')} />}
@@ -122,7 +127,13 @@ function OrderForm({ token, kind, products, onClose, onSaved }) {
 
 function OrderDetail({ token, order: o, transitions, onClose, onSaved }) {
   const [status, setStatus] = useState('');
+  const [deliveryMethod, setDeliveryMethod] = useState(o.deliveryMethod || (o.deliveryPreference === 'SELLER' ? 'SELLER_DELIVERY' : 'D2F_DELIVERY'));
+  const [shipmentEvidence, setShipmentEvidence] = useState(o.shipmentEvidence || '');
+  const [deliveryEvidence, setDeliveryEvidence] = useState('');
+  const [statusReason, setStatusReason] = useState('');
   const [productCost, setProductCost] = useState(o.productCostMinor == null ? '' : String(o.productCostMinor / (o.currency === 'XOF' ? 1 : 100)));
+  const [pickupFee, setPickupFee] = useState(String((o.pickupFeeMinor || 0) / (o.currency === 'XOF' ? 1 : 100)));
+  const [handlingFee, setHandlingFee] = useState(String((o.handlingFeeMinor || 0) / (o.currency === 'XOF' ? 1 : 100)));
   const [shippingCost, setShippingCost] = useState(o.shippingCostMinor == null ? '' : String(o.shippingCostMinor / (o.currency === 'XOF' ? 1 : 100)));
   const [tracking, setTracking] = useState(o.parcel?.trackingId || '');
   const [carrierRef, setCarrierRef] = useState(o.trackingRef || '');
@@ -149,10 +160,19 @@ function OrderDetail({ token, order: o, transitions, onClose, onSaved }) {
         ...(tracking.trim() ? { trackingId: tracking.trim() } : {}),
         ...(carrierRef.trim() ? { trackingRef: carrierRef.trim() } : {}),
         notes: notes.trim(),
+        ...(o.kind === 'MARKETPLACE' ? {
+          ...(canChangeMethod && deliveryMethod !== savedMethod ? { deliveryMethod } : {}),
+          ...(shippingCarrier.trim() ? { shippingCarrier: shippingCarrier.trim() } : {}),
+          ...(shipmentEvidence.trim() && shipmentEvidence !== o.shipmentEvidence ? { shipmentEvidence: shipmentEvidence.trim() } : {}),
+          ...(status === 'DELIVERED' && deliveryEvidence.trim() ? { deliveryEvidence: deliveryEvidence.trim() } : {}),
+          ...(['FAILED_DELIVERY', 'CANCELLED'].includes(status) && statusReason.trim() ? { statusReason: statusReason.trim() } : {}),
+        } : {}),
         ...(quoting && productCost !== '' && shippingCost !== ''
           ? {
               productCostMinor: minorAmount(productCost, o.currency),
               shippingCostMinor: minorAmount(shippingCost, o.currency),
+              pickupFeeMinor: minorAmount(pickupFee || '0', o.currency),
+              handlingFeeMinor: minorAmount(handlingFee || '0', o.currency),
             }
           : {}),
       };
@@ -212,26 +232,38 @@ function OrderDetail({ token, order: o, transitions, onClose, onSaved }) {
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
   const allowed = transitions[o.status] || [];
+  const savedMethod = o.deliveryMethod || (o.deliveryPreference === 'SELLER' ? 'SELLER_DELIVERY' : 'D2F_DELIVERY');
+  const canChangeMethod = o.kind === 'MARKETPLACE' && ['REQUESTED', 'ACCEPTED'].includes(o.status) && o.paymentStatus !== 'VERIFIED';
   const isMarketplaceApp = o.kind === 'MARKETPLACE' && o.source === 'APP';
   const commissionLabel = o.commissionBps != null ? `${(o.commissionBps / 100).toFixed(o.commissionBps % 100 === 0 ? 0 : 1)}%` : null;
   const quoting = o.kind === 'BUY_FOR_ME' && ['REQUESTED', 'QUOTED'].includes(o.status);
-  const subtotal = productCost !== '' && shippingCost !== ''
-    ? (minorAmount(productCost, o.currency) ?? 0) + (minorAmount(shippingCost, o.currency) ?? 0)
+  const subtotal = quoting && productCost !== '' && shippingCost !== ''
+    ? [productCost, shippingCost, pickupFee, handlingFee].reduce((sum, value) => sum + (minorAmount(value, o.currency) ?? 0), 0)
     : o.amountMinor;
   return <Modal title={o.title} label={o.kind === 'MARKETPLACE' ? 'MARKETPLACE ORDER' : 'BUY FOR ME REQUEST'} onClose={onClose} busy={busy}><div className="modal-body invite-form ops-form">
     {o.kind === 'BUY_FOR_ME' && <section className="order-guidance"><small>NEXT STEP · {['QUOTED', 'ACCEPTED'].includes(o.status) && o.paymentStatus !== 'PENDING' ? 'CUSTOMER' : 'D2F TEAM'}</small><h3>{purchaseNextStep(o)[0]}</h3><p>{purchaseNextStep(o)[1]}</p><div className="order-progress" aria-label={`Purchase progress: ${human(o.status)}`}>{['REQUESTED', 'QUOTED', 'ACCEPTED', 'PAYMENT_CONFIRMED', 'PURCHASED', 'RECEIVED', 'SHIPPED', 'COMPLETED'].map((stage, i, stages) => <span key={stage} className={i <= stages.indexOf(o.status) ? 'complete' : ''} />)}</div></section>}
-    <div className="detail-status"><span><small>CURRENT STATUS</small><Pill status={o.status} /></span><span><small>{o.kind === 'BUY_FOR_ME' ? 'SUBTOTAL' : 'ORDER TOTAL'}</small><b>{money(subtotal, o.currency)}</b></span></div>
+    <div className="detail-status"><span><small>CURRENT STATUS</small><Pill status={o.status} /></span><span><small>ORDER TOTAL</small><b>{money(subtotal, o.currency)}</b></span></div>
     <div className="detail-grid"><div><small>Source</small><b>{o.source === 'APP' ? 'App (customer)' : 'Admin record'}</b></div><div><small>Customer</small><b>{o.customer.displayName}</b></div><div><small>Quantity</small><b>{o.quantity}</b></div><div><small>Created (dashboard time)</small><b>{dateTime(o.createdAt)}</b></div>{o.kind === 'MARKETPLACE' && <div><small>Seller</small><b>{sellerName(o)}</b></div>}{o.kind === 'MARKETPLACE' && <div><small>Commission</small><b>{o.commissionMinor != null ? `${money(o.commissionMinor, o.currency)} (${commissionLabel})` : '—'}</b></div>}<div><small>Parcel</small><b>{o.parcel?.trackingId || 'Not linked'}</b></div>{(o.kind === 'BUY_FOR_ME' && o.budgetMinor != null) && <div><small>Buyer budget</small><b>{money(o.budgetMinor, o.currency)}</b></div>}</div>
-    {isMarketplaceApp && <div className="delivery-box"><small>DELIVERY</small><p><b>{o.deliveryPreference === 'D2F' ? 'D2F arranges delivery' : o.deliveryPreference === 'SELLER' ? 'Seller ships' : 'Not chosen'}</b></p><p>{[o.recipientName, o.recipientPhone].filter(Boolean).join(' · ')}</p><p>{[o.deliveryAddress, [o.deliveryCity, o.deliveryCountry].filter(Boolean).join(', ')].filter(Boolean).join(' — ')}</p></div>}
+    {isMarketplaceApp && <div className="delivery-box"><small>DELIVERY</small><p><b>{fulfillmentMethods[savedMethod]}</b></p><p>{[o.recipientName, o.recipientPhone].filter(Boolean).join(' · ')}</p><p>{[o.deliveryAddress, [o.deliveryCity, o.deliveryCountry].filter(Boolean).join(', ')].filter(Boolean).join(' — ')}</p></div>}
     {o.kind === 'BUY_FOR_ME' && <div className="delivery-box"><small>SHIP TO · CUSTOMER ADDRESS</small><p>{[o.deliveryAddress, o.deliveryCity, o.deliveryStateProvince, o.deliveryPostalCode, o.deliveryCountry].filter(Boolean).join(', ') || 'Address not provided'}</p></div>}
     {o.sourceUrl && <a className="text-button" href={o.sourceUrl} target="_blank" rel="noreferrer">Open product source <ExternalLink size={13} /></a>}
-    {quoting && <><div className="form-row"><label>Product cost ({o.currency})<input type="number" min="0" step={o.currency === 'XOF' ? '1' : '.01'} value={productCost} onChange={e => setProductCost(e.target.value)} /></label><label>Shipping cost ({o.currency})<input type="number" min="0" step={o.currency === 'XOF' ? '1' : '.01'} value={shippingCost} onChange={e => setShippingCost(e.target.value)} /></label></div><div className="ops-quote-total"><span>Customer subtotal · product + shipping</span><b>{money(subtotal, o.currency)}</b></div></>}
+    {quoting && <><div className="form-row"><label>Product cost ({o.currency})<input type="number" min="0" step={o.currency === 'XOF' ? '1' : '.01'} value={productCost} onChange={e => setProductCost(e.target.value)} /></label><label>Shipping cost ({o.currency})<input type="number" min="0" step={o.currency === 'XOF' ? '1' : '.01'} value={shippingCost} onChange={e => setShippingCost(e.target.value)} /></label></div><div className="form-row"><label>Door pickup fee ({o.currency})<input type="number" min="0" step={o.currency === 'XOF' ? '1' : '.01'} value={pickupFee} onChange={e => setPickupFee(e.target.value)} /></label><label>Handling / preparation fee ({o.currency})<input type="number" min="0" step={o.currency === 'XOF' ? '1' : '.01'} value={handlingFee} onChange={e => setHandlingFee(e.target.value)} /></label></div><div className="ops-quote-total"><span>Total payable</span><b>{money(subtotal, o.currency)}</b></div></>}
     {allowed.filter(s => s !== 'PAYMENT_CONFIRMED').length > 0 && <label>Next status<select value={status} onChange={e => setStatus(e.target.value)}><option value="">Keep current status</option>{allowed.filter(s => s !== 'PAYMENT_CONFIRMED').map(s => <option key={s} value={s}>{s === 'ACCEPTED' ? 'Customer acceptance confirmed' : human(s)}</option>)}</select></label>}
+    {o.kind === 'MARKETPLACE' && <>
+      <p>Order ID {o.id}</p>
+      <label>Delivery method<select value={deliveryMethod} disabled={!canChangeMethod} onChange={e => setDeliveryMethod(e.target.value)}>{Object.entries(fulfillmentMethods).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+      {deliveryMethod === 'EXTERNAL_CARRIER' && <label>Carrier name<input maxLength={120} value={shippingCarrier} onChange={e => setShippingCarrier(e.target.value)} /></label>}
+      {deliveryMethod !== 'D2F_DELIVERY' && <label>{deliveryMethod === 'CUSTOMER_PICKUP' ? 'Package reserved for pickup reference' : 'Shipment proof reference'}<input maxLength={500} value={shipmentEvidence} onChange={e => setShipmentEvidence(e.target.value)} /></label>}
+      {status === 'DELIVERED' && deliveryMethod !== 'D2F_DELIVERY' && <label>{deliveryMethod === 'CUSTOMER_PICKUP' ? 'Verified pickup acknowledgement' : deliveryMethod === 'EXTERNAL_CARRIER' ? 'Confirmed carrier delivery event' : 'Verified recipient handover proof'}<input maxLength={500} value={deliveryEvidence} onChange={e => setDeliveryEvidence(e.target.value)} /></label>}
+      {['FAILED_DELIVERY', 'CANCELLED'].includes(status) && <label>Reason<textarea maxLength={500} value={statusReason} onChange={e => setStatusReason(e.target.value)} /></label>}
+      {o.deliveryConfirmedAt && <p>Delivery confirmed {dateTime(o.deliveryConfirmedAt)} · {o.deliveryEvidence}</p>}
+    </>}
     <label>Customer parcel tracking number<input maxLength={80} value={tracking} onChange={e => setTracking(e.target.value)} placeholder="Optional existing D2F parcel ID" /></label>
     <label>Carrier reference<input maxLength={120} value={carrierRef} onChange={e => setCarrierRef(e.target.value)} placeholder="e.g. carrier tracking reference" /></label>
     <label>Internal notes<textarea maxLength={2000} rows={3} value={notes} onChange={e => setNotes(e.target.value)} /></label>
     {error && <div className="alert error-alert" role="alert">{error}</div>}
     <button type="button" className="button primary full-button" disabled={busy} onClick={save}><Check size={16} /> Save quote / status</button>
+    {o.kind === 'MARKETPLACE' && <MarketplaceOrderControls order={o} token={token} onSaved={onSaved} />}
     {o.kind === 'BUY_FOR_ME' && <section className="ops-update-panel"><h3>Payment proof</h3><p>Payment instructions: {o.paymentInstructions || 'Contact D2F to configure payment instructions.'}</p><p>Status: {human(o.paymentStatus || 'NOT_SUBMITTED')} · Transaction ID: {o.paymentTransactionId || 'Not submitted'}</p>
       {(o.paymentSubmissions || []).map(sub => <article key={sub.id}><b>{sub.method} · {human(sub.status)}</b><p>Transaction ID: {sub.transactionId}</p>{sub.reviewNote && <p>{sub.reviewNote}</p>}<button type="button" className="button secondary" onClick={() => viewEvidence(sub)}>View screenshot</button>{sub.status === 'PENDING' && <div className="form-row"><label>Correction note (only needed to reject)<input value={reviewNote} onChange={e => setReviewNote(e.target.value)} /></label><button type="button" className="button secondary" disabled={busy} onClick={() => reviewPayment(sub.id, false)}>Request correction</button><button type="button" className="button primary" disabled={busy} onClick={() => reviewPayment(sub.id, true)}>Verify payment</button></div>}</article>)}
       {evidence && <div className="ops-evidence"><button type="button" className="text-button" onClick={() => setEvidence(null)}>Close evidence</button><p>Transaction {evidence.transactionId}</p><img src={evidence.url} alt="Customer payment proof" /></div>}

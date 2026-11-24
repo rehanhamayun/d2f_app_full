@@ -17,6 +17,8 @@ test('purchase retries are safe, tenant-scoped and quote acceptance protects the
   };
   try {
     for (let n = 0; n < 2; n++) users.push(await prisma.user.create({ data: { email: `${n}-${suffix}@example.test`, fullName: 'Purchase buyer', passwordHash: 'unused', role: 'CUSTOMER', organizationId: org.id } }));
+    const admin = await prisma.user.create({ data: { email: `admin-${suffix}@example.test`, fullName: 'Purchase admin', passwordHash: 'unused', role: 'ADMIN', organizationId: org.id } });
+    users.push(admin);
     const payload = { clientRequestId: 'retry-' + suffix, title: 'A laptop and carrying case', quantity: 1, budgetMinor: 100000, currency: 'USD', deliveryAddress: '123 Example Street', deliveryCity: 'Lomé', deliveryCountry: 'Togo', deliveryPostalCode: '00000' };
     const attempts = await Promise.all([call(users[0], '/buy-for-me/requests', payload), call(users[0], '/buy-for-me/requests', payload)]);
     assert.deepEqual(attempts.map(r => r.status).sort(), [200, 201]);
@@ -27,11 +29,17 @@ test('purchase retries are safe, tenant-scoped and quote acceptance protects the
     assert.equal(await prisma.notification.count({ where: { userId: users[0].id, entityId: orderId } }), 1);
     assert.equal((await call(users[0], '/buy-for-me/requests', { ...payload, title: 'Changed item after uncertain response' })).status, 409);
     assert.equal((await call(users[1], '/buy-for-me/requests', payload)).status, 409);
-    await prisma.serviceOrder.update({ where: { id: orderId }, data: { status: 'QUOTED', productCostMinor: 90000, shippingCostMinor: 10000, amountMinor: 100000 } });
+    const quote = await call(admin, `/admin/commerce/orders/${orderId}`, { status: 'QUOTED', productCostMinor: 90000, shippingCostMinor: 6000, pickupFeeMinor: 1500, handlingFeeMinor: 2500 }, 'PATCH');
+    assert.equal(quote.status, 200);
+    assert.equal(quote.body.amountMinor, 100000);
+    assert.equal(quote.body.pickupFeeMinor, 1500);
+    const revised = await call(admin, `/admin/commerce/orders/${orderId}`, { pickupFeeMinor: 1000, handlingFeeMinor: 3000 }, 'PATCH');
+    assert.equal(revised.status, 200);
+    assert.equal((await call(users[0], `/buy-for-me/requests/${orderId}/accept`, { expectedAmountMinor: 100000, expectedUpdatedAt: quote.body.updatedAt })).status, 409);
     assert.equal((await call(users[0], `/buy-for-me/requests/${orderId}/accept`, { expectedAmountMinor: 95000, expectedCurrency: 'USD' })).status, 409);
     assert.equal((await call(users[0], `/buy-for-me/requests/${orderId}/accept`, { expectedAmountMinor: 100000, expectedCurrency: 'EUR' })).status, 409);
     assert.equal((await prisma.serviceOrder.findUnique({ where: { id: orderId } })).status, 'QUOTED');
-    assert.equal((await call(users[0], `/buy-for-me/requests/${orderId}/accept`, { expectedAmountMinor: 100000, expectedCurrency: 'USD' })).status, 200);
+    assert.equal((await call(users[0], `/buy-for-me/requests/${orderId}/accept`, { expectedAmountMinor: 100000, expectedCurrency: 'USD', expectedUpdatedAt: revised.body.updatedAt })).status, 200);
     // Legacy clients without a retry key still work while installed apps update.
     const { clientRequestId, ...legacy } = payload;
     assert.equal((await call(users[0], '/buy-for-me/requests', legacy)).status, 201);

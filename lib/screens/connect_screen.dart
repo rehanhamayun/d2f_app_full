@@ -9,6 +9,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/api.dart';
@@ -1789,69 +1790,290 @@ class _ConnectTripForm extends StatefulWidget {
 
 class _ConnectTripFormState extends State<_ConnectTripForm> {
   final _form = GlobalKey<FormState>();
-  final _fields = {
-    for (final k in [
-      'origin',
-      'destination',
-      'flightNumber',
-      'capacityKg',
-      'verificationReference',
-    ])
-      k: TextEditingController(),
-  };
+  final _flight = TextEditingController();
+  final _capacity = TextEditingController();
   final _categories = <String>{'CLOTHING', 'DOCUMENTS'};
-  DateTime? _departure;
-  String? _departureZone, _destinationZone, _departureOccurrence;
+  final _countries = <String?>[null, null];
+  final _cities = <String?>[null, null];
+  final _zones = <String?>[null, null];
+  final _times = <DateTime?>[null, null];
+  final _occurrences = <String?>[null, null];
+  String? _airline;
   bool _ack = false, _busy = false;
   String? _error;
+
+  static const _citiesByCountry = {
+    'United States': ['Omaha, NE', 'New York, NY', 'Atlanta, GA', 'Boston, MA', 'Miami, FL', 'Washington, DC', 'Chicago, IL', 'Dallas, TX', 'Houston, TX', 'Denver, CO', 'Phoenix, AZ', 'Los Angeles, CA', 'San Francisco, CA', 'Seattle, WA', 'Anchorage, AK', 'Honolulu, HI'],
+    'France': ['Paris', 'Lyon', 'Marseille', 'Nice', 'Toulouse', 'Bordeaux'],
+    'Belgium': ['Brussels', 'Antwerp', 'Charleroi', 'Liège'],
+    'Togo': ['Lomé', 'Kara', 'Sokodé'],
+    'Benin': ['Cotonou', 'Porto-Novo', 'Parakou'],
+    'Burkina Faso': ['Ouagadougou', 'Bobo-Dioulasso'],
+    'Gabon': ['Libreville', 'Port-Gentil'],
+    'Ghana': ['Accra', 'Kumasi', 'Tamale'],
+    'Senegal': ['Dakar', 'Saint-Louis'],
+    'Nigeria': ['Lagos', 'Abuja', 'Kano', 'Port Harcourt'],
+    'Côte d’Ivoire': ['Abidjan', 'Bouaké', 'Yamoussoukro'],
+  };
+  static const _airlines = ['Air Belgium', 'Air Burkina', 'Air Côte d’Ivoire', 'Air France', 'Air Senegal', 'American Airlines', 'ASKY Airlines', 'Brussels Airlines', 'Delta Air Lines', 'Ethiopian Airlines', 'Kenya Airways', 'KLM', 'Lufthansa', 'Royal Air Maroc', 'Turkish Airlines', 'United Airlines'];
+
+  String _route(int index) =>
+      '${_cities[index]}, ${_countries[index] == 'United States' ? 'USA' : _countries[index]}';
+
   @override
   void dispose() {
-    for (final c in _fields.values) {
-      c.dispose();
-    }
+    _flight.dispose();
+    _capacity.dispose();
     super.dispose();
   }
 
-  Future<void> _submit() async {
-    if (!(_form.currentState?.validate() ?? false)) return;
-    if (!_ack ||
-        _departure == null ||
-        _categories.isEmpty ||
-        _departureZone == null ||
-        _destinationZone == null) {
-      setState(
-        () => _error = 'Add your departure, country time zones, permitted categories and verification confirmation.',
+  Future<String?> _choose(String title, Iterable<String> options, {bool allowOther = false}) =>
+      showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (_) => _TripOptionPicker(title: title, options: options, allowOther: allowOther),
       );
+
+  Future<void> _pickTime(int index) async {
+    FocusScope.of(context).unfocus();
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      helpText: index == 0 ? 'Departure date' : 'Arrival date',
+      firstDate: DateUtils.dateOnly(now).subtract(const Duration(days: 1)),
+      lastDate: now.add(const Duration(days: 372)),
+      initialDate: _times[index] ?? now.add(const Duration(days: 7)),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      helpText: index == 0 ? 'Departure city time' : 'Arrival city time',
+      initialTime: _times[index] == null ? const TimeOfDay(hour: 12, minute: 0) : TimeOfDay.fromDateTime(_times[index]!),
+    );
+    if (time != null && mounted) setState(() {
+      _times[index] = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+      _occurrences[index] = null;
+    });
+  }
+
+  Future<void> _submit() async {
+    if (_busy || !(_form.currentState?.validate() ?? false)) return;
+    if ([..._cities, ..._zones, ..._times, _airline].contains(null) || !_ack || _categories.isEmpty) {
+      setState(() => _error = 'Choose both routes, time zones, travel dates, an airline and at least one category. Confirm the verification requirements.');
       return;
     }
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
+    setState(() { _busy = true; _error = null; });
     try {
-      await widget.request(
-        '/trips',
-        method: 'POST',
-        data: {
-          for (final k in [
-            'origin',
-            'destination',
-            'flightNumber',
-            'verificationReference',
-          ])
-            k: _fields[k]!.text.trim(),
-          'capacityKg': double.parse(_fields['capacityKg']!.text),
-          'departureLocal': DateFormat("yyyy-MM-dd'T'HH:mm")
-              .format(_departure!),
-          'departureTimezone': _departureZone,
-          if (_departureOccurrence != null)
-            'departureOccurrence': _departureOccurrence,
-          'destinationTimezone': _destinationZone,
-          'categories': _categories.toList(),
-          'complianceAcknowledged': true,
-        },
-      );
+      final saved = await widget.request('/trips', method: 'POST', data: {
+        'registrationVersion': 2,
+        'origin': _route(0),
+        'destination': _route(1),
+        'airline': _airline,
+        'flightNumber': _flight.text.trim().toUpperCase(),
+        'capacityKg': double.parse(_capacity.text),
+        'departureLocal': DateFormat("yyyy-MM-dd'T'HH:mm").format(_times[0]!),
+        'departureTimezone': _zones[0],
+        if (_occurrences[0] != null) 'departureOccurrence': _occurrences[0],
+        'arrivalLocal': DateFormat("yyyy-MM-dd'T'HH:mm").format(_times[1]!),
+        'destinationTimezone': _zones[1],
+        if (_occurrences[1] != null) 'arrivalOccurrence': _occurrences[1],
+        'categories': _categories.toList(),
+        'complianceAcknowledged': true,
+      });
+      if (!mounted) return;
+      await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) =>
+        _ConnectTripVerification(tripId: saved['id'] as String, documents: const [])));
       if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Widget _select(String label, String? value, VoidCallback? onTap) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: OutlinedButton(
+          onPressed: onTap,
+          child: Row(children: [Expanded(child: Text(value == null ? label : '$label · $value')), const Icon(Icons.expand_more)]),
+        ),
+      );
+
+  Widget _location(int index, String label) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _select('$label country', _countries[index], () async {
+        final country = await _choose('$label country', countryTimezones.keys);
+        if (country != null && mounted && country != _countries[index]) setState(() {
+          _countries[index] = country;
+          _cities[index] = null;
+          _zones[index] = countryTimezones[country]!.length == 1 ? countryTimezones[country]!.first : null;
+          _occurrences[index] = null;
+        });
+      }),
+      _select('$label city', _cities[index], _countries[index] == null ? null : () async {
+        final city = await _choose('$label city', _citiesByCountry[_countries[index]] ?? const [], allowOther: true);
+        if (city != null && mounted) setState(() {
+          _cities[index] = city;
+          _zones[index] = suggestedTimezone(_route(index));
+          _occurrences[index] = null;
+        });
+      }),
+      _select('$label time zone', _zones[index], _countries[index] == null ? null : () async {
+        final zone = await _choose('$label time zone', countryTimezones[_countries[index]]!);
+        if (zone != null && mounted) setState(() { _zones[index] = zone; _occurrences[index] = null; });
+      }),
+      OutlinedButton.icon(
+        onPressed: () => _pickTime(index),
+        icon: const Icon(Icons.calendar_month),
+        label: Text(_times[index] == null ? '$label date & time (required)' : '$label · ${DateFormat('MMM d, y · h:mm a').format(_times[index]!)}'),
+      ),
+      const SizedBox(height: 16),
+    ],
+  );
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Register your trip')),
+    body: SafeArea(child: Form(
+      key: _form,
+      child: ListView(
+        padding: const EdgeInsets.all(20),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        children: [
+          const _ConnectNotice(icon: Icons.verified_user_outlined,
+            text: 'Register your travel details. Next, upload your identity and ticket for D2F verification.'),
+          const SizedBox(height: 16),
+          _location(0, 'Departure'),
+          _location(1, 'Arrival'),
+          _select('Airline', _airline, () async {
+            final value = await _choose('Airline', _airlines, allowOther: true);
+            if (value != null && mounted) setState(() => _airline = value);
+          }),
+          TextFormField(
+            controller: _flight,
+            maxLength: 16,
+            textCapitalization: TextCapitalization.characters,
+            decoration: const InputDecoration(labelText: 'Flight number', hintText: 'e.g. AF 864'),
+            validator: (v) => v == null || v.trim().isEmpty ? 'Enter your flight number' : null,
+          ),
+          TextFormField(
+            controller: _capacity,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Available baggage capacity', suffixText: 'kg'),
+            validator: (value) {
+              final n = double.tryParse(value ?? '');
+              return n == null || !n.isFinite || n < .1 || n > 100 ? 'Enter capacity from 0.1 to 100 kg' : null;
+            },
+          ),
+          ExpansionTile(
+            title: const Text('Daylight-saving adjustment'),
+            children: [
+              for (final (index, label) in [(0, 'Departure'), (1, 'Arrival')])
+                DropdownButtonFormField<String>(
+                  key: ValueKey('$index-${_times[index]}-${_zones[index]}'),
+                  initialValue: _occurrences[index],
+                  isExpanded: true,
+                  decoration: InputDecoration(labelText: '$label if the local clock time occurs twice'),
+                  items: const [
+                    DropdownMenuItem(value: 'EARLIER', child: Text('First occurrence')),
+                    DropdownMenuItem(value: 'LATER', child: Text('Second occurrence')),
+                  ],
+                  onChanged: (value) => setState(() => _occurrences[index] = value),
+                ),
+            ],
+          ),
+          const Text('Categories you are willing to carry', style: AppTheme.sectionTitle),
+          Wrap(spacing: 8, children: [
+            for (final c in connectCategories)
+              FilterChip(label: Text(connectLabel(c)), selected: _categories.contains(c),
+                onSelected: (value) => setState(() { value ? _categories.add(c) : _categories.remove(c); })),
+          ]),
+          CheckboxListTile(
+            value: _ack,
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            onChanged: (value) => setState(() => _ack = value ?? false),
+            title: const Text('I agree to identity, ticket, baggage and transport eligibility verification.'),
+          ),
+          if (_error != null) Text(_error!, style: const TextStyle(color: AppColors.coral)),
+          FilledButton(onPressed: _busy ? null : _submit, child: Text(_busy ? 'Submitting…' : 'Submit trip')),
+        ],
+      ),
+    )),
+  );
+}
+
+class _TripOptionPicker extends StatefulWidget {
+  final String title;
+  final Iterable<String> options;
+  final bool allowOther;
+  const _TripOptionPicker({required this.title, required this.options, required this.allowOther});
+
+  @override
+  State<_TripOptionPicker> createState() => _TripOptionPickerState();
+}
+
+class _TripOptionPickerState extends State<_TripOptionPicker> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final options = widget.options.where((v) => v.toLowerCase().contains(_query.toLowerCase())).toList();
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: FractionallySizedBox(
+        heightFactor: .65,
+        child: Column(children: [
+          Padding(padding: const EdgeInsets.all(16), child: TextField(
+            decoration: InputDecoration(labelText: 'Search ${widget.title.toLowerCase()}', prefixIcon: const Icon(Icons.search)),
+            onChanged: (value) => setState(() => _query = value.trim()),
+            maxLength: 80,
+          )),
+          Expanded(child: ListView(children: [
+            for (final value in options) ListTile(title: Text(value), onTap: () => Navigator.pop(context, value)),
+            if (options.isEmpty) const ListTile(title: Text('No matching options')),
+            if (widget.allowOther && _query.isNotEmpty && !options.any((v) => v.toLowerCase() == _query.toLowerCase()))
+              ListTile(title: Text('Use “$_query”'), onTap: () => Navigator.pop(context, _query)),
+          ])),
+        ]),
+      ),
+    );
+  }
+}
+
+class _ConnectTripVerification extends StatefulWidget {
+  final String tripId;
+  final List<Map<String, dynamic>> documents;
+  const _ConnectTripVerification({required this.tripId, required this.documents});
+
+  @override
+  State<_ConnectTripVerification> createState() => _ConnectTripVerificationState();
+}
+
+class _ConnectTripVerificationState extends State<_ConnectTripVerification> {
+  late final _uploaded = widget.documents.map((row) => row['kind']).toSet();
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _select(String kind) async {
+    setState(() { _busy = true; _error = null; });
+    try {
+      final file = await ImagePicker().pickImage(source: ImageSource.gallery);
+      if (file == null) return;
+      final contentType = switch (file.name.toLowerCase().split('.').last) {
+        'jpg' || 'jpeg' => 'image/jpeg',
+        'png' => 'image/png',
+        'webp' => 'image/webp',
+        _ => null,
+      };
+      if (contentType == null || await file.length() > 4 * 1024 * 1024) {
+        throw const FormatException('Choose a JPEG, PNG or WebP image up to 4 MB.');
+      }
+      await Api.I.uploadConnectTripDocument(widget.tripId, kind, await file.readAsBytes(), contentType);
+      if (mounted) setState(() => _uploaded.add(kind));
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     } finally {
@@ -1861,205 +2083,25 @@ class _ConnectTripFormState extends State<_ConnectTripForm> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Register your trip')),
-    body: Form(
-      key: _form,
-      child: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Text(
-            'Your journey.\nA connection for someone.',
-            style: AppTheme.display,
+    appBar: AppBar(title: const Text('Trip verification')),
+    body: SafeArea(child: ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Text(_uploaded.length == 2 ? 'Documents submitted for review' : 'Upload verification documents', style: AppTheme.sectionTitle),
+        const Text('D2F reviews your identity, ticket, baggage allowance and transport eligibility before approval. Documents are visible only to you and authorized D2F reviewers.'),
+        const SizedBox(height: 16),
+        for (final (kind, label) in [('IDENTITY', 'Identity document'), ('TICKET', 'Flight ticket with baggage allowance')])
+          ListTile(
+            title: Text(label),
+            subtitle: Text(_uploaded.contains(kind) ? 'Uploaded · tap to replace' : 'Upload image'),
+            leading: Icon(_uploaded.contains(kind) ? Icons.check_circle_outline : Icons.upload_file),
+            onTap: _busy ? null : () => _select(kind),
           ),
-          const SizedBox(height: 12),
-          const _ConnectNotice(
-            icon: Icons.verified_user_outlined,
-            text: 'D2F reviews your identity, ticket, baggage allowance and transport eligibility before approval. Your personal address is never shown to senders.',
-          ),
-          const SizedBox(height: 20),
-          for (final field in [
-            ('origin', 'Departure city & country'),
-            ('destination', 'Destination city & country'),
-            ('flightNumber', 'Airline & flight number'),
-            ('capacityKg', 'Available baggage capacity (kg)'),
-            (
-              'verificationReference',
-              'Secure identity & ticket verification reference',
-            ),
-          ])
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: TextFormField(
-                controller: _fields[field.$1],
-                onChanged: (_) {
-                  if (field.$1 == 'origin' || field.$1 == 'destination') {
-                    setState(() {
-                      if (field.$1 == 'origin') {
-                        _departureZone = suggestedTimezone(
-                          _fields['origin']!.text,
-                        );
-                      }
-                      if (field.$1 == 'destination') {
-                        _destinationZone = suggestedTimezone(
-                          _fields['destination']!.text,
-                        );
-                      }
-                    });
-                  }
-                },
-                maxLength: field.$1 == 'verificationReference' ? 500 : 120,
-                keyboardType: field.$1 == 'capacityKg'
-                    ? const TextInputType.numberWithOptions(decimal: true)
-                    : TextInputType.text,
-                decoration: InputDecoration(
-                  labelText: field.$2,
-                  counterText: '',
-                ),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Required';
-                  if (field.$1 == 'capacityKg') {
-                    final n = double.tryParse(v);
-                    if (n == null || !n.isFinite || n < .1 || n > 100) {
-                      return 'Enter capacity from 0.1 to 100 kg';
-                    }
-                  }
-                  return null;
-                },
-              ),
-            ),
-          for (final side in ['origin', 'destination'])
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: DropdownButtonFormField<String>(
-                key: ValueKey('$side-${_fields[side]!.text}'),
-                initialValue: side == 'origin'
-                    ? _departureZone
-                    : _destinationZone,
-                isExpanded: true,
-                decoration: InputDecoration(
-                  labelText: side == 'origin'
-                      ? 'Departure country time zone'
-                      : 'Destination country time zone',
-                  helperText:
-                      'Local time for this route. USA has multiple time zones.',
-                ),
-                items:
-                    (countryTimezones[countryForRoute(_fields[side]!.text)] ??
-                            <String>[])
-                        .map((z) => DropdownMenuItem(value: z, child: Text(z)))
-                        .toList(),
-                onChanged: (value) => setState(() {
-                  if (side == 'origin') {
-                    _departureZone = value;
-                  } else {
-                    _destinationZone = value;
-                  }
-                }),
-                validator: (value) => value == null
-                    ? 'Choose the country and its time zone'
-                    : null,
-              ),
-            ),
-          OutlinedButton.icon(
-            onPressed: () async {
-              final d = await showDatePicker(
-                context: context,
-                firstDate: DateTime.now(),
-                lastDate: DateTime.now().add(const Duration(days: 365)),
-                initialDate: DateTime.now().add(const Duration(days: 7)),
-              );
-              if (d == null || !context.mounted) return;
-              final t = await showTimePicker(
-                context: context,
-                initialTime: const TimeOfDay(hour: 12, minute: 0),
-              );
-              if (t != null && mounted) {
-                setState(
-                  () => _departure = DateTime(
-                    d.year,
-                    d.month,
-                    d.day,
-                    t.hour,
-                    t.minute,
-                  ),
-                );
-              }
-            },
-            icon: const Icon(Icons.calendar_month),
-            label: Text(
-              _departure == null
-                  ? 'Departure date & time · departure city'
-                  : '${DateFormat('MMM d, yyyy · h:mm a').format(_departure!)} · ${_departureZone ?? 'choose zone'}',
-            ),
-          ),
-          const SizedBox(height: 20),
-          ExpansionTile(
-            title: const Text(
-              'Daylight-saving adjustment (optional)',
-              style: TextStyle(fontSize: 13),
-            ),
-            tilePadding: EdgeInsets.zero,
-            children: [
-              DropdownButtonFormField<String>(
-                initialValue: _departureOccurrence,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'If this departure clock time occurs twice',
-                ),
-                items: const [
-                  DropdownMenuItem(
-                    value: 'EARLIER',
-                    child: Text('First occurrence · earlier instant'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'LATER',
-                    child: Text('Second occurrence · later instant'),
-                  ),
-                ],
-                onChanged: (value) =>
-                    setState(() => _departureOccurrence = value),
-              ),
-              const SizedBox(height: 16),
-            ],
-          ),
-          const Text(
-            'Categories you are willing to carry',
-            style: AppTheme.sectionTitle,
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            children: [
-              for (final c in connectCategories)
-                FilterChip(
-                  label: Text(connectLabel(c)),
-                  selected: _categories.contains(c),
-                  onSelected: (selected) => setState(() {
-                    selected ? _categories.add(c) : _categories.remove(c);
-                  }),
-                ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          CheckboxListTile(
-            value: _ack,
-            contentPadding: EdgeInsets.zero,
-            controlAffinity: ListTileControlAffinity.leading,
-            onChanged: (v) => setState(() => _ack = v ?? false),
-            title: const Text(
-              'I agree to D2F identity, ticket and compliance verification. I will inspect permitted contents and may reject unsafe or undeclared items.',
-              style: TextStyle(fontSize: 12, height: 1.5),
-            ),
-          ),
-          if (_error != null)
-            Text(_error!, style: const TextStyle(color: AppColors.coral)),
-          FilledButton(
-            onPressed: _busy ? null : _submit,
-            child: Text(_busy ? 'Submitting…' : 'Submit trip for D2F review'),
-          ),
-        ],
-      ),
-    ),
+        if (_busy) const LinearProgressIndicator(),
+        if (_error != null) Text(_error!, style: const TextStyle(color: AppColors.coral)),
+        FilledButton(onPressed: _busy ? null : () => Navigator.pop(context), child: Text(_uploaded.length == 2 ? 'Done' : 'Finish later')),
+      ],
+    )),
   );
 }
 
@@ -2122,6 +2164,18 @@ class _ConnectTripTile extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         _ConnectLine('Departure', connectTripDate(trip)),
+        if (trip['arrivalAt'] != null)
+          _ConnectLine('Arrival', countryDate(trip['arrivalAt'], timezone: trip['destinationTimezone'] as String?)),
+        if (trip['airline'] != null) _ConnectLine('Flight', '${trip['airline']} ${trip['flightNumber']}'),
+        if (!staff && trip['airline'] != null && ['PENDING_REVIEW', 'REJECTED'].contains(trip['status']))
+          OutlinedButton(
+            onPressed: () async {
+              await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) =>
+                _ConnectTripVerification(tripId: trip['id'] as String, documents: connectRows(trip['verificationDocuments']))));
+              await onChanged();
+            },
+            child: Text(connectRows(trip['verificationDocuments']).length == 2 ? 'Review verification uploads' : 'Complete trip verification'),
+          ),
         _ConnectLine(
           'Available / total capacity',
           '${trip['remainingKg']} / ${trip['capacityKg']} kg',
@@ -2131,7 +2185,7 @@ class _ConnectTripTile extends StatelessWidget {
           'Accepted categories',
           (trip['categories'] as List).map(connectLabel).join(', '),
         ),
-        if (admin && trip['status'] == 'PENDING_REVIEW')
+        if (admin && trip['status'] == 'PENDING_REVIEW' && trip['airline'] == null)
           OutlinedButton(
             onPressed: () => _run(
               context,

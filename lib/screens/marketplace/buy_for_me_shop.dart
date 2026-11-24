@@ -15,6 +15,8 @@ import '../../models/models.dart';
 import '../../providers/auth_provider.dart';
 import '../../widgets/order_timeline.dart';
 import 'buy_for_me_request_form.dart';
+import 'marketplace_shop.dart';
+import 'storefronts.dart';
 
 /// Buy For Me: the customer describes an item from any store; D2F quotes the
 /// total, the customer accepts, and D2F buys and ships it.
@@ -33,6 +35,8 @@ class _BuyForMeShopState extends ConsumerState<BuyForMeShop>
   bool _loading = true, _failed = false;
 
   bool _loadStarted = false;
+  List<Map<String, dynamic>> _retailers = [];
+  bool _retailerLoadFailed = false;
   StreamSubscription<dynamic>? _pushUpdates;
 
   /// Fetch requests only once auth resolves to a CUSTOMER account.
@@ -41,7 +45,10 @@ class _BuyForMeShopState extends ConsumerState<BuyForMeShop>
     final role = ref.read(authControllerProvider).valueOrNull?.role;
     if (role == null) return;
     _loadStarted = true;
-    if (role == UserRole.CUSTOMER) _load();
+    if (role == UserRole.CUSTOMER) {
+      _load();
+      if (widget.loadRequests == null) _loadRetailers();
+    }
   }
 
   @override
@@ -95,6 +102,53 @@ class _BuyForMeShopState extends ConsumerState<BuyForMeShop>
     }
   }
 
+  Future<void> _loadRetailers() async {
+    try {
+      final stores = await Api.I.buyForMeRetailers();
+      if (mounted) setState(() { _retailers = stores; _retailerLoadFailed = false; });
+    } catch (_) {
+      if (mounted) setState(() => _retailerLoadFailed = true);
+    }
+  }
+
+  Future<void> _openRetailer(Map<String, dynamic> store) async {
+    final uri = Uri.tryParse(store['url'] as String? ?? '');
+    if (uri != null && uri.scheme == 'https' && await launchUrl(uri, mode: LaunchMode.externalApplication)) return;
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open the retailer website.')));
+  }
+
+  Widget _storeCard(Map<String, dynamic> store) {
+    final String? logo = store['logoUrl'] as String?;
+    return OutlinedButton(
+      onPressed: () => _openRetailer(store),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        if (logo != null) Image.network(logo, width: 24, height: 24,
+          errorBuilder: (_, _, _) => const Icon(Icons.open_in_new, size: 18))
+        else const Icon(Icons.open_in_new, size: 18),
+        Text(store['name'] as String, textAlign: TextAlign.center),
+      ]),
+    );
+  }
+
+  Widget _storeSection(String country, String title) {
+    final stores = _retailers.where((store) => store['country'] == country).toList();
+    if (stores.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(child: Text(title, style: AppTheme.sectionTitle)),
+          if (stores.length > 6)
+            TextButton(onPressed: () => showModalBottomSheet<void>(
+              context: context,
+              builder: (_) => SafeArea(child: ListView(padding: const EdgeInsets.all(16), children: stores.map(_storeCard).toList())),
+            ), child: const Text('View all')),
+        ]),
+        Wrap(spacing: 8, runSpacing: 8, children: stores.take(6).map(_storeCard).toList()),
+      ]),
+    );
+  }
+
   Future<void> _newRequest() async {
     await Navigator.push<bool>(
       context,
@@ -123,6 +177,22 @@ class _BuyForMeShopState extends ConsumerState<BuyForMeShop>
         children: [
           _hero(),
           const SizedBox(height: 14),
+          _storeSection('US', 'Popular US stores'),
+          _storeSection('FR', 'Popular French stores'),
+          if (_retailerLoadFailed)
+            TextButton(onPressed: _loadRetailers, child: const Text('Retry loading stores')),
+          if (canShop)
+            Card(
+              color: AppColors.goldSoft,
+              child: ListTile(
+                leading: const Icon(Icons.storefront_outlined),
+                title: const Text('D2F Marketplace'),
+                subtitle: const Text('Shop from approved local sellers'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push<void>(context, MaterialPageRoute(builder: (_) =>
+                  Scaffold(appBar: AppBar(title: const Text('D2F Marketplace'), actions: [IconButton(tooltip: 'Local storefronts', icon: const Icon(Icons.storefront), onPressed: () => Navigator.push<void>(context, MaterialPageRoute(builder: (_) => const MarketplaceStorefronts())))]), body: const MarketplaceShop()))),
+              ),
+            ),
           _howItWorks(),
           const SizedBox(height: 16),
           if (canShop)
@@ -837,6 +907,7 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet>
                   ? _order.amountMinor
                   : null,
               expectedCurrency: decision == 'accept' ? _order.currency : null,
+              expectedUpdatedAt: decision == 'accept' ? _order.updatedAt : null,
             );
       if (!mounted) return;
       setState(() {
@@ -973,9 +1044,11 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet>
                       'Shipping cost',
                       formatMoney(o.shippingCostMinor, o.currency),
                     ),
+                  if (o.pickupFeeMinor > 0) _detailRow('Door pickup fee', formatMoney(o.pickupFeeMinor, o.currency)),
+                  if (o.handlingFeeMinor > 0) _detailRow('Handling / preparation fee', formatMoney(o.handlingFeeMinor, o.currency)),
                   if (o.amountMinor != null)
                     _detailRow(
-                      'Subtotal',
+                      'Total payable',
                       formatMoney(o.amountMinor, o.currency),
                     ),
                   if ((o.notes ?? '').isNotEmpty)
@@ -1151,13 +1224,15 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet>
                               'Payment proof received. D2F is verifying it.',
                             )
                           else ...[
-                            if ((o.paymentStatus ?? '') == 'REJECTED')
+                            if (o.paymentStatus == 'REJECTED') ...[
+                              const Text('Payment rejected', style: TextStyle(color: AppColors.coral, fontWeight: FontWeight.w900)),
                               Text(
                                 o.paymentSubmissions.isNotEmpty
                                     ? (o.paymentSubmissions.first.reviewNote ??
                                           'Please submit corrected payment proof.')
                                     : 'Please submit corrected payment proof.',
                               ),
+                            ],
                             const SizedBox(height: 9),
                             TextField(
                               controller: _transactionId,
@@ -1178,7 +1253,7 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet>
                                 label: Text(
                                   _busy
                                       ? 'Sending…'
-                                      : 'Attach screenshot & send for review',
+                                      : o.paymentStatus == 'REJECTED' ? 'Resubmit payment proof' : 'Attach screenshot & send for review',
                                 ),
                               ),
                             ),

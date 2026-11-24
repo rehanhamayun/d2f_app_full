@@ -415,6 +415,20 @@ class Api {
     }
   }
 
+  Future<void> uploadConnectTripDocument(
+    String tripId, String kind, Uint8List bytes, String contentType,
+  ) async {
+    try {
+      await _dio!.put(
+        '/connect/trips/$tripId/verification/$kind',
+        data: bytes,
+        options: Options(contentType: contentType),
+      );
+    } on DioException catch (e) {
+      throw _map(e);
+    }
+  }
+
   Future<Uint8List> connectPaymentImage(
     String bookingId,
     String submissionId,
@@ -879,6 +893,28 @@ class Api {
   Future<Uint8List> marketplaceProductImage(String productId, String imageId) =>
       _imageBytes('/marketplace/products/$productId/images/$imageId/raw');
 
+  Future<List<Map<String, dynamic>>> marketplaceStorefronts() async {
+    try {
+      final response = await _dio!.get('/marketplace/storefronts');
+      return (response.data as List).cast<Map<String, dynamic>>();
+    } on DioException catch (e) { throw _map(e); }
+  }
+
+  Future<Map<String, dynamic>> marketplaceStorefront(String id) async {
+    try {
+      final response = await _dio!.get('/marketplace/storefronts/$id');
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) { throw _map(e); }
+  }
+
+  Future<Uint8List> marketplaceStorefrontLogo(String id) => _imageBytes('/marketplace/storefronts/$id/logo');
+
+  Future<void> openMarketplaceIssue(String id, String type, String reason) async {
+    try {
+      await _dio!.post('/marketplace/orders/$id/issues', data: {'type': type, 'reason': reason});
+    } on DioException catch (e) { throw _map(e); }
+  }
+
   Future<List<MarketplaceOrder>> marketplaceOrders() async {
     try {
       final response = await _dio!.get('/marketplace/orders');
@@ -895,6 +931,7 @@ class Api {
     required String productId,
     required int quantity,
     required String deliveryPreference,
+    String? deliveryMethod,
     String? recipientName,
     required String recipientPhone,
     required String deliveryAddress,
@@ -909,6 +946,7 @@ class Api {
           'productId': productId,
           'quantity': quantity,
           'deliveryPreference': deliveryPreference,
+          if (deliveryMethod != null) 'deliveryMethod': deliveryMethod,
           if (recipientName != null && recipientName.trim().isNotEmpty)
             'recipientName': recipientName.trim(),
           'recipientPhone': recipientPhone.trim(),
@@ -938,6 +976,11 @@ class Api {
   }
 
   // ── Buy For Me (customer purchase requests) ───────────────────────────────
+
+  Future<List<Map<String, dynamic>>> buyForMeRetailers() async {
+    final response = await _dio!.get<List<dynamic>>('/buy-for-me/retailers');
+    return (response.data ?? []).cast<Map<String, dynamic>>();
+  }
 
   Future<List<MarketplaceOrder>> buyForMeRequests() async {
     try {
@@ -999,6 +1042,7 @@ class Api {
     String decision, {
     int? expectedAmountMinor,
     String? expectedCurrency,
+    DateTime? expectedUpdatedAt,
   }) async {
     try {
       final response = await _dio!.post(
@@ -1007,6 +1051,7 @@ class Api {
           if (expectedAmountMinor != null)
             'expectedAmountMinor': expectedAmountMinor,
           if (expectedCurrency != null) 'expectedCurrency': expectedCurrency,
+          if (expectedUpdatedAt != null) 'expectedUpdatedAt': expectedUpdatedAt.toUtc().toIso8601String(),
         },
       );
       return MarketplaceOrder.fromJson(
@@ -1284,6 +1329,8 @@ class Api {
     String action, {
     String? reason,
     String? trackingRef,
+    String? shippingCarrier,
+    String? shipmentEvidence,
   }) async {
     try {
       final response = await _dio!.post(
@@ -1293,6 +1340,8 @@ class Api {
             'reason': reason.trim(),
           if (trackingRef != null && trackingRef.trim().isNotEmpty)
             'trackingRef': trackingRef.trim(),
+          if (shippingCarrier != null) 'shippingCarrier': shippingCarrier,
+          if (shipmentEvidence != null) 'shipmentEvidence': shipmentEvidence,
         },
       );
       return MarketplaceOrder.fromJson(

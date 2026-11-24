@@ -17,6 +17,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ORIGINS = {'https://d2f-admin-dashboard.pages.dev'}
 MAX_BODY = 8_000_000
 
+
+class PrintPreflightError(Exception):
+    pass
+
 class PrintStore:
     def __init__(self, folder, printers, send):
         self.folder = Path(folder)
@@ -27,12 +31,13 @@ class PrintStore:
         self.token = token_file.read_text().strip()
         self.printers, self.send = printers, send
         self.lock = threading.Lock()
+        self.active_job = None
 
     def history(self):
         rows = []
         for path in self.folder.glob('job-*.json'):
             row = json.loads(path.read_text())
-            if row['status'] == 'PRINTING':
+            if row['status'] == 'PRINTING' and row['clientJobId'] != self.active_job:
                 row.update(status='UNKNOWN', message='Connector interrupted. Check the physical label before reprinting.')
             rows.append(row)
         return sorted(rows, key=lambda row: row['deviceTimeMs'], reverse=True)
@@ -67,20 +72,24 @@ class PrintStore:
                     if any(old[k] != body[k] for k in ('parcelId', 'printerName', 'labelHash', 'ownerId')):
                         raise ValueError('Job ID already used for another label.')
                     return old
-            if body.get('reprint') is not True and any(r['labelHash'] == digest and r['printerName'] == printer and time.time()*1000-r['deviceTimeMs'] < 120000 for r in rows):
-                raise ValueError('This label was recently sent. Check the physical output and use explicit Reprint if necessary.')
+            if body.get('reprint') is not True and any(r['parcelId'] == body['parcelId'] for r in rows):
+                raise ValueError('This parcel already has a print job. Check the physical output and use explicit Reprint if necessary.')
             row = {k: body[k] for k in ('clientJobId', 'parcelId', 'trackingId', 'printerName', 'ownerId')}
             row.update(labelHash=digest, reason=reason.strip(), pages=1, source='WINDOWS_LOCAL_CONNECTOR', status='PRINTING', deviceTimeMs=int(time.time()*1000))
+            self.active_job = job_id
             self._save(path, row)
             image = self.folder / ('label-' + job_id + '.png')
-            image.write_bytes(data)
             try:
+                image.write_bytes(data)
                 self.send(image, printer, job_id)
                 row.update(status='QUEUED', message='Windows accepted the print job. Verify the physical label at the printer.')
+            except PrintPreflightError as error:
+                row.update(status='FAILED', message=str(error))
             except Exception:
                 row.update(status='UNKNOWN', message='Windows printing did not complete normally. Check the printer queue and physical output before explicitly reprinting.')
             finally:
                 self._save(path, row)
+                self.active_job = None
                 image.unlink(missing_ok=True)
             return row
 
@@ -95,9 +104,9 @@ class PrintStore:
 
 
 def windows_printers():
-    raw = subprocess.check_output(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', '@(Get-Printer | Select-Object -ExpandProperty Name) | ConvertTo-Json -Compress'], text=True, timeout=20)
+    raw = subprocess.check_output(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', '[Console]::OutputEncoding = [Text.Encoding]::UTF8; @(Get-Printer | Select-Object -ExpandProperty Name) | ConvertTo-Json -Compress'], encoding='utf-8', timeout=20)
     result = json.loads(raw or '[]')
-    return [result] if isinstance(result, str) else result
+    return [result] if isinstance(result, str) else result or []
 
 
 def windows_send(image, printer, job_id):
@@ -105,6 +114,15 @@ def windows_send(image, printer, job_id):
     params.write_text(json.dumps({'image': str(image.resolve()), 'printer': printer, 'job': job_id}))
     try:
         subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', str(Path(__file__).with_name('print-label.ps1')), '-InputPath', str(params.resolve())], check=True, timeout=90, capture_output=True)
+    except subprocess.CalledProcessError as error:
+        messages = {
+            20: 'Windows no longer recognizes the printer. Check the driver and reconnect.',
+            21: 'The printer is offline or paused. Check power, connection and the Windows print queue.',
+            22: 'The queue has no 4×6 portrait media. Configure the 4×6 roll in Windows Printing Preferences.',
+        }
+        if error.returncode in messages:
+            raise PrintPreflightError(messages[error.returncode]) from error
+        raise
     finally:
         params.unlink(missing_ok=True)
 
@@ -146,7 +164,7 @@ def make_handler(store, origins=ORIGINS):
         def do_GET(self):
             if not self.allowed(): return
             try:
-                if self.path == '/health': self.reply(200, {'ready': True, 'version': '1.1.8'})
+                if self.path == '/health': self.reply(200, {'ready': True, 'version': '1.1.11'})
                 elif self.path == '/printers': self.reply(200, store.printers())
                 elif self.path == '/jobs': self.reply(200, store.history())
                 else: self.reply(404, {'error': 'Unknown connector endpoint.'})
@@ -176,6 +194,6 @@ if __name__ == '__main__':
     store = PrintStore(folder, windows_printers, windows_send)
     origins = ORIGINS | ({args.dev_origin} if args.dev_origin else set())
     print('D2F local printing: http://127.0.0.1:18441')
-    print('Pairing key (enter only in your D2F dashboard):', store.token)
+    print('Pairing key file (open privately):', folder / 'pairing-key.txt')
     print('Keep this window open. Press Ctrl+C to stop. No automatic print retries.')
     ThreadingHTTPServer(('127.0.0.1', 18441), make_handler(store, origins)).serve_forever()

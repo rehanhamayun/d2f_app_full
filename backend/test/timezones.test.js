@@ -12,7 +12,7 @@ test('Connect interprets departure-city local times, independent of server or vi
   assert.equal(localToInstant('2026-12-15T12:00', 'Africa/Lome').toISOString(), '2026-12-15T12:00:00.000Z');
   assert.throws(() => routeZone('Unknown city, USA'), /Choose a time zone/);
   assert.throws(() => routeZone('Paris, France', 'America/Chicago'), /Choose a time zone/);
-  assert.throws(() => localToInstant('2026-02-30T12:00', 'Africa/Lome'), /valid departure date/);
+  assert.throws(() => localToInstant('2026-02-30T12:00', 'Africa/Lome'), /valid local date/);
   assert.throws(() => localToInstant('2026-03-08T02:30', 'America/New_York'), /does not exist/);
   assert.throws(() => localToInstant('2026-11-01T01:30', 'America/New_York'), /occurs twice/);
   assert.equal(localToInstant('2026-11-01T01:30', 'America/New_York', 'EARLIER').toISOString(), '2026-11-01T05:30:00.000Z');

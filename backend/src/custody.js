@@ -47,13 +47,13 @@ export async function confirmIntake(tx, user, parcel, body = {}) {
   if (legacyVerification && parcel.locationId && parcel.locationId !== facility.id) fail(409, 'Verify this legacy parcel at its recorded warehouse.');
   if (user.id === parcel.pickupConfirmedById) fail(403, 'Driver collection and warehouse receipt require separate people.');
   if (body.confirmed !== true) fail(400, 'Confirm physical receipt after inspecting every package.');
-  const operationalNote = await resolveOperationalNote(tx, parcel.organizationId, parcel, 'RECEIVED', body);
   const items = await tx.parcelItem.findMany({ where: { parcelId: parcel.id }, orderBy: { position: 'asc' } });
-  const scanned = typeof body.scannedTrackingId === 'string' ? body.scannedTrackingId.trim().toUpperCase() : '';
+  const scanned = typeof body.scannedTrackingId === 'string' ? body.scannedTrackingId.toUpperCase().replace(/\s/g, '') : '';
   if (scanned !== parcel.trackingId && !items.some(i => i.packageCode === scanned)) fail(400, 'Scan or enter the parcel or package tracking number at the warehouse.');
   const expected = items.filter(i => !i.notCollectedReason);
   const verified = body.verifiedItemIds;
   if (expected.length && (!Array.isArray(verified) || verified.length !== expected.length || new Set(verified).size !== verified.length || expected.some(i => !verified.includes(i.id)))) fail(400, 'Verify every collected package against the intake checklist before confirming receipt.');
+  const operationalNote = await resolveOperationalNote(tx, parcel.organizationId, parcel, 'RECEIVED', body);
   const now = new Date();
   if (parcel.pickupConfirmedAt && now < parcel.pickupConfirmedAt) fail(409, 'Warehouse receipt cannot precede physical collection.');
   await tx.parcelItem.updateMany({ where: { id: { in: expected.map(i => i.id) } }, data: { warehouseReceivedAt: now } });

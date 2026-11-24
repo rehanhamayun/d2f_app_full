@@ -2,14 +2,26 @@
 // Customer uses their own card at retailers; D2F provides warehouse address,
 // receives package, quotes shipping, then forwards to customer.
 import { Router } from 'express';
+import { createHash } from 'node:crypto';
 import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { fail, warehouseLock } from '../warehouse.js';
-import { audit, validAmount, validOptionalText, validText, currencies } from '../shopfront.js';
+import { audit, upsertCustomer, validAmount, validOptionalText, validText, currencies } from '../shopfront.js';
+import { resolveOrganizationId } from '../tracking.js';
 import { createNotification } from '../notifications.js';
+
+const activeTerms = () => ({ serviceType: 'SHIP_FOR_ME', isActive: true, effectiveFrom: { lte: new Date() } });
 
 const router = Router();
 router.use(authenticate, requireRole('CUSTOMER'));
+
+async function warehouseReference(tx, customer, userId) {
+  const previous = customer && await tx.shipForMeRequest.findFirst({
+    where: { customerId: customer.id, organizationId: customer.organizationId },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { customerWarehouseId: true },
+  });
+  return previous?.customerWarehouseId || `D2F-${createHash('sha256').update(userId).digest('hex').slice(0, 14).toUpperCase()}`;
+}
 
 const requestSelect = {
   id: true,
@@ -98,43 +110,20 @@ router.post('/requests', async (req, res, next) => {
     });
     if (!customer) fail(404, 'Customer profile not found.');
 
-    // Check agreement acceptance for Ship For Me
-    const latestAgreement = await prisma.customerAgreement.findFirst({
-      where: { serviceType: 'SHIP_FOR_ME', isActive: true },
-      orderBy: { effectiveFrom: 'desc' },
-    });
-    if (!latestAgreement) {
-      fail(400, 'Ship For Me terms are not configured. Contact D2F support.');
-    }
-    const acceptance = await prisma.customerAgreementAcceptance.findUnique({
-      where: {
-        customerId_agreementId: {
-          customerId: customer.id,
-          agreementId: latestAgreement.id,
-        },
-      },
-    });
-    if (!acceptance) {
-      fail(403, 'You must accept the Ship For Me terms before creating a request.');
-    }
-
-    // Assign a default warehouse address
-    const defaultAddress = await prisma.warehouseAddress.findFirst({
-      where: { organizationId: customer.organizationId, isActive: true, isDefault: true },
-      select: { id: true },
-    });
-    if (!defaultAddress) {
-      fail(400, 'No active warehouse address configured. Contact D2F support.');
-    }
-
-    // Generate unique customer warehouse ID
-    const seq = await prisma.shipForMeRequest.count({
-      where: { organizationId: customer.organizationId },
-    });
-    const customerWarehouseId = `D2F-${String(seq + 1).padStart(4, '0')}`;
-
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('customer-agreements', 0))`;
       await warehouseLock(tx, customer.organizationId);
+      const latestAgreement = await tx.customerAgreement.findFirst({ where: activeTerms(), orderBy: { effectiveFrom: 'desc' } });
+      if (!latestAgreement) fail(409, 'Ship For Me terms are awaiting publication. Contact D2F support.');
+      const acceptance = await tx.customerAgreementAcceptance.findUnique({
+        where: { customerId_agreementId: { customerId: customer.id, agreementId: latestAgreement.id } },
+      });
+      if (acceptance?.version !== latestAgreement.version) fail(403, 'Accept the current Ship For Me terms before registering a purchase.');
+      const defaultAddress = await tx.warehouseAddress.findFirst({
+        where: { organizationId: customer.organizationId, isActive: true, isDefault: true }, select: { id: true },
+      });
+      if (!defaultAddress) fail(409, 'D2F has not assigned a receiving address. Contact D2F support before shipping a purchase.');
+      const customerWarehouseId = await warehouseReference(tx, customer, req.user.id);
       const created = await tx.shipForMeRequest.create({
         data: {
           organizationId: customer.organizationId,
@@ -150,7 +139,7 @@ router.post('/requests', async (req, res, next) => {
           status: 'DRAFT',
           agreementAccepted: true,
           agreementVersion: latestAgreement.version,
-          acceptedAt: new Date(),
+          acceptedAt: acceptance.acceptedAt,
         },
         select: requestSelect,
       });
@@ -206,18 +195,12 @@ router.get('/warehouse-address', async (req, res, next) => {
       where: { userId: req.user.id },
       select: { id: true, organizationId: true },
     });
-    if (!customer) fail(404, 'Customer profile not found.');
+    const organizationId = await resolveOrganizationId(prisma, { ...req.user, organizationId: req.user.organizationId || customer?.organizationId });
     const address = await prisma.warehouseAddress.findFirst({
-      where: { organizationId: customer.organizationId, isActive: true, isDefault: true },
+      where: { organizationId, isActive: true, isDefault: true },
     });
     if (!address) fail(404, 'No warehouse address configured.');
-    const seq = await prisma.shipForMeRequest.count({
-      where: { organizationId: customer.organizationId },
-    });
-    res.json({
-      ...address,
-      customerWarehouseId: `D2F-${String(seq + 1).padStart(4, '0')}`,
-    });
+    res.json({ ...address, customerWarehouseId: await warehouseReference(prisma, customer, req.user.id) });
   } catch (error) {
     next(error);
   }
@@ -228,10 +211,10 @@ router.get('/warehouse-address', async (req, res, next) => {
 router.get('/terms', async (req, res, next) => {
   try {
     const agreement = await prisma.customerAgreement.findFirst({
-      where: { serviceType: 'SHIP_FOR_ME', isActive: true },
+      where: activeTerms(),
       orderBy: { effectiveFrom: 'desc' },
     });
-    if (!agreement) return res.status(404).json({ error: 'No active terms found.' });
+    if (!agreement) return res.status(404).json({ error: 'Ship For Me terms are awaiting publication. Retry or contact D2F support.' });
     const acceptance = await prisma.customerAgreementAcceptance.findFirst({
       where: { agreementId: agreement.id, version: agreement.version, customer: { userId: req.user.id } },
       select: { acceptedAt: true },
@@ -255,18 +238,16 @@ router.get('/terms', async (req, res, next) => {
 router.post('/terms/accept', async (req, res, next) => {
   try {
     const { agreementId, version } = req.body || {};
-    const customer = await prisma.customer.findUnique({
-      where: { userId: req.user.id },
-      select: { id: true },
-    });
-    if (!customer) fail(404, 'Customer profile not found.');
-    const agreement = await prisma.customerAgreement.findUnique({
-      where: { id: agreementId },
-    });
-    if (!agreement || !agreement.isActive || agreement.serviceType !== 'SHIP_FOR_ME') fail(404, 'Terms not found.');
-    if (version !== agreement.version) fail(409, 'The terms have changed. Review the current version before accepting.');
-    await prisma.$transaction(async (tx) => {
-      await tx.customerAgreementAcceptance.upsert({
+    const acceptance = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('customer-agreements', 0))`;
+      const agreement = await tx.customerAgreement.findFirst({ where: activeTerms(), orderBy: { effectiveFrom: 'desc' } });
+      if (!agreement) fail(404, 'Ship For Me terms have not been published.');
+      if (agreementId !== agreement.id || version !== agreement.version) fail(409, 'The terms have changed. Return and review the current version.');
+      const customer = await upsertCustomer(tx, req.user);
+      const key = { customerId_agreementId: { customerId: customer.id, agreementId: agreement.id } };
+      const previous = await tx.customerAgreementAcceptance.findUnique({ where: key });
+      if (previous?.version === version) return previous;
+      const saved = await tx.customerAgreementAcceptance.upsert({
         where: {
           customerId_agreementId: {
             customerId: customer.id,
@@ -281,9 +262,10 @@ router.post('/terms/accept', async (req, res, next) => {
           acceptedAt: new Date(),
         },
       });
-      await audit(tx, req, 'CustomerAgreementAcceptance', agreement.id, 'SHIP_FOR_ME_TERMS_ACCEPT', `v${agreement.version}`);
+      await audit(tx, req, 'CustomerAgreementAcceptance', agreement.id, 'SHIP_FOR_ME_TERMS_ACCEPT', agreement.version);
+      return saved;
     });
-    res.json({ ok: true, version: agreement.version, acceptedAt: new Date() });
+    res.json({ ok: true, version: acceptance.version, acceptedAt: acceptance.acceptedAt });
   } catch (error) {
     next(error);
   }

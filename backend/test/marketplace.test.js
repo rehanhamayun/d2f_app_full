@@ -128,7 +128,7 @@ test('Marketplace shopfront, seller studio, Buy For Me and commissions', async t
     let orderId;
     await t.test('buyer checks out: commission snapshot, reservation, address privacy', async () => {
       // Validation first
-      expectStatus(await req('/marketplace/orders', buyer, 'POST', { productId, quantity: 2, deliveryPreference: 'D2F', recipientPhone: '+1 555 0100', deliveryAddress: '12 Baker Street', deliveryCity: 'Omaha', deliveryCountry: 'United States', notes: 'Please pack with care' }), 201);
+      expectStatus(await req('/marketplace/orders', buyer, 'POST', { productId, quantity: 2, deliveryPreference: 'SELLER', deliveryMethod: 'EXTERNAL_CARRIER', recipientPhone: '+1 555 0100', deliveryAddress: '12 Baker Street', deliveryCity: 'Omaha', deliveryCountry: 'United States', notes: 'Please pack with care' }), 201);
       const orders = expectStatus(await req('/marketplace/orders', buyer), 200);
       const placed = orders.find(o => o.product?.id === productId);
       orderId = placed.id;
@@ -162,13 +162,39 @@ test('Marketplace shopfront, seller studio, Buy For Me and commissions', async t
       assert.equal(foreignReport.sellers.length, 0);
     });
 
-    await t.test('seller fulfils: advance, ship with carrier reference, buyer sees progress', async () => {
-      expectStatus(await req(`/seller/orders/${orderId}/advance`, sellerUser, 'POST', {}), 200);
-      expectStatus(await req(`/seller/orders/${orderId}/ship`, sellerUser, 'POST', { trackingRef: 'DHL-884421' }), 200);
-      const mine = expectStatus(await req('/marketplace/orders', buyer), 200).find(o => o.id === orderId);
+    await t.test('payment and proof gates keep fulfillment and refunds accurate', async () => {
+      const sellerPath = `/seller/orders/${orderId}`, adminPath = `/admin/commerce/orders/${orderId}`;
+      const payment = { verified: true, method: 'BANK_TRANSFER', reference: 'QA-REFERENCE', amountMinor: 7000, currency: 'USD' };
+      expectStatus(await req(`${sellerPath}/advance`, sellerUser, 'POST', { paymentStatus: 'VERIFIED' }), 409);
+      expectStatus(await req(`${adminPath}/marketplace-payment`, sellerUser, 'POST', payment), 403);
+      expectStatus(await req(`${adminPath}/marketplace-payment`, admin, 'POST', { ...payment, amountMinor: 1 }), 400);
+      expectStatus(await req(`${adminPath}/marketplace-payment`, admin, 'POST', { ...payment, verified: false, note: 'Amount does not match.' }), 200);
+      let mine = expectStatus(await req('/marketplace/orders', buyer), 200).find(o => o.id === orderId);
+      assert.equal(mine.status, 'ACCEPTED');
+      assert.equal(mine.paymentStatus, 'REJECTED');
+      assert.equal(mine.marketplacePaymentNote, 'Amount does not match.');
+      expectStatus(await req(`${adminPath}/marketplace-payment`, admin, 'POST', payment), 200);
+      expectStatus(await req(`${sellerPath}/advance`, sellerUser, 'POST', {}), 200);
+      expectStatus(await req(`${sellerPath}/ship`, sellerUser, 'POST', { trackingRef: 'DHL-884421' }), 400);
+      expectStatus(await req(`${sellerPath}/ship`, sellerUser, 'POST', { trackingRef: 'DHL-884421', shippingCarrier: 'DHL', shipmentEvidence: 'Carrier receipt 001' }), 200);
+      mine = expectStatus(await req('/marketplace/orders', buyer), 200).find(o => o.id === orderId);
       assert.equal(mine.status, 'SHIPPED');
+      assert.equal(mine.paymentStatus, 'VERIFIED');
       assert.equal(mine.trackingRef, 'DHL-884421');
-      expectStatus(await req(`/seller/orders/${orderId}/complete`, sellerUser, 'POST', {}), 200);
+      assert.match(mine.marketplaceInvoice.number, /^D2F-MP-/);
+      expectStatus(await req(`${sellerPath}/complete`, sellerUser, 'POST', {}), 403);
+      expectStatus(await req(adminPath, admin, 'PATCH', { status: 'COMPLETED' }), 409);
+      expectStatus(await req(adminPath, admin, 'PATCH', { status: 'DELIVERED' }), 400);
+      expectStatus(await req(adminPath, admin, 'PATCH', { status: 'DELIVERED', deliveryEvidence: 'DHL signed handover 001' }), 200);
+      expectStatus(await req(adminPath, admin, 'PATCH', { status: 'COMPLETED' }), 200);
+      expectStatus(await req(`/marketplace/orders/${orderId}/issues`, secondBuyer, 'POST', { type: 'REFUND', reason: 'Not my order' }), 404);
+      const refund = expectStatus(await req(`/marketplace/orders/${orderId}/issues`, buyer, 'POST', { type: 'REFUND', reason: 'D2F agreed to a partial refund.' }), 201);
+      const outcome = { status: 'RESOLVED', resolution: 'Transfer confirmed', amountMinor: 1000, reference: 'QA-REFUND' };
+      expectStatus(await req(`${adminPath}/issues/${refund.id}`, admin, 'PATCH', { ...outcome, amountMinor: 7001 }), 409);
+      expectStatus(await req(`${adminPath}/issues/${refund.id}`, admin, 'PATCH', outcome), 200);
+      expectStatus(await req(`${adminPath}/issues/${refund.id}`, admin, 'PATCH', outcome), 409);
+      const history = expectStatus(await req(`${adminPath}/history`, admin), 200);
+      assert.ok(history.some(row => row.action === 'MARKETPLACE_PAYMENT_VERIFIED' && row.actor.role === 'ADMIN'));
     });
 
     await t.test('stock reservation and restock on cancel', async () => {

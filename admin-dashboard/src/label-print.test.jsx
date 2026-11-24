@@ -25,8 +25,27 @@ beforeEach(()=>{
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
 async function open(){
  render(<LabelPrintPanel parcelId="p1" token={token}/>);fireEvent.click(screen.getByRole('button',{name:'Print Label'}));await screen.findByRole('dialog');
- fireEvent.change(screen.getByLabelText('Local connector pairing key'),{target:{value:'local-key'}});fireEvent.click(screen.getByRole('button',{name:'Connect local printer'}));await screen.findByText('Connected to the local Windows connector. Select the actual Brother 4×6 printer queue.');
+ screen.getByText('Direct printing and print history (optional)').parentElement.open = true;
+ fireEvent.change(screen.getByLabelText('Local connector pairing key'),{target:{value:'local-key'}});fireEvent.click(screen.getByRole('button',{name:'Connect local printer'}));await screen.findByText('Connector: Paired');
 }
+test('the main 4 × 6 print button uses the browser without the connector or print history',async()=>{
+ request.mockImplementationOnce(async()=>({id:'p1',trackingId:'D2F1',origin:'Omaha',destination:'Lomé'}));
+ request.mockRejectedValue(new Error('Print history is unavailable'));
+ render(<LabelPrintPanel parcelId="p1" token={token}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Print Label'}));
+ const printButton=await screen.findByRole('button',{name:'Print 4 × 6 label'});
+ expect(screen.getByText('Direct printing and print history (optional)').parentElement).not.toHaveAttribute('open');
+ fireEvent.click(printButton);
+ const frame=screen.getByTitle('4 × 6 shipping label');
+ const print=vi.spyOn(frame.contentWindow,'print').mockImplementation(()=>{});
+ expect(frame.contentDocument.head.textContent).toContain('size:4in 6in');
+ fireEvent.load(frame.contentDocument.querySelector('img'));
+ expect(print).toHaveBeenCalledOnce();
+ frame.contentWindow.dispatchEvent(new frame.contentWindow.Event('afterprint'));
+ expect(screen.queryByTitle('4 × 6 shipping label')).toBeNull();
+ expect(sent).toHaveLength(0);
+ expect(request).toHaveBeenCalledTimes(1);
+});
 test('explicit local print sends only the local key and syncs an audited queue result',async()=>{
  await open();fireEvent.click(screen.getByRole('button',{name:'Print one label'}));
  await screen.findByText(/Print history synced/);

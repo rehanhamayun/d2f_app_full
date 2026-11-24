@@ -19,6 +19,7 @@ export async function manifestFor(tx, container) {
   });
   return { code: container.code, method: container.method, sealNumber: container.sealNumber,
     origin: locationLabel(container.origin), destination: locationLabel(container.destination),
+    onwardCountries: container.onwardCountries,
     issuedAt: new Date().toISOString(), provisional: container.status === 'LOADING',
     parcelCount: parcels.length, totalWeightKg: Math.round(parcels.reduce((n, p) => n + p.weightKg, 0) * 1000) / 1000,
     parcels };
