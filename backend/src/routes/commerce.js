@@ -229,27 +229,6 @@ router.get('/commissions', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-router.get('/:kind', async (req, res, next) => {
-  try {
-    const kind = req.params.kind.toUpperCase();
-    if (!transitions[kind]) fail(400, 'Choose Marketplace or Buy For Me.');
-    const limit = Number(req.query.limit ?? 50), offset = Number(req.query.offset ?? 0);
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(offset) || offset < 0) fail(400, 'Invalid page.');
-    const where = { organizationId: req.organizationId, kind };
-    const [orders, total, products] = await prisma.$transaction([
-      prisma.serviceOrder.findMany({ where, include: orderInclude, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], take: limit, skip: offset }),
-      prisma.serviceOrder.count({ where }),
-      prisma.product.findMany({ where: { organizationId: req.organizationId }, orderBy: { title: 'asc' }, include: { seller: { select: { id: true, displayName: true } } } }),
-    ]);
-    res.json({
-      orders: kind === 'BUY_FOR_ME'
-        ? orders.map(order => ({ ...order, paymentInstructions: process.env.D2F_ZELLE_ACCOUNT ? `Zelle: ${process.env.D2F_ZELLE_ACCOUNT}` : 'Payment instructions are not configured. Contact D2F before requesting payment.' }))
-        : orders,
-      total, products, limit, offset, transitions: transitions[kind],
-    });
-  } catch (e) { next(e); }
-});
-
 router.get('/orders/:id/payment-submissions/:submissionId/image', async (req, res, next) => {
   try {
     const order = await prisma.serviceOrder.findFirst({
@@ -841,6 +820,27 @@ router.post('/payouts', async (req, res, next) => {
       return created;
     });
     res.status(201).json(payout);
+  } catch (e) { next(e); }
+});
+
+router.get('/:kind', async (req, res, next) => {
+  try {
+    const kind = req.params.kind.toUpperCase();
+    if (!transitions[kind]) fail(400, 'Choose Marketplace or Buy For Me.');
+    const limit = Number(req.query.limit ?? 50), offset = Number(req.query.offset ?? 0);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(offset) || offset < 0) fail(400, 'Invalid page.');
+    const where = { organizationId: req.organizationId, kind };
+    const [orders, total, products] = await prisma.$transaction([
+      prisma.serviceOrder.findMany({ where, include: orderInclude, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], take: limit, skip: offset }),
+      prisma.serviceOrder.count({ where }),
+      prisma.product.findMany({ where: { organizationId: req.organizationId }, orderBy: { title: 'asc' }, include: { seller: { select: { id: true, displayName: true } } } }),
+    ]);
+    res.json({
+      orders: kind === 'BUY_FOR_ME'
+        ? orders.map(order => ({ ...order, paymentInstructions: process.env.D2F_ZELLE_ACCOUNT ? `Zelle: ${process.env.D2F_ZELLE_ACCOUNT}` : 'Payment instructions are not configured. Contact D2F before requesting payment.' }))
+        : orders,
+      total, products, limit, offset, transitions: transitions[kind],
+    });
   } catch (e) { next(e); }
 });
 

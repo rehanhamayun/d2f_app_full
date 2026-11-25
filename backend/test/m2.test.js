@@ -28,6 +28,11 @@ test('M2: warehouse, two-way freight, permissions and selected revenue modules',
     await t.test('operational routes reject anonymous, customer and driver access; commerce is Admin only', async () => {
       for (const actor of [null, customerUser, driver]) for (const path of ['/warehouse/containers', '/warehouse/locations', '/admin/commerce/marketplace']) expectStatus(await req(path, actor), actor ? 403 : 401);
       expectStatus(await req('/admin/commerce/buy_for_me', staff), 403);
+      for (const route of ['/admin/commerce/commission-settings', '/admin/commerce/payouts']) {
+        expectStatus(await req(route, staff), 403);
+        expectStatus(await req(route, admin), 200);
+      }
+
       expectStatus(await req('/admin/users', staff), 403);
       for (const path of ['/warehouse/directory/parcels', '/warehouse/directory/customers']) {
         expectStatus(await req(path, staff), 200);
