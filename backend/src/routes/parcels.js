@@ -33,7 +33,8 @@ const DELIVERY_MODES = ['PICKUP', 'DROP_OFF'];
 const text = (value, max = 1000) => typeof value === 'string' && value.trim().length > 0 && value.trim().length <= max;
 
 const parcelInclude = {
-  connectBooking: { select: { id: true } },
+  connectBooking: { select: { id: true, verifiedWeightKg: true, assignments: { where: { status: 'CONFIRMED' }, select: { trip: { select: { airline: true, flightNumber: true } } }, take: 1 } } },
+  location: { select: { id: true, name: true } },
   items: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
   images: {
     orderBy: { createdAt: 'asc' },
@@ -53,6 +54,20 @@ const parcelInclude = {
 };
 
 router.use(authenticate, requireRole('STAFF', 'ADMIN'));
+
+function measuredPackages(raw) {
+  if (!Array.isArray(raw) || raw.length < 2 || raw.length > 20 ||
+      raw.some(p => !PACKAGE_TYPES.includes(p?.type) || typeof p.weightKg !== 'number' ||
+        !Number.isFinite(p.weightKg) || p.weightKg <= 0 || p.weightKg > 10000)) {
+    fail(400, 'Enter the type and actual weight for each of 2–20 physical packages.');
+  }
+  return {
+    weightKg: raw.reduce((sum, p) => sum + p.weightKg, 0),
+    items: raw.map(({ type, weightKg }, position) => ({
+      name: type, type, weightKg, verifiedWeightKg: weightKg, position,
+    })),
+  };
+}
 
 // POST /parcels — register a new parcel (STAFF/ADMIN)
 router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
@@ -98,6 +113,8 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
     if (recipientAddress != null && (typeof recipientAddress !== 'string' || recipientAddress.length > 1000)) {
       return res.status(400).json({ error: 'Delivery address must be at most 1,000 characters.' });
     }
+    const physicalPackages = req.body?.physicalPackages == null ? null : measuredPackages(req.body.physicalPackages);
+
     const routeError = validateRoute({
       origin,
       destination,
@@ -117,6 +134,7 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
     if (clientRequestId) {
       const existing = await prisma.parcel.findUnique({
         where: { organizationId_clientRequestId: { organizationId, clientRequestId } },
+        include: parcelInclude,
       });
       if (existing) {
         if (existing.organizationId !== organizationId) {
@@ -140,6 +158,7 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
         `;
         const existing = await tx.parcel.findUnique({
           where: { organizationId_clientRequestId: { organizationId, clientRequestId } },
+          include: parcelInclude,
         });
         if (existing) {
           if (existing.organizationId !== organizationId) {
@@ -168,6 +187,7 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
       if (!intake) fail(400, facilityAuthorizationRequired
         ? 'Assign your account to the receiving facility before registering warehouse stock.'
         : 'Add or select a receiving warehouse matching the shipment origin.');
+      const warehouseReceivedAt = new Date();
       const created = await tx.parcel.create({
         data: {
           ...tracking,
@@ -177,7 +197,8 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
           recipientAddress: recipientAddress?.trim() || null,
           pickupAddress: pickupAddress?.trim() || null,
           packageType,
-          weightKg: Number(weightKg),
+          weightKg: physicalPackages?.weightKg ?? Number(weightKg),
+          verifiedWeightKg: physicalPackages?.weightKg ?? Number(weightKg),
           origin: origin.trim(),
           destination: destination.trim(),
           method,
@@ -185,13 +206,16 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
           notes: notes?.trim() || null,
           orderType: orderType ?? null,
           status: 'RECEIVED',
-          warehouseReceivedAt: new Date(),
+          warehouseReceivedAt,
+          ...(physicalPackages && { items: { create: physicalPackages.items.map(p => ({ ...p, warehouseReceivedAt })) } }),
           warehouseReceivedById: req.user.id,
           createdById: req.user.id,
           locationId: intake?.id || req.user.locationId || null,
           clientRequestId: clientRequestId || null,
         },
       });
+
+      if (physicalPackages) await allocatePackageCodes(tx, created);
 
       // trackingIndex: public tracking ID → parcel lookup (QR payload source)
       await tx.trackingIndex.create({
@@ -218,7 +242,7 @@ router.post('/', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
         },
       });
 
-      return created;
+      return tx.parcel.findUnique({ where: { id: created.id }, include: parcelInclude });
     });
 
     res.status(createdNew ? 201 : 200).json(parcel);
@@ -703,6 +727,45 @@ router.post('/:id/transfers', requireRole('STAFF', 'ADMIN'), async (req, res, ne
   }
 });
 
+// Record the actual manifest on a legacy one-label intake before shipping.
+router.post('/:id/physical-packages', async (req, res, next) => {
+  try {
+    const { weightKg, items } = measuredPackages(req.body?.physicalPackages);
+    const organizationId = await resolveOrganizationId(prisma, req.user);
+    const result = await prisma.$transaction(async tx => {
+      await warehouseLock(tx, organizationId);
+      const p = await tx.parcel.findFirst({
+        where: { id: req.params.id, organizationId },
+        include: { items: { orderBy: { position: 'asc' } }, location: true },
+      });
+      if (!p) fail(404, 'Shipment not found.');
+      if (!p.warehouseReceivedAt || !p.location || p.containerId ||
+          !['RECEIVED', 'PROCESSING', 'READY_FOR_LOADING'].includes(p.status) || p.serviceType === 'AIR_TRAVELLER') {
+        fail(409, 'Physical packages can be recorded at the warehouse before container loading or dispatch.');
+      }
+      if (!isFacilityAuthorized(req.user, p.location)) fail(403, facilityDeniedMessage(p.location));
+      if (p.items.length) {
+        if (p.items.length === items.length && p.items.every((item, i) =>
+          item.type === items[i].type && item.verifiedWeightKg === items[i].verifiedWeightKg)) {
+          return { trackingId: p.trackingId, packageCount: p.items.length };
+        }
+        fail(409, 'This shipment already has physical package records.');
+      }
+      await tx.parcelItem.createMany({ data: items.map(item => ({
+        ...item, parcelId: p.id, warehouseReceivedAt: p.warehouseReceivedAt,
+      })) });
+      await allocatePackageCodes(tx, p);
+      await tx.parcel.update({ where: { id: p.id }, data: { weightKg, verifiedWeightKg: weightKg } });
+      await tx.auditLog.create({ data: {
+        actorId: req.user.id, entity: 'Parcel', entityId: p.id, action: 'PARCEL_PACKAGES_VERIFIED',
+        detail: JSON.stringify({ previousWeightKg: p.weightKg, weightKg, packageCount: items.length }),
+      } });
+      return { trackingId: p.trackingId, packageCount: items.length };
+    });
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
 // GET /parcels/:idOrTracking/images/:imageId/raw — staff/admin photo serving.
 // Metadata lists ride in the parcel detail; the bytes come straight from here.
 router.get('/:idOrTracking/images/:imageId/raw', requireRole('STAFF', 'ADMIN'), async (req, res, next) => {
@@ -797,7 +860,14 @@ router.patch('/:id', requireRole('ADMIN'), async (req, res, next) => {
         fail(400, 'A pickup needs a collection address before it can be scheduled.');
       }
       if (current.updatedAt.getTime() !== Date.parse(body.updatedAt)) fail(409, 'This parcel has changed. Close the form and refresh the parcel before editing again.');
+      if (data.weightKg != null && data.weightKg !== current.weightKg && current.verifiedWeightKg != null) {
+        if (await tx.parcelItem.count({ where: { parcelId: current.id, verifiedWeightKg: { not: null } } })) {
+          fail(409, 'This weight is the sum of verified physical packages.');
+        }
+        data.verifiedWeightKg = data.weightKg;
+      }
       if (data.customerId && data.customerId !== current.customerId) {
+        if (current.shipmentInvoice) fail(409, 'This shipment has an issued invoice. Its billed customer is locked.');
         const customer = await tx.customer.findFirst({ where: { id: data.customerId, organizationId } });
         if (!customer) fail(404, 'Customer not found');
         // Linked shopping orders must continue to belong to the same customer.
@@ -923,7 +993,8 @@ router.get('/:idOrTracking', async (req, res, next) => {
     }
 
     if (!parcel) return res.status(404).json({ error: 'Parcel not found' });
-    res.json(parcel);
+    const { shipmentInvoice, ...detail } = parcel;
+    res.json({ ...detail, hasInvoice: Boolean(shipmentInvoice) });
   } catch (e) {
     next(e);
   }

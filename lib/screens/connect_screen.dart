@@ -1,5 +1,8 @@
 import '../core/country_time.dart';
 import 'direct_label_print_screen.dart';
+import 'scan_screen.dart';
+import 'label_preview_screen.dart';
+import 'invoice_screen.dart';
 import '../widgets/structured_address_field.dart';
 import '../widgets/connect_declaration_form.dart';
 import '../widgets/connect_payment_evidence.dart';
@@ -96,9 +99,25 @@ class ConnectServiceCard extends StatelessWidget {
   }
 }
 
+Widget? connectNotificationDestination(String? entityType, String? entityId) {
+  if (entityId == null || entityId.isEmpty) return null;
+  return switch (entityType) {
+    'ConnectAssignment' => ConnectScreen(focusAssignmentId: entityId),
+    'ConnectTrip' => ConnectScreen(focusTripId: entityId),
+    'ConnectBooking' => ConnectBookingScreen(id: entityId, request: Api.I.connect),
+    _ => null,
+  };
+}
+
 class ConnectScreen extends ConsumerStatefulWidget {
   final ConnectRequest? request;
-  const ConnectScreen({super.key, this.request});
+  final String? focusTripId, focusAssignmentId;
+  const ConnectScreen({
+    super.key,
+    this.request,
+    this.focusTripId,
+    this.focusAssignmentId,
+  });
   @override
   ConsumerState<ConnectScreen> createState() => _ConnectScreenState();
 }
@@ -117,6 +136,9 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.focusTripId != null || widget.focusAssignmentId != null) {
+      _tab = _staff ? 1 : 2;
+    }
     _load();
   }
 
@@ -150,6 +172,15 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  List<Map<String, dynamic>> get _orderedTrips {
+    final trips = _staff ? connectRows(_operations['trips']) : _trips;
+    bool focused(Map<String, dynamic> trip) =>
+        trip['id'] == widget.focusTripId ||
+        connectRows(trip['assignments'])
+            .any((a) => a['id'] == widget.focusAssignmentId);
+    return [...trips.where(focused), ...trips.where((trip) => !focused(trip))];
   }
 
   Future<void> _openBooking(Map<String, dynamic> booking) async {
@@ -299,8 +330,7 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
                       icon: Icons.flight_takeoff,
                       text: 'No trips yet. Trips stay under review until D2F verifies the traveller, flight and permitted contents.',
                     ),
-                  for (final trip
-                      in (_staff ? connectRows(_operations['trips']) : _trips))
+                  for (final trip in _orderedTrips)
                     _ConnectTripTile(
                       trip: trip,
                       request: _request,
@@ -947,13 +977,11 @@ class _ConnectBookingScreenState extends State<ConnectBookingScreen> {
     List<ConnectInput> fields = const [],
     Map<String, dynamic> fixed = const {},
     String? message,
+    Map<String, dynamic>? supplied,
   }) async {
-    final data = await connectActionDialog(
-      context,
-      title,
-      fields,
-      message: message,
-    );
+    final data =
+        supplied ??
+        await connectActionDialog(context, title, fields, message: message);
     if (data == null) return;
     setState(() => _busy = true);
     try {
@@ -1018,24 +1046,40 @@ class _ConnectBookingScreenState extends State<ConnectBookingScreen> {
                     ['PROPOSED', 'ACCEPTED', 'CONFIRMED'].contains(a['status']),
               )
               .firstOrNull;
+    final flight = [
+      assignment?['trip']?['airline'],
+      assignment?['trip']?['flightNumber'],
+    ].whereType<String>().where((part) => part.isNotEmpty).join(' ');
+    final receivedParcel = widget.staff && p is Map && b?['originReceivedAt'] != null
+        ? Parcel.fromJson({
+            ...Map<String, dynamic>.from(p),
+            'warehouseReceivedAt': b?['originReceivedAt'],
+            'verifiedWeightKg': b?['verifiedWeightKg'],
+          })
+        : null;
     return Scaffold(
       backgroundColor: const Color(0xfff4f7f5),
       appBar: AppBar(
         title: const Text('Connect booking'),
         actions: [
-          if (widget.staff && p != null)
+          if (receivedParcel != null) ...[
             IconButton(
-              tooltip: 'Print Label',
+              tooltip: 'Shipping labels PDF',
               onPressed: () => Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => DirectLabelPrintScreen(
-                    parcel: Parcel.fromJson(Map<String, dynamic>.from(p)),
-                  ),
-                ),
+                MaterialPageRoute(builder: (_) => LabelPreviewScreen(parcel: receivedParcel)),
+              ),
+              icon: const Icon(Icons.description_outlined),
+            ),
+            IconButton(
+              tooltip: 'Direct label printing',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => DirectLabelPrintScreen(parcel: receivedParcel)),
               ),
               icon: const Icon(Icons.print_outlined),
             ),
+          ],
           IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
         ],
       ),
@@ -1242,6 +1286,10 @@ class _ConnectBookingScreenState extends State<ConnectBookingScreen> {
                               ? 'D2F review in progress'
                               : '${connectLabel(assignment['status'])} · ${connectTripDate(Map<String, dynamic>.from(assignment['trip']))}',
                         ),
+                        if (flight.isNotEmpty)
+                          _ConnectLine('Assigned flight', flight),
+                        if (widget.staff && p['location']?['name'] != null)
+                          _ConnectLine('Current facility', p['location']['name']),
                         _ConnectLine(
                           'Traveller collection',
                           b['collectedAt'] == null
@@ -1352,6 +1400,13 @@ class _ConnectBookingScreenState extends State<ConnectBookingScreen> {
                           'D2F payment instructions',
                           b['paymentInstructions'] ?? 'D2F will provide verified payment instructions here. Wait for these instructions before paying.',
                         ),
+                        if (receivedParcel != null)
+                          OutlinedButton.icon(
+                            onPressed: () => openIntakeReceipt(context, receivedParcel),
+                            icon: const Icon(Icons.print_outlined),
+                            label: const Text('Print or share intake receipt'),
+                          ),
+                        if (b['quoteAcceptedAt'] != null) InvoiceButton(type: 'connect', id: widget.id),
                         _ConnectLine(
                           'Payment',
                           b['payment'] == null
@@ -1632,6 +1687,12 @@ class _ConnectBookingScreenState extends State<ConnectBookingScreen> {
                                       'note',
                                       'Inspection and package condition',
                                     ),
+                                    ConnectInput(
+                                      'physicalPackages',
+                                      'Multiple packages: verified kg, comma separated',
+                                      optional: true,
+                                      packageWeights: true,
+                                    ),
                                   ],
                                 ),
                               ),
@@ -1647,41 +1708,25 @@ class _ConnectBookingScreenState extends State<ConnectBookingScreen> {
                           ],
                           if (b['collectedAt'] != null &&
                               b['destinationReceivedAt'] == null)
-                            _button(
-                              'Confirm destination team receipt',
-                              () async {
-                                try {
-                                  final ops = await widget.request(
-                                    '/operations',
-                                    method: 'GET',
+                            _button('Confirm destination team receipt', () async {
+                              final selection =
+                                  await showDialog<Map<String, dynamic>>(
+                                    context: context,
+                                    builder: (_) => _ConnectFacilityDialog(
+                                      request: widget.request,
+                                      path:
+                                          '/bookings/${widget.id}/destination-locations',
+                                      requiresNote: true,
+                                    ),
                                   );
-                                  final locations = connectRows(
-                                    ops['locations'],
-                                  ).where((l) => l['connectReceiving'] == true);
-                                  if (!context.mounted) return;
-                                  _action(
-                                    'destination-received',
-                                    'Destination receiving team handover',
-                                    fields: [
-                                      ConnectInput(
-                                        'locationId',
-                                        'Approved destination facility',
-                                        options: {
-                                          for (final l in locations)
-                                            l['id']: l['name'],
-                                        },
-                                      ),
-                                      const ConnectInput(
-                                        'note',
-                                        'Condition & receiving evidence',
-                                      ),
-                                    ],
-                                  );
-                                } catch (e) {
-                                  if (mounted) setState(() => _error = '$e');
-                                }
-                              },
-                            ),
+                              if (selection != null && mounted) {
+                                await _action(
+                                  'destination-received',
+                                  'Confirm destination team receipt',
+                                  supplied: selection,
+                                );
+                              }
+                            }),
                           if (p['status'] == 'ARRIVED_DESTINATION')
                             _button(
                               'Mark ready for recipient handover',
@@ -2125,17 +2170,75 @@ class _ConnectTripTile extends StatelessWidget {
     String title, {
     List<ConnectInput> fields = const [],
     Map<String, dynamic> fixed = const {},
+    String method = 'POST',
   }) async {
     final data = await connectActionDialog(context, title, fields);
     if (data == null) return;
     try {
-      await request(path, method: 'POST', data: {...fixed, ...data});
+      await request(path, method: method, data: {...fixed, ...data});
       await onChanged();
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('$e')));
       }
+    }
+  }
+
+  Future<void> _scanPackage(
+    BuildContext context,
+    Map<String, dynamic> assignment,
+  ) async {
+    final trackingId = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const ScanScreen(returnTracking: true)),
+    );
+    if (trackingId == null || !context.mounted) return;
+    try {
+      final result = await request(
+        '/assignments/${assignment['id']}/package-receipts',
+        method: 'POST',
+        data: {'trackingId': trackingId},
+      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result['duplicate'] == true
+                  ? 'Package already scanned.'
+                  : '${result['scanned']} of ${result['expected']} packages scanned.',
+            ),
+          ),
+        );
+      }
+      await onChanged();
+    } catch (e) {
+      if (context.mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  Future<void> _selectFacility(BuildContext context) async {
+    final data = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => _ConnectFacilityDialog(
+        request: request,
+        path: '/trips/${trip['id']}/receiving-locations',
+      ),
+    );
+    if (data == null || !context.mounted) return;
+    try {
+      await request(
+        '/trips/${trip['id']}/receiving-location',
+        method: 'PATCH',
+        data: data,
+      );
+      await onChanged();
+    } catch (e) {
+      if (context.mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
@@ -2165,27 +2268,64 @@ class _ConnectTripTile extends StatelessWidget {
         const SizedBox(height: 12),
         _ConnectLine('Departure', connectTripDate(trip)),
         if (trip['arrivalAt'] != null)
-          _ConnectLine('Arrival', countryDate(trip['arrivalAt'], timezone: trip['destinationTimezone'] as String?)),
-        if (trip['airline'] != null) _ConnectLine('Flight', '${trip['airline']} ${trip['flightNumber']}'),
-        if (!staff && trip['airline'] != null && ['PENDING_REVIEW', 'REJECTED'].contains(trip['status']))
+          _ConnectLine(
+            'Arrival',
+            countryDate(
+              trip['arrivalAt'],
+              timezone: trip['destinationTimezone'] as String?,
+            ),
+          ),
+        if (trip['flightNumber'] != null)
+          _ConnectLine(
+            'Flight',
+            [trip['airline'], trip['flightNumber']].whereType<String>().join(' '),
+          ),
+        if (!staff &&
+            trip['airline'] != null &&
+            ['PENDING_REVIEW', 'REJECTED'].contains(trip['status']))
           OutlinedButton(
             onPressed: () async {
-              await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) =>
-                _ConnectTripVerification(tripId: trip['id'] as String, documents: connectRows(trip['verificationDocuments']))));
+              await Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (_) => _ConnectTripVerification(
+                    tripId: trip['id'] as String,
+                    documents: connectRows(trip['verificationDocuments']),
+                  ),
+                ),
+              );
               await onChanged();
             },
-            child: Text(connectRows(trip['verificationDocuments']).length == 2 ? 'Review verification uploads' : 'Complete trip verification'),
+            child: Text(
+              connectRows(trip['verificationDocuments']).length == 2
+                  ? 'Review verification uploads'
+                  : 'Complete trip verification',
+            ),
           ),
         _ConnectLine(
           'Available / total capacity',
           '${trip['remainingKg']} / ${trip['capacityKg']} kg',
         ),
         _ConnectLine('Trip status', connectLabel(trip['status'])),
+        if (trip['scheduleChange'] != null)
+          _ConnectLine(
+            'Schedule update',
+            trip['scheduleChange']['type'] == 'DELAY'
+                ? 'Flight delayed'
+                : 'Flight rebooked',
+          ),
+        if (staff && trip['status'] == 'APPROVED')
+          OutlinedButton.icon(
+            onPressed: () => _selectFacility(context),
+            icon: const Icon(Icons.location_on_outlined),
+            label: const Text('Set public receiving facility'),
+          ),
         _ConnectLine(
           'Accepted categories',
           (trip['categories'] as List).map(connectLabel).join(', '),
         ),
-        if (admin && trip['status'] == 'PENDING_REVIEW' && trip['airline'] == null)
+        if (admin &&
+            trip['status'] == 'PENDING_REVIEW' &&
+            trip['airline'] == null)
           OutlinedButton(
             onPressed: () => _run(
               context,
@@ -2246,8 +2386,10 @@ class _ConnectTripTile extends StatelessWidget {
                 const SizedBox(height: 6),
                 Text(a['description'] ?? '', style: AppTheme.caption),
                 if (!staff &&
+                    (a['scannedPackageCount'] ?? 0) == 0 &&
                     a['collectedAt'] == null &&
-                    trip['status'] == 'APPROVED')
+                    trip['status'] == 'APPROVED') ...[
+                  const SizedBox(height: 12),
                   OutlinedButton.icon(
                     onPressed: () async {
                       final saved = await Navigator.push<bool>(
@@ -2271,6 +2413,7 @@ class _ConnectTripTile extends StatelessWidget {
                           : 'Review / renew traveller declaration',
                     ),
                   ),
+                ],
                 if (a['travellerDeclaration'] != null)
                   Text(
                     'Traveller declaration recorded · ${countryDate(a['travellerDeclaration']['createdAt'], timezone: trip['departureTimezone'] as String? ?? suggestedTimezone('${trip['origin']}'))}',
@@ -2290,6 +2433,7 @@ class _ConnectTripTile extends StatelessWidget {
                     child: const Text('Review & accept parcel'),
                   ),
                 if (!staff &&
+                    (a['scannedPackageCount'] ?? 0) == 0 &&
                     a['collectedAt'] == null &&
                     trip['status'] == 'APPROVED')
                   TextButton(
@@ -2306,22 +2450,50 @@ class _ConnectTripTile extends StatelessWidget {
                   ),
                 if (!staff &&
                     a['status'] == 'CONFIRMED' &&
-                    a['collectedAt'] == null)
-                  OutlinedButton.icon(
-                    onPressed: () => _run(
-                      context,
-                      '/assignments/${a['id']}/collect',
-                      'Verify contents & confirm collection',
-                      fields: const [
-                        ConnectInput(
-                          'code',
-                          'Single-use code from D2F receiving team',
-                        ),
-                      ],
-                      fixed: const {'contentsAccepted': true},
+                    a['collectedAt'] == null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    a['handoverAuthorized'] == true
+                        ? '${a['scannedPackageCount'] ?? 0} of ${a['expectedPackageCount'] ?? 0} packages scanned'
+                        : 'The receiving team will authorize package collection.',
+                    style: AppTheme.caption,
+                  ),
+                  if (a['handoverAuthorized'] == true &&
+                      (a['scannedPackageCount'] ?? 0) <
+                          (a['expectedPackageCount'] ?? 0))
+                    OutlinedButton.icon(
+                      onPressed: () => _scanPackage(context, a),
+                      icon: const Icon(Icons.qr_code_scanner),
+                      label: const Text('Scan package received'),
                     ),
-                    icon: const Icon(Icons.password),
-                    label: const Text('Verify D2F collection code'),
+                  if (a['handoverAuthorized'] == true &&
+                      (a['expectedPackageCount'] ?? 0) > 0 &&
+                      a['scannedPackageCount'] == a['expectedPackageCount'])
+                    FilledButton.icon(
+                      onPressed: () => _run(
+                        context,
+                        '/assignments/${a['id']}/collect',
+                        'Confirm physical handover',
+                        fields: const [
+                          ConnectInput(
+                            'code',
+                            'Single-use code from D2F receiving team',
+                          ),
+                          ConnectInput(
+                            'contentsAccepted',
+                            'I received every scanned package and verified the contents',
+                            checkbox: true,
+                          ),
+                        ],
+                      ),
+                      icon: const Icon(Icons.password),
+                      label: const Text('Confirm handover with D2F code'),
+                    ),
+                ],
+                if (a['collectedAt'] != null)
+                  const Text(
+                    'Package handover confirmed',
+                    style: AppTheme.caption,
                   ),
               ],
             ),
@@ -2383,9 +2555,136 @@ class _ConnectTripTile extends StatelessWidget {
   );
 }
 
+class _ConnectFacilityDialog extends StatefulWidget {
+  final ConnectRequest request;
+  final String path;
+  final bool requiresNote;
+  const _ConnectFacilityDialog({
+    required this.request,
+    required this.path,
+    this.requiresNote = false,
+  });
+
+  @override
+  State<_ConnectFacilityDialog> createState() => _ConnectFacilityDialogState();
+}
+
+class _ConnectFacilityDialogState extends State<_ConnectFacilityDialog> {
+  late Future<dynamic> facilities;
+  final form = GlobalKey<FormState>();
+  final note = TextEditingController();
+  String? selected;
+
+  Future<dynamic> _load() => widget.request(widget.path, method: 'GET');
+
+  @override
+  void initState() {
+    super.initState();
+    facilities = _load();
+  }
+
+  @override
+  void dispose() {
+    note.dispose();
+    super.dispose();
+  }
+
+  void _retry() => setState(() {
+    selected = null;
+    facilities = _load();
+  });
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<dynamic>(
+    future: facilities,
+    builder: (context, snapshot) {
+      final data = snapshot.connectionState == ConnectionState.done
+          ? snapshot.data
+          : null;
+      final options = connectRows(data?['locations']);
+      return AlertDialog(
+        title: const Text('Choose the public receiving facility'),
+        content: SizedBox(
+          width: 440,
+          child: SingleChildScrollView(
+            child: Form(
+              key: form,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (snapshot.connectionState != ConnectionState.done)
+                    const LinearProgressIndicator(
+                      semanticsLabel: 'Loading facilities',
+                    )
+                  else if (snapshot.hasError) ...[
+                    const Text('Could not load receiving facilities.'),
+                    TextButton(onPressed: _retry, child: const Text('Retry')),
+                  ] else if (options.isEmpty) ...[
+                    Text(
+                      'No public receiving facility is configured for ${data['route']}. Ask your D2F administrator to set up a public address in Connect locations.',
+                    ),
+                    TextButton(onPressed: _retry, child: const Text('Refresh')),
+                  ] else ...[
+                    DropdownButtonFormField<String>(
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Receiving facility',
+                      ),
+                      items: [
+                        for (final option in options)
+                          DropdownMenuItem(
+                            value: option['id'] as String,
+                            child: Text(
+                              option['name'],
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (value) => setState(() => selected = value),
+                    ),
+                    if (widget.requiresNote)
+                      TextFormField(
+                        controller: note,
+                        decoration: const InputDecoration(
+                          labelText: 'Condition & receiving evidence',
+                        ),
+                        maxLength: 1000,
+                        validator: (value) => value?.trim().isNotEmpty == true
+                            ? null
+                            : 'Required',
+                      ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: selected == null || options.isEmpty
+                ? null
+                : () {
+                    if (form.currentState?.validate() == true)
+                      Navigator.pop(context, {
+                        'locationId': selected,
+                        if (widget.requiresNote) 'note': note.text.trim(),
+                      });
+                  },
+            child: const Text('Confirm'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
 class ConnectInput {
   final String key, label;
-  final bool numeric, money, checkbox;
+  final bool numeric, money, checkbox, optional, packageWeights;
   final Map<String, String>? options;
   const ConnectInput(
     this.key,
@@ -2393,6 +2692,8 @@ class ConnectInput {
     this.checkbox = false,
     this.numeric = false,
     this.money = false,
+    this.optional = false,
+    this.packageWeights = false,
     this.options,
   });
 }
@@ -2486,8 +2787,18 @@ Future<Map<String, dynamic>?> connectActionDialog(
                                   : TextInputType.text,
                               validator: (v) {
                                 if (v == null || v.trim().isEmpty) {
-                                  return 'Required';
+                                  return f.optional ? null : 'Required';
                                 }
+                                if (f.packageWeights &&
+                                    v.split(',').any((text) {
+                                      final weight = double.tryParse(
+                                        text.trim(),
+                                      );
+                                      return weight == null ||
+                                          !weight.isFinite ||
+                                          weight <= 0;
+                                    }))
+                                  return 'Enter valid package weights';
                                 if (f.numeric || f.money) {
                                   final n = double.tryParse(v);
                                   if (n == null || !n.isFinite || n < 0) {
@@ -2517,6 +2828,13 @@ Future<Map<String, dynamic>?> connectActionDialog(
                       ? checks[f.key] == true
                       : f.options != null
                       ? choices[f.key]
+                      : f.packageWeights
+                      ? (controllers[f.key]!.text.trim().isEmpty
+                            ? null
+                            : controllers[f.key]!.text
+                                  .split(',')
+                                  .map((v) => double.parse(v.trim()))
+                                  .toList())
                       : f.money
                       ? (double.parse(controllers[f.key]!.text) * 100).round()
                       : f.numeric

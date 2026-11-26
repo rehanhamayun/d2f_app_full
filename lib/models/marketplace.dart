@@ -570,7 +570,7 @@ class MarketplaceNotification {
   final String id;
   final String type;
   final String title;
-  final String? body;
+  final String? body, entityType, entityId;
   final bool read;
   final DateTime? createdAt;
 
@@ -579,6 +579,8 @@ class MarketplaceNotification {
     required this.type,
     required this.title,
     this.body,
+    this.entityType,
+    this.entityId,
     required this.read,
     this.createdAt,
   });
@@ -589,6 +591,8 @@ class MarketplaceNotification {
         type: json['type'] as String? ?? 'NOTIFICATION',
         title: json['title'] as String? ?? 'D2F',
         body: json['body'] as String?,
+        entityType: json['entityType'] as String?,
+        entityId: json['entityId'] as String?,
         read: json['read'] as bool? ?? false,
         createdAt: DateTime.tryParse(json['createdAt'] as String? ?? ''),
       );

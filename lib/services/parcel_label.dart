@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -11,374 +10,255 @@ class ParcelLabel {
   static const format = PdfPageFormat(
     4 * PdfPageFormat.inch,
     6 * PdfPageFormat.inch,
-    marginAll: 14,
+    marginAll: 15,
   );
   static const _channel = MethodChannel('d2f/labels');
   static String filename(Parcel parcel) => '${parcel.trackingId}-label.pdf';
 
   static Future<Uint8List> generate(Parcel parcel) async {
+    final packages = parcel.items.indexed
+        .where((entry) => !entry.$2.missed && entry.$2.packageCode != null)
+        .map((entry) => (entry.$1 + 1, entry.$2 as ParcelItem?))
+        .toList();
+    if (parcel.items.isEmpty) packages.add((1, null));
+    if (packages.isEmpty) {
+      throw StateError(
+        'Labels are available after D2F records physical custody.',
+      );
+    }
+
     final font = pw.Font.ttf(
       await rootBundle.load('assets/fonts/PlusJakartaSans.ttf'),
     );
-    final logo = pw.MemoryImage(
-      (await rootBundle.load('assets/images/d2f_2.png')).buffer.asUint8List(),
-    );
     final doc = pw.Document(
-      title: '${parcel.trackingId} shipping label',
-      author: 'D2F Shipping LLC',
+      title: '${parcel.trackingId} shipping labels',
+      author: 'D2F Shipping',
+      theme: pw.ThemeData.withFont(base: font, bold: font),
     );
-    pw.Widget text(
+
+    pw.Widget field(
       String value,
+      double left,
+      double top,
+      double width,
+      double height,
       double size, {
+      int maxLines = 1,
       PdfColor color = PdfColors.black,
-    }) => pw.Text(
-      value,
-      style: pw.TextStyle(fontSize: size, color: color),
-    );
-    pw.Widget field(String label, String value, {double size = 9}) => pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        text(label, 6.5, color: PdfColors.grey700),
-        pw.SizedBox(height: 3),
-        text(value, size),
-      ],
-    );
-    doc.addPage(
-      pw.Page(
-        pageFormat: format,
-        theme: pw.ThemeData.withFont(base: font, bold: font),
-        build: (_) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-          children: [
-            pw.Row(
-              children: [
-                pw.Image(logo, width: 29, height: 29),
-                pw.SizedBox(width: 8),
-                pw.Expanded(
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      text('D2F GLOBAL', 14),
-                      text('SHIPPING LABEL', 6.5),
-                    ],
-                  ),
-                ),
-                pw.Container(
-                  padding: const pw.EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 5,
-                  ),
-                  decoration: pw.BoxDecoration(
-                    border: pw.Border.all(width: .7),
-                  ),
-                  child: text(parcel.method.name, 10),
-                ),
-              ],
+    }) => pw.Positioned(
+      left: left,
+      top: top,
+      child: pw.SizedBox(
+        width: width,
+        height: height,
+        child: pw.FittedBox(
+          alignment: pw.Alignment.topLeft,
+          fit: pw.BoxFit.scaleDown,
+          child: pw.SizedBox(
+            width: width,
+            child: pw.Text(
+              value.trim().isEmpty ? '-' : value,
+              maxLines: maxLines,
+              style: pw.TextStyle(fontSize: size, color: color),
             ),
-            pw.Divider(height: 17, thickness: .7),
-            text('TRACKING NUMBER', 6.5, color: PdfColors.grey700),
-            pw.SizedBox(height: 4),
-            text(parcel.trackingId, 18),
-            pw.SizedBox(height: 7),
-            pw.Container(
-              color: PdfColors.white,
-              padding: const pw.EdgeInsets.symmetric(
-                horizontal: 9,
-                vertical: 5,
-              ),
-              child: pw.BarcodeWidget(
-                barcode: pw.Barcode.code128(),
-                data: parcel.trackingId,
-                drawText: false,
-                height: 40,
-              ),
-            ),
-            pw.SizedBox(height: 12),
-            pw.Row(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Container(
-                  width: 91,
-                  height: 91,
-                  padding: const pw.EdgeInsets.all(6),
-                  color: PdfColors.white,
-                  child: pw.BarcodeWidget(
-                    barcode: pw.Barcode.qrCode(),
-                    data: parcel.trackingId,
-                    drawText: false,
-                  ),
-                ),
-                pw.SizedBox(width: 13),
-                pw.Expanded(
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      field('FROM', parcel.origin, size: 8),
-                      pw.SizedBox(height: 9),
-                      field('TO', parcel.destination, size: 10),
-                      pw.SizedBox(height: 9),
-                      text(
-                        '${parcel.packageTypeLabel.toUpperCase()}  |  ${parcel.weightKg} kg',
-                        8,
-                      ),
-                      if (parcel.items.isNotEmpty)
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.only(top: 3),
-                          child: text(
-                            '${parcel.items.length} PACKAGE'
-                            '${parcel.items.length == 1 ? '' : 'S'}'
-                            ' IN THIS SHIPMENT',
-                            7,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            pw.SizedBox(height: 10),
-            pw.Container(
-              padding: const pw.EdgeInsets.all(9),
-              decoration: pw.BoxDecoration(border: pw.Border.all(width: .7)),
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-                children: [
-                  text('DELIVER TO', 6.5, color: PdfColors.grey700),
-                  pw.SizedBox(height: 4),
-                  pw.SizedBox(
-                    height: 25,
-                    child: pw.FittedBox(
-                      fit: pw.BoxFit.scaleDown,
-                      alignment: pw.Alignment.topLeft,
-                      child: pw.SizedBox(
-                        width: 240,
-                        child: text(parcel.recipientName, 11),
-                      ),
-                    ),
-                  ),
-                  if (parcel.recipientPhone?.isNotEmpty ?? false) ...[
-                    text(parcel.recipientPhone!, 8),
-                    pw.SizedBox(height: 4),
-                  ],
-                  if (parcel.recipientAddress?.isNotEmpty ?? false)
-                    pw.SizedBox(
-                      height: 35,
-                      child: pw.FittedBox(
-                        fit: pw.BoxFit.scaleDown,
-                        alignment: pw.Alignment.topLeft,
-                        child: pw.SizedBox(
-                          width: 240,
-                          child: text(parcel.recipientAddress!, 8),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            pw.Spacer(),
-            pw.Divider(height: 12, thickness: .5),
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                text(
-                  'Registered ${DateFormat('dd MMM yyyy').format(parcel.createdAt.toLocal())}',
-                  6.5,
-                ),
-                text('d2fshipping.com', 6.5),
-              ],
-            ),
-            pw.SizedBox(height: 5),
-            text(
-              'Scan either code to retrieve this parcel. Keep the label flat and visible.',
-              6,
-            ),
-          ],
+          ),
         ),
       ),
     );
 
-    // Per-package pages ("Box 2 of 6"): each declared package gets its own
-    // printable label carrying the package sub-code (P01…) once the goods
-    // have entered D2F custody. Scanning still resolves the shipment.
-    final items = parcel.items
-        .where((item) => item.packageCode != null)
-        .toList(growable: false);
-    for (final item in items) {
-      final position = parcel.items.indexOf(item) + 1;
-      final dims =
-          (item.lengthCm != null &&
-              item.widthCm != null &&
-              item.heightCm != null)
-          ? '  |  ${_labelCm(item.lengthCm!)}×${_labelCm(item.widthCm!)}×${_labelCm(item.heightCm!)} cm'
-          : '';
+    pw.Widget rule(double top, {double height = .7}) => pw.Positioned(
+      left: 0,
+      top: top,
+      child: pw.Container(width: 258, height: height, color: PdfColors.black),
+    );
+
+    List<pw.Widget> address(
+      String title,
+      String name,
+      String? phone,
+      String place,
+      double left,
+    ) => [
+      field(title, left, 235, 120, 10, 8),
+      field(name, left, 251, 120, 23, 11, maxLines: 2),
+      field(phone ?? '', left, 277, 120, 13, 9),
+      field(place, left, 293, 120, 35, 9, maxLines: 4),
+    ];
+
+    for (final (position, item) in packages) {
+      final code = item?.packageCode ?? parcel.trackingId;
+      final count = parcel.items.isEmpty ? 1 : parcel.items.length;
+      final verifiedWeight =
+          item?.verifiedWeightKg ??
+          (count == 1 ? parcel.verifiedWeightKg : null);
+      final labelWeight =
+          verifiedWeight ??
+          item?.weightKg ??
+          (count == 1 ? parcel.weightKg : null);
+      final verified =
+          verifiedWeight != null ||
+          (parcel.warehouseReceived &&
+              parcel.restrictionsAcknowledgedAt == null);
+      final method = switch (parcel.serviceType) {
+        'AIR_TRAVELLER' => 'AIR TRAVELLER',
+        'AIR_CARGO' => 'AIR CARGO',
+        _ => parcel.method.name,
+      };
+
       doc.addPage(
         pw.Page(
           pageFormat: format,
-          theme: pw.ThemeData.withFont(base: font, bold: font),
-          build: (_) => pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-            children: [
-              pw.Row(
-                children: [
-                  pw.Image(logo, width: 29, height: 29),
-                  pw.SizedBox(width: 8),
-                  pw.Expanded(
+          build: (_) => pw.SizedBox(
+            width: 258,
+            height: 402,
+            child: pw.Stack(
+              children: [
+                field('D2F SHIPPING', 0, 1, 184, 25, 20),
+                pw.Positioned(
+                  left: 194,
+                  top: 1,
+                  child: pw.Container(
+                    width: 64,
+                    height: 25,
+                    alignment: pw.Alignment.center,
+                    decoration: pw.BoxDecoration(border: pw.Border.all()),
+                    child: pw.Text(
+                      method,
+                      style: const pw.TextStyle(fontSize: 8),
+                    ),
+                  ),
+                ),
+                rule(34, height: 1.3),
+                field('DESTINATION', 0, 45, 184, 11, 8),
+                field(
+                  parcel.destination.toUpperCase(),
+                  0,
+                  62,
+                  187,
+                  47,
+                  23,
+                  maxLines: 2,
+                ),
+                pw.Positioned(
+                  left: 196,
+                  top: 45,
+                  child: pw.Container(
+                    width: 62,
+                    height: 59,
+                    color: PdfColors.black,
+                    alignment: pw.Alignment.center,
                     child: pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      mainAxisAlignment: pw.MainAxisAlignment.center,
                       children: [
-                        text('D2F GLOBAL', 14),
-                        text(
-                          'PACKAGE P${position.toString().padLeft(2, '0')} OF ${parcel.items.length}',
-                          6.5,
+                        pw.Text(
+                          '$position / $count',
+                          style: const pw.TextStyle(
+                            fontSize: 16,
+                            color: PdfColors.white,
+                          ),
+                        ),
+                        pw.SizedBox(height: 5),
+                        pw.Text(
+                          'PACKAGE',
+                          style: const pw.TextStyle(
+                            fontSize: 8,
+                            color: PdfColors.white,
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  pw.Container(
-                    padding: const pw.EdgeInsets.symmetric(
-                      horizontal: 9,
-                      vertical: 5,
-                    ),
-                    decoration: pw.BoxDecoration(
-                      border: pw.Border.all(width: .7),
-                    ),
-                    child: text(
-                      '${item.typeLabel.toUpperCase()} $position OF ${parcel.items.length}',
-                      10,
+                ),
+                rule(114),
+                field('PACKAGE TRACKING', 0, 125, 258, 11, 8),
+                pw.Positioned(
+                  left: 0,
+                  top: 140,
+                  child: pw.SizedBox(
+                    width: 258,
+                    height: 27,
+                    child: pw.FittedBox(
+                      fit: pw.BoxFit.scaleDown,
+                      alignment: pw.Alignment.topLeft,
+                      child: pw.Text(
+                        code,
+                        style: const pw.TextStyle(fontSize: 21),
+                      ),
                     ),
                   ),
-                ],
-              ),
-              pw.Divider(height: 17, thickness: .7),
-              text('SHIPMENT TRACKING NUMBER', 6.5, color: PdfColors.grey700),
-              pw.SizedBox(height: 4),
-              text(parcel.trackingId, 16),
-              pw.SizedBox(height: 7),
-              pw.Container(
-                color: PdfColors.white,
-                padding: const pw.EdgeInsets.symmetric(
-                  horizontal: 9,
-                  vertical: 5,
                 ),
-                child: pw.BarcodeWidget(
-                  barcode: pw.Barcode.code128(),
-                  data: item.packageCode!,
-                  drawText: false,
-                  height: 40,
+                pw.Positioned(
+                  left: 16,
+                  top: 173,
+                  child: pw.BarcodeWidget(
+                    barcode: pw.Barcode.code128(),
+                    data: code,
+                    drawText: false,
+                    width: 226,
+                    height: 44,
+                  ),
                 ),
-              ),
-              pw.SizedBox(height: 12),
-              pw.Row(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Container(
-                    width: 91,
-                    height: 91,
-                    padding: const pw.EdgeInsets.all(6),
+                rule(225),
+                ...address(
+                  'FROM',
+                  parcel.customer?.displayName ?? '',
+                  parcel.customer?.phone,
+                  parcel.origin,
+                  0,
+                ),
+                ...address(
+                  'SHIP TO',
+                  parcel.recipientName,
+                  parcel.recipientPhone,
+                  parcel.recipientAddress?.trim().isNotEmpty == true
+                      ? parcel.recipientAddress!
+                      : parcel.destination,
+                  134,
+                ),
+                rule(332),
+                field('SHIPMENT GROUP', 0, 341, 182, 11, 8),
+                field(parcel.trackingId, 0, 355, 182, 17, 13),
+                field(
+                  (item?.typeLabel ?? parcel.packageTypeLabel).toUpperCase(),
+                  0,
+                  376,
+                  180,
+                  12,
+                  9,
+                ),
+                field(
+                  labelWeight == null
+                      ? 'WEIGHT NOT RECORDED'
+                      : '${verified ? 'VERIFIED' : 'RECORDED'} WEIGHT  $labelWeight kg',
+                  0,
+                  389,
+                  180,
+                  12,
+                  9,
+                ),
+                pw.Positioned(
+                  left: 192,
+                  top: 336,
+                  child: pw.Container(
+                    width: 66,
+                    height: 66,
+                    padding: const pw.EdgeInsets.all(7),
                     color: PdfColors.white,
                     child: pw.BarcodeWidget(
                       barcode: pw.Barcode.qrCode(),
-                      data: item.packageCode!,
+                      data: code,
                       drawText: false,
                     ),
                   ),
-                  pw.SizedBox(width: 13),
-                  pw.Expanded(
-                    child: pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        field(
-                          'PACKAGE (${item.typeLabel.toUpperCase()})',
-                          '${item.name} · ×${item.quantity}',
-                          size: 10,
-                        ),
-                        if (item.weightKg != null)
-                          pw.Padding(
-                            padding: const pw.EdgeInsets.only(top: 7),
-                            child: field(
-                              'WEIGHT',
-                              '${item.weightKg} kg$dims',
-                              size: 9,
-                            ),
-                          )
-                        else if (dims.isNotEmpty)
-                          pw.Padding(
-                            padding: const pw.EdgeInsets.only(top: 7),
-                            child: field('SIZE', dims.trim(), size: 9),
-                          ),
-                        if (item.details != null && item.details!.isNotEmpty)
-                          pw.Padding(
-                            padding: const pw.EdgeInsets.only(top: 7),
-                            child: field('NOTE', item.details!, size: 8),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 10),
-              pw.Container(
-                padding: const pw.EdgeInsets.all(9),
-                decoration: pw.BoxDecoration(border: pw.Border.all(width: .7)),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-                  children: [
-                    text('DELIVER TO', 6.5, color: PdfColors.grey700),
-                    pw.SizedBox(height: 4),
-                    pw.SizedBox(
-                      height: 25,
-                      child: pw.FittedBox(
-                        fit: pw.BoxFit.scaleDown,
-                        alignment: pw.Alignment.topLeft,
-                        child: pw.SizedBox(
-                          width: 240,
-                          child: text(parcel.recipientName, 11),
-                        ),
-                      ),
-                    ),
-                    if (parcel.recipientPhone?.isNotEmpty ?? false) ...[
-                      text(parcel.recipientPhone!, 8),
-                      pw.SizedBox(height: 4),
-                    ],
-                    if (parcel.recipientAddress?.isNotEmpty ?? false)
-                      pw.SizedBox(
-                        height: 35,
-                        child: pw.FittedBox(
-                          fit: pw.BoxFit.scaleDown,
-                          alignment: pw.Alignment.topLeft,
-                          child: pw.SizedBox(
-                            width: 240,
-                            child: text(parcel.recipientAddress!, 8),
-                          ),
-                        ),
-                      ),
-                  ],
                 ),
-              ),
-              pw.Spacer(),
-              pw.Divider(height: 12, thickness: .5),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  text('Package code ${item.packageCode}'.toUpperCase(), 6.5),
-                  text('d2fshipping.com', 6.5),
-                ],
-              ),
-              pw.SizedBox(height: 5),
-              text(
-                'Scan the code to open the shipment record. Keep the label flat and visible.',
-                6,
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       );
     }
     return doc.save();
   }
-
-  static String _labelCm(double value) =>
-      value % 1 == 0 ? value.toStringAsFixed(0) : value.toStringAsFixed(1);
 
   static Future<bool> save(Parcel parcel) async {
     final bytes = await generate(parcel);

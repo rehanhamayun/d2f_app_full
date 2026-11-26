@@ -1,4 +1,5 @@
 import express from 'express';
+import invoiceRouter from './routes/invoices.js';
 import labelPrintRouter from './routes/label_print.js';
 import operationalNotesRouter from './routes/operational_notes.js';
 import cors from 'cors';
@@ -68,6 +69,7 @@ app.use('/auth/password', recoveryRouter);
 app.use('/auth/social', socialRouter);
 app.use('/admin', adminRouter);
 app.use('/warehouse', warehouseRouter);
+app.use('/invoices', invoiceRouter);
 app.use('/label-print', labelPrintRouter);
 app.use('/operational-notes', operationalNotesRouter);
 app.use('/admin/commerce/services', adminServicesRouter);

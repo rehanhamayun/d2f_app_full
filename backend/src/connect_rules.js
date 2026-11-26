@@ -1,3 +1,4 @@
+import { routeCountry } from './timezones.js';
 import { connectReceivingApprovalRequired } from './operations_policy.js';
 
 export const CATEGORIES = ['CLOTHING', 'PHONE', 'LAPTOP', 'DOCUMENTS', 'OTHER'];
@@ -34,8 +35,16 @@ export function approvedLocationMatches(location, trip) {
   return Boolean(location?.connectReceiving && receivingLocationMatches(location, trip));
 }
 export function receivingLocationMatches(location, trip) {
-  return Boolean(trip && location?.address?.trim() && location.city && location.country &&
-    routeKey(trip.origin).includes(routeKey(location.city)) && routeKey(trip.origin).includes(routeKey(location.country)));
+  if (!trip || !location?.address?.trim() || !location.city || !location.country) return false;
+  const country = routeCountry(trip.origin);
+  if (!country || country !== routeCountry(location.country)) return false;
+  const city = routeKey(location.city.split(',')[0]);
+  const origin = String(trip.origin).trim();
+  if (origin.includes(',')) return routeKey(origin.split(',')[0]) === city;
+  // Older trips sometimes saved "Lome- Togo" as free text.
+  const originKey = routeKey(origin);
+  return originKey === city + routeKey(country);
+
 }
 export function usableReceivingLocation(location, trip) {
   return connectReceivingApprovalRequired()

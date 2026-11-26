@@ -57,6 +57,20 @@ export async function confirmIntake(tx, user, parcel, body = {}) {
   const now = new Date();
   if (parcel.pickupConfirmedAt && now < parcel.pickupConfirmedAt) fail(409, 'Warehouse receipt cannot precede physical collection.');
   await tx.parcelItem.updateMany({ where: { id: { in: expected.map(i => i.id) } }, data: { warehouseReceivedAt: now } });
+  if (body.verifiedWeightsKg != null) {
+    const weights = body.verifiedWeightsKg;
+    const ids = expected.length ? expected.map(item => item.id) : [parcel.id];
+    if (typeof weights !== 'object' || Array.isArray(weights) ||
+        Object.keys(weights).length !== ids.length ||
+        ids.some(id => typeof weights[id] !== 'number' || !Number.isFinite(weights[id]) || weights[id] <= 0 || weights[id] > 10000)) {
+      fail(400, 'Enter a measured weight for every package present.');
+    }
+    for (const item of expected) {
+      await tx.parcelItem.update({ where: { id: item.id }, data: { verifiedWeightKg: weights[item.id] } });
+    }
+    const verifiedTotal = ids.reduce((sum, id) => sum + weights[id], 0);
+    await tx.parcel.update({ where: { id: parcel.id }, data: { weightKg: verifiedTotal, verifiedWeightKg: verifiedTotal } });
+  }
   await allocatePackageCodes(tx, parcel);
   const status = legacyVerification ? parcel.status : 'RECEIVED';
   await tx.parcel.update({ where: { id: parcel.id }, data: { status, locationId: facility.id, warehouseReceivedAt: now, warehouseReceivedById: user.id } });

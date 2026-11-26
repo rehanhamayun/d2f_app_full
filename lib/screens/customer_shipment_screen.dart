@@ -17,6 +17,7 @@ import '../providers/auth_provider.dart';
 import '../widgets/auth_widgets.dart';
 import '../widgets/common.dart';
 import '../widgets/goods_gallery.dart';
+import 'invoice_screen.dart';
 import '../widgets/route_planner.dart';
 import '../widgets/timeline.dart';
 
@@ -2235,6 +2236,11 @@ class CustomerParcelDetailsScreen extends StatelessWidget {
       body: ListView(
         padding: AppSpacing.pageInsets,
         children: [
+          if (parcel.hasInvoice) ...[
+            InvoiceButton(type: 'shipment', id: parcel.id),
+            const SizedBox(height: 16),
+          ],
+
           if (justCreated) ...[
             Container(
               padding: const EdgeInsets.all(20),

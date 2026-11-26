@@ -3,6 +3,7 @@ import 'dart:async';
 import 'services/push_notifications.dart';
 import 'screens/marketplace/notifications_screen.dart';
 import 'screens/direct_label_print_screen.dart';
+import 'screens/connect_screen.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -46,20 +47,21 @@ class _D2FAppState extends State<D2FApp> {
       _messenger.currentState?.showSnackBar(
         SnackBar(
           content: Text(message.notification?.title ?? 'New D2F update'),
-          action: SnackBarAction(label: 'View', onPressed: _openNotifications),
+          action: SnackBarAction(label: 'View', onPressed: () => _openNotification(message.data)),
         ),
       );
     });
     _pushOpen = PushNotifications.I.opened.stream.listen(
-      (_) => _openNotifications(),
+      (message) => _openNotification(message.data),
     );
     _initialize();
   }
 
-  void _openNotifications() {
+  void _openNotification(Map<String, dynamic> data) {
     if (Api.I.sessionToken == null) return;
+    final destination = connectNotificationDestination(data['entityType'] as String?, data['entityId'] as String?);
     _navigator.currentState?.push(
-      MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+      MaterialPageRoute<void>(builder: (_) => destination ?? const NotificationsScreen()),
     );
   }
 

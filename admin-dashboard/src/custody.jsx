@@ -34,7 +34,12 @@ export function CustodyActions({ parcel, token, onSaved, isAdmin = false }) {
           e.currentTarget?.elements.scannedTrackingId?.focus();
           throw new Error(`Enter ${parcel.trackingId} or scan one of its package labels in the tracking number box.`);
         }
-        Object.assign(body, { scannedTrackingId: scanned, verifiedItemIds: verified, ...operationalNote });
+        const ids = items.length ? items.map(item => item.id) : [parcel.id];
+        const weights = ids.map(id => [id, String(f.get(`weight-${id}`) || '').trim()]);
+        const verifiedWeightsKg = weights.some(([, value]) => value)
+          ? Object.fromEntries(weights.map(([id, value]) => [id, Number(value)]))
+          : undefined;
+        Object.assign(body, { scannedTrackingId: scanned, verifiedItemIds: verified, verifiedWeightsKg, ...operationalNote });
       }
       await request(`/parcels/${parcel.id}/${mode === 'schedule' ? 'pickup-schedule' : mode === 'dispatch' ? 'events' : mode === 'legacy' ? 'pickup-verification' : 'warehouse-intake'}`, { token, method:'POST', body:JSON.stringify(body) });
       setMode(''); if (mode === 'intake') setNotice('Warehouse receipt saved.'); await onSaved();
@@ -48,6 +53,11 @@ export function CustodyActions({ parcel, token, onSaved, isAdmin = false }) {
     {mode && <form onSubmit={submit}><div className="form-grid"><label>{mode === 'schedule' ? 'Planned receiving warehouse' : 'Actual receiving warehouse'}<select name="locationId" required defaultValue={(mode === 'dispatch' ? parcel.locationId : parcel.pickupTargetLocationId || parcel.locationId) || ''}><option value="">Choose facility</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name} · {l.city}, {l.country}</option>)}</select></label>
       {mode === 'schedule' || mode === 'dispatch' || mode === 'legacy' ? <><label>Assigned pickup driver<select name="pickupDriverId" required defaultValue={parcel.pickupDriverId || ''}><option value="">Choose active driver</option>{drivers.map(d => <option value={d.id} key={d.id}>{d.fullName}</option>)}</select></label>{mode === 'schedule' && <label>Confirmed pickup appointment · dashboard time<input type="datetime-local" required value={when} onChange={e => setWhen(e.target.value)} /></label>}{!drivers.length && <p>Add/invite an active Driver through Team & access before confirming a pickup.</p>}</> : <><label>Tracking number to verify<input name="scannedTrackingId" required autoFocus autoComplete="off" spellCheck="false" placeholder={parcel.trackingId} /><small className="field-help">Scan the physical parcel label here or enter its tracking number manually.</small></label><OperationalNoteField token={token} status="RECEIVED" serviceType={parcel.serviceType || parcel.method} onChange={setOperationalNote} /></>}
     </div>{mode === 'intake' && items.length > 0 && <fieldset><legend>Verify each physical package received</legend>{items.map(i => <label className="checkbox-label" key={i.id}><input type="checkbox" checked={verified.includes(i.id)} onChange={e => setVerified(v => e.target.checked ? [...v,i.id] : v.filter(x => x !== i.id))} />{i.packageCode || i.type} · {i.name} · {i.quantity} contents units</label>)}</fieldset>}
+    {mode === 'intake' && <fieldset><legend>Scale readings (kg)</legend>
+      <small className="field-help">Enter measured weights for all packages, or leave them blank to retain the recorded weights.</small>
+      {(items.length ? items : [{ id: parcel.id, type: parcel.packageType }]).map((item, index) =>
+        <label key={item.id}>Package {index + 1} · {item.type}<input name={`weight-${item.id}`} type="number" min=".001" max="10000" step="any" /></label>)}
+    </fieldset>}
     <label className="checkbox-label"><input name="confirmed" type="checkbox" required />{mode === 'schedule' ? 'D2F confirmed this appointment, driver and receiving warehouse with the customer.' : mode === 'legacy' ? 'Assign driver verification for the existing pickup record; this does not confirm warehouse receipt.' : mode === 'dispatch' ? 'I physically handed these goods to the assigned delivery driver at this destination facility.' : 'I physically scanned, inspected and verified these goods at this receiving warehouse.'}</label>
     {error && <p className="alert error-alert" role="alert">{error}</p>}<div className="heading-actions"><button type="button" className="button secondary" disabled={busy} onClick={() => setMode('')}>Cancel</button><button className="button primary" disabled={busy || mode === 'intake' && verified.length !== items.length}>{busy ? 'Saving…' : mode === 'schedule' ? 'Confirm pickup appointment' : mode === 'dispatch' ? 'Confirm dispatch' : mode === 'legacy' ? 'Assign driver verification' : 'Confirm warehouse receipt'}</button></div></form>}
     {notice && <p role="status">{notice}</p>}

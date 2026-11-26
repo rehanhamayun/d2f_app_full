@@ -32,6 +32,20 @@ class ShipScreenState extends State<ShipScreen> {
   final _recipientAddress = TextEditingController();
   final _pickupAddress = TextEditingController();
   final _weight = TextEditingController();
+  final _additionalPackages =
+      <({ValueNotifier<String> type, TextEditingController weight})>[];
+  static const _packageTypes = [
+    DropdownMenuItem(value: 'BOX', child: Text('Box')),
+    DropdownMenuItem(value: 'SUITCASE', child: Text('Suitcase')),
+    DropdownMenuItem(value: 'BARREL', child: Text('Barrel')),
+    DropdownMenuItem(value: 'TV', child: Text('TV / Electronics')),
+    DropdownMenuItem(value: 'APPLIANCE', child: Text('Appliance')),
+    DropdownMenuItem(value: 'FURNITURE', child: Text('Furniture')),
+    DropdownMenuItem(value: 'PALLET', child: Text('Pallet')),
+    DropdownMenuItem(value: 'VEHICLE', child: Text('Vehicle')),
+    DropdownMenuItem(value: 'DOCUMENTS', child: Text('Documents')),
+    DropdownMenuItem(value: 'OTHER', child: Text('Other')),
+  ];
   final _notes = TextEditingController();
 
   List<Customer> _customers = [];
@@ -68,6 +82,7 @@ class ShipScreenState extends State<ShipScreen> {
     _recipientAddress.dispose();
     _pickupAddress.dispose();
     _weight.dispose();
+    _clearAdditionalPackages();
     _notes.dispose();
     super.dispose();
   }
@@ -186,6 +201,19 @@ class ShipScreenState extends State<ShipScreen> {
         pickupAddress: _pickupAddress.text.trim(),
         packageType: _packageType!,
         weightKg: double.parse(_weight.text.trim()),
+        physicalPackages: _additionalPackages.isEmpty
+            ? null
+            : [
+                {
+                  'type': _packageType!,
+                  'weightKg': double.parse(_weight.text.trim()),
+                },
+                for (final package in _additionalPackages)
+                  {
+                    'type': package.type.value,
+                    'weightKg': double.parse(package.weight.text.trim()),
+                  },
+              ],
         origin: _origin!,
         destination: _destination!,
         method: _method.name,
@@ -208,6 +236,14 @@ class ShipScreenState extends State<ShipScreen> {
     }
   }
 
+  void _clearAdditionalPackages() {
+    for (final package in _additionalPackages) {
+      package.type.dispose();
+      package.weight.dispose();
+    }
+    _additionalPackages.clear();
+  }
+
   /// Called when returning from the success screen via "Register Another".
   void resetForm() {
     _recipientName.clear();
@@ -215,6 +251,14 @@ class ShipScreenState extends State<ShipScreen> {
     _recipientAddress.clear();
     _pickupAddress.clear();
     _weight.clear();
+    final packages = _additionalPackages.toList();
+    _additionalPackages.clear();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      for (final package in packages) {
+        package.type.dispose();
+        package.weight.dispose();
+      }
+    });
     _notes.clear();
     setState(() {
       _customer = null;
@@ -668,71 +712,7 @@ class ShipScreenState extends State<ShipScreen> {
                                   DropdownButtonFormField<String>(
                                     isExpanded: true,
                                     initialValue: _packageType,
-                                    items: const [
-                                      DropdownMenuItem(
-                                        value: 'BOX',
-                                        child: Text(
-                                          'Box',
-                                          style: AppTheme.body,
-                                        ),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'BARREL',
-                                        child: Text(
-                                          'Barrel',
-                                          style: AppTheme.body,
-                                        ),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'TV',
-                                        child: Text(
-                                          'TV / Electronics',
-                                          style: AppTheme.body,
-                                        ),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'APPLIANCE',
-                                        child: Text(
-                                          'Appliance',
-                                          style: AppTheme.body,
-                                        ),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'FURNITURE',
-                                        child: Text(
-                                          'Furniture',
-                                          style: AppTheme.body,
-                                        ),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'PALLET',
-                                        child: Text(
-                                          'Pallet',
-                                          style: AppTheme.body,
-                                        ),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'VEHICLE',
-                                        child: Text(
-                                          'Vehicle',
-                                          style: AppTheme.body,
-                                        ),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'DOCUMENTS',
-                                        child: Text(
-                                          'Documents',
-                                          style: AppTheme.body,
-                                        ),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'OTHER',
-                                        child: Text(
-                                          'Other',
-                                          style: AppTheme.body,
-                                        ),
-                                      ),
-                                    ],
+                                    items: _packageTypes,
                                     onChanged: (v) =>
                                         setState(() => _packageType = v),
                                     decoration: const InputDecoration(
@@ -774,7 +754,7 @@ class ShipScreenState extends State<ShipScreen> {
                                       final w = double.tryParse(
                                         v?.trim() ?? '',
                                       );
-                                      if (w == null || w <= 0) {
+                                      if (w == null || !w.isFinite || w <= 0) {
                                         return 'Enter a valid weight';
                                       }
                                       return null;
@@ -784,6 +764,99 @@ class ShipScreenState extends State<ShipScreen> {
                               ),
                             ),
                           ],
+                        ),
+                        for (final (index, package)
+                            in _additionalPackages.indexed)
+                          Padding(
+                            key: ObjectKey(package.weight),
+                            padding: const EdgeInsets.only(top: 14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Package ${index + 2}',
+                                  style: AppTheme.caption,
+                                ),
+                                const SizedBox(height: 6),
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(
+                                      child: DropdownButtonFormField<String>(
+                                        isExpanded: true,
+                                        initialValue: package.type.value,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Type',
+                                        ),
+                                        items: _packageTypes,
+                                        onChanged: (value) =>
+                                            package.type.value = value!,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: TextFormField(
+                                        controller: package.weight,
+                                        keyboardType:
+                                            const TextInputType.numberWithOptions(
+                                              decimal: true,
+                                            ),
+                                        decoration: const InputDecoration(
+                                          labelText: 'Weight (kg)',
+                                        ),
+                                        validator: (value) {
+                                          final weight = double.tryParse(
+                                            value?.trim() ?? '',
+                                          );
+                                          return weight == null ||
+                                                  !weight.isFinite ||
+                                                  weight <= 0
+                                              ? 'Enter a valid weight'
+                                              : null;
+                                        },
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Remove package ${index + 2}',
+                                      onPressed: _saving
+                                          ? null
+                                          : () {
+                                              setState(
+                                                () => _additionalPackages
+                                                    .removeAt(index),
+                                              );
+                                              WidgetsBinding.instance
+                                                  .addPostFrameCallback((_) {
+                                                    package.type.dispose();
+                                                    package.weight.dispose();
+                                                  });
+                                            },
+                                      icon: const Icon(
+                                        Icons.remove_circle_outline,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed:
+                                _saving || _additionalPackages.length >= 19
+                                ? null
+                                : () {
+                                    setState(
+                                      () => _additionalPackages.add((
+                                        type: ValueNotifier('BOX'),
+                                        weight: TextEditingController(),
+                                      )),
+                                    );
+                                  },
+                            icon: const Icon(Icons.add),
+                            label: const Text('Add physical package'),
+                          ),
                         ),
                         const SizedBox(height: 14),
                         Text.rich(

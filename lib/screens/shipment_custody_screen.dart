@@ -150,6 +150,7 @@ class _ShipmentCustodyScreenState extends State<ShipmentCustodyScreen> {
   final _scan = TextEditingController();
   Map<String, dynamic> _operationalNote = {};
   final _verified = <String>{};
+  final _measured = <String, String>{};
   List<dynamic> _locations = [], _drivers = [];
   String? _locationId, _driverId, _error;
   DateTime? _appointment;
@@ -223,6 +224,19 @@ class _ShipmentCustodyScreenState extends State<ShipmentCustodyScreen> {
         invalid =
             'Select an inspection message or enter Other - Custom Message.';
     }
+    final measured = <String, double>{};
+    if (invalid == null && !_schedule && !_dispatch &&
+        _measured.values.any((value) => value.trim().isNotEmpty)) {
+      final ids = expected.isEmpty ? [widget.parcel.id] : expected.map((item) => item.id);
+      for (final id in ids) {
+        final weight = double.tryParse(_measured[id]?.trim() ?? '');
+        if (weight == null || !weight.isFinite || weight <= 0 || weight > 10000) {
+          invalid = 'Enter measured weights for all packages or leave them blank.';
+          break;
+        }
+        measured[id] = weight;
+      }
+    }
     if (invalid == null && !_confirmed) {
       invalid = 'Confirm that you physically verified this handover.';
     }
@@ -257,6 +271,7 @@ class _ShipmentCustodyScreenState extends State<ShipmentCustodyScreen> {
           if (!_schedule && !_dispatch) ...{
             'scannedTrackingId': _scan.text.trim(),
             'verifiedItemIds': _verified.toList(),
+            if (measured.isNotEmpty) 'verifiedWeightsKg': measured,
             ..._operationalNote,
           },
         },
@@ -502,6 +517,21 @@ class _ShipmentCustodyScreenState extends State<ShipmentCustodyScreen> {
                         _verified.remove(item.id);
                       }
                     }),
+                  ),
+                const SizedBox(height: 12),
+                const Text('Scale readings (kg)', style: AppTheme.sectionTitle),
+                const Text('Enter measured weights for every package, or leave the fields blank.', style: AppTheme.caption),
+                const SizedBox(height: 8),
+                for (final (index, id) in (widget.parcel.items.isEmpty
+                    ? [widget.parcel.id]
+                    : widget.parcel.items.where((item) => !item.missed).map((item) => item.id).toList()).indexed)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: TextFormField(
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: InputDecoration(labelText: 'Package ${index + 1} weight (kg)'),
+                      onChanged: (value) => _measured[id] = value,
+                    ),
                   ),
               ],
               const SizedBox(height: 20),

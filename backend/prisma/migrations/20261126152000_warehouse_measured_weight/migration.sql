@@ -1,0 +1,1 @@
+ALTER TABLE "Parcel" ADD COLUMN "verifiedWeightKg" DOUBLE PRECISION;

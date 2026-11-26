@@ -1,6 +1,7 @@
 import 'direct_label_print_screen.dart';
 import 'shipment_custody_screen.dart';
 import 'connect_screen.dart';
+import 'invoice_screen.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -95,6 +96,7 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
+
           if (parcel != null)
             IconButton(
               tooltip: 'Print Label',
@@ -668,6 +670,10 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
                     df.format(parcel.pickupScheduledAt!.toLocal()),
                   ),
               ],
+              if (parcel.locationName != null)
+                _row('Current facility', parcel.locationName!),
+              if (parcel.containerCode != null)
+                _row('Assigned container', parcel.containerCode!),
               _row('Method', parcel.method.label),
               if (parcel.awbNumber != null)
                 _row('Air Waybill / AWB', parcel.awbNumber!),
@@ -686,6 +692,15 @@ class _ParcelDetailScreenState extends ConsumerState<ParcelDetailScreen> {
                 _row('Notes', parcel.notes!),
               _row('Registered', df.format(parcel.createdAt)),
               _row('Last update', df.format(parcel.updatedAt)),
+              if (parcel.warehouseReceived)
+                OutlinedButton.icon(
+                  onPressed: () => openIntakeReceipt(context, parcel),
+                  icon: const Icon(Icons.print_outlined),
+                  label: const Text('Print or share intake receipt'),
+                ),
+              if (parcel.hasInvoice)
+                InvoiceButton(type: 'shipment', id: parcel.id),
+
             ],
           ),
         ),

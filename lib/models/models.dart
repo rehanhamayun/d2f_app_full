@@ -443,6 +443,7 @@ class ParcelItem {
   final String? details;
   final int quantity;
   final double? weightKg;
+  final double? verifiedWeightKg;
   final int position;
   final String type; // BOX | SUITCASE | BARREL | …, see kParcelItemTypes
   final double? lengthCm;
@@ -458,6 +459,7 @@ class ParcelItem {
     this.details,
     required this.quantity,
     this.weightKg,
+    this.verifiedWeightKg,
     required this.position,
     this.type = 'BOX',
     this.lengthCm,
@@ -474,6 +476,7 @@ class ParcelItem {
     details: j['details'] as String?,
     quantity: (j['quantity'] as num?)?.toInt() ?? 1,
     weightKg: (j['weightKg'] as num?)?.toDouble(),
+    verifiedWeightKg: (j['verifiedWeightKg'] as num?)?.toDouble(),
     position: (j['position'] as num?)?.toInt() ?? 0,
     type: j['type'] as String? ?? 'BOX',
     lengthCm: (j['lengthCm'] as num?)?.toDouble(),
@@ -544,6 +547,7 @@ class Parcel {
   final String id;
   final String trackingId;
   final String customerId;
+  final bool hasInvoice;
   final String recipientName;
   final String? recipientPhone;
   final String? recipientAddress;
@@ -556,13 +560,14 @@ class Parcel {
   final String? notes;
   final String serviceType;
   final String? connectBookingId;
+  final double? verifiedWeightKg;
   final String? awbNumber, airline, flightNumber;
   final String status;
   final DeliveryMode deliveryMode;
   final DateTime? pickupScheduledAt;
   final DateTime? pickupPreferredAt, pickupConfirmedAt, warehouseReceivedAt;
   final String? pickupDriverId, pickupTargetLocationId, warehouseReceivedById;
-  final String? locationId;
+  final String? locationId, locationName;
   bool get warehouseReceived => warehouseReceivedAt != null;
   final DateTime? restrictionsAcknowledgedAt;
   final List<ParcelItem> items;
@@ -601,6 +606,7 @@ class Parcel {
     required this.id,
     required this.trackingId,
     required this.customerId,
+    this.hasInvoice = false,
     required this.recipientName,
     this.recipientPhone,
     this.recipientAddress,
@@ -613,6 +619,7 @@ class Parcel {
     this.notes,
     this.serviceType = 'SEA',
     this.connectBookingId,
+    this.verifiedWeightKg,
     this.awbNumber,
     this.airline,
     this.flightNumber,
@@ -623,6 +630,7 @@ class Parcel {
     this.pickupConfirmedAt,
     this.warehouseReceivedAt,
     this.locationId,
+    this.locationName,
     this.pickupDriverId,
     this.pickupTargetLocationId,
     this.warehouseReceivedById,
@@ -654,6 +662,7 @@ class Parcel {
     id: j['id'] as String,
     trackingId: j['trackingId'] as String,
     customerId: j['customerId'] as String,
+    hasInvoice: j['hasInvoice'] == true,
     recipientName: j['recipientName'] as String? ?? '',
     recipientPhone: j['recipientPhone'] as String?,
     recipientAddress: j['recipientAddress'] as String?,
@@ -667,9 +676,15 @@ class Parcel {
         j['serviceType'] as String? ??
         (j['method'] == 'AIR' ? 'AIR_CARGO' : j['method'] as String? ?? 'SEA'),
     connectBookingId: j['connectBooking']?['id'] as String?,
+    verifiedWeightKg:
+        ((j['connectBooking']?['verifiedWeightKg'] ?? j['verifiedWeightKg'])
+                as num?)
+            ?.toDouble(),
     awbNumber: j['awbNumber'] as String?,
-    airline: j['airline'] as String?,
-    flightNumber: j['flightNumber'] as String?,
+    airline: (j['airline'] ?? _activeConnectTrip(j)?['airline']) as String?,
+    flightNumber:
+        (j['flightNumber'] ?? _activeConnectTrip(j)?['flightNumber'])
+            as String?,
     notes: j['notes'] as String?,
     status: j['status'] as String? ?? 'RECEIVED',
     deliveryMode: deliveryModeFrom(j['deliveryMode'] as String?),
@@ -686,6 +701,7 @@ class Parcel {
       j['warehouseReceivedAt'] as String? ?? '',
     ),
     locationId: j['locationId'] as String?,
+    locationName: j['location']?['name'] as String?,
     pickupDriverId: j['pickupDriverId'] as String?,
     pickupTargetLocationId: j['pickupTargetLocationId'] as String?,
     warehouseReceivedById: j['warehouseReceivedById'] as String?,
@@ -724,6 +740,11 @@ class Parcel {
     deliveryProofType: j['deliveryProofType'] as String?,
     deliveryProofReference: j['deliveryProofReference'] as String?,
   );
+
+  static Map? _activeConnectTrip(Map<String, dynamic> json) {
+    final assignments = json['connectBooking']?['assignments'] as List?;
+    return assignments?.firstOrNull?['trip'] as Map?;
+  }
 
   /// Country flag emoji derived from the destination string.
   String get destinationFlag => serviceCountryFlag(destination);

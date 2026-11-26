@@ -52,6 +52,7 @@ const requestSelect = {
   insuranceFeeMinor: true,
   handlingFeeMinor: true,
   totalQuoteMinor: true,
+  quoteAcceptedAt: true,
   quoteValidUntil: true,
   quoteNotes: true,
   paymentStatus: true,
@@ -271,6 +272,34 @@ router.post('/terms/accept', async (req, res, next) => {
   }
 });
 
+router.post('/requests/:id/accept-quote', async (req, res, next) => {
+  try {
+    const result = await prisma.$transaction(async tx => {
+      const scope = { id: req.params.id, customer: { userId: req.user.id } };
+      const first = await tx.shipForMeRequest.findFirst({ where: scope, select: { organizationId: true } });
+      if (!first) fail(404, 'Request not found.');
+      await warehouseLock(tx, first.organizationId);
+      const current = await tx.shipForMeRequest.findFirst({ where: scope, select: requestSelect });
+      if (!current) fail(404, 'Request not found.');
+      if (req.body?.totalMinor !== current.totalQuoteMinor) fail(409, 'The quote changed. Review the latest charges.');
+      if (current.quoteAcceptedAt && ['ACCEPTED', 'PAID', 'SHIPPED', 'COMPLETED'].includes(current.status)) return current;
+      if (current.status !== 'QUOTED' || current.totalQuoteMinor == null) fail(409, 'D2F has not issued a shipping quote.');
+      if (current.quoteValidUntil && current.quoteValidUntil <= new Date()) fail(409, 'This shipping quote has expired. Contact D2F.');
+      if (req.body?.updatedAt !== current.updatedAt.toISOString()) fail(409, 'The quote changed. Review the latest charges.');
+      const updated = await tx.shipForMeRequest.update({
+        where: { id: current.id }, data: { status: 'ACCEPTED', quoteAcceptedAt: new Date() }, select: requestSelect,
+      });
+      await audit(tx, req, 'ShipForMeRequest', current.id, 'SHIP_FOR_ME_QUOTE_ACCEPTED', JSON.stringify({
+        totalMinor: current.totalQuoteMinor, currency: 'USD',
+      }));
+      return updated;
+    });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ── Cancel my request ───────────────────────────────────────────────────
 
 router.post('/requests/:id/cancel', async (req, res, next) => {
@@ -278,9 +307,10 @@ router.post('/requests/:id/cancel', async (req, res, next) => {
     const result = await prisma.$transaction(async (tx) => {
       const customer = await tx.customer.findUnique({
         where: { userId: req.user.id },
-        select: { id: true },
+        select: { id: true, organizationId: true },
       });
       if (!customer) fail(404, 'Request not found.');
+      await warehouseLock(tx, customer.organizationId);
       const existing = await tx.shipForMeRequest.findFirst({
         where: { id: req.params.id, customerId: customer.id },
       });

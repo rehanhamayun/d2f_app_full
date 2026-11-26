@@ -242,6 +242,7 @@ model Parcel {
   recipientAddress           String?
   packageType                String // BOX, BARREL, TV, APPLIANCE, FURNITURE, PALLET, VEHICLE...
   weightKg                   Float
+  verifiedWeightKg           Float?
   origin                     String // commercial shipping origin, separate from the intake warehouse
   destination                String
   pickupAddress              String? // required for same-city road pickups
@@ -254,6 +255,7 @@ model Parcel {
   customsDocuments           String?
   connectBooking             ConnectBooking?
   notes                      String?
+  shipmentInvoice             Json?
   orderType                  String?
   onwardDispatchedAt         DateTime?
   status                     String          @default("RECEIVED")
@@ -325,6 +327,7 @@ model ParcelItem {
   details             String? // short free-form description for the intake team
   quantity            Int       @default(1)
   weightKg            Float? // optional per-item estimate
+  verifiedWeightKg    Float?
   position            Int       @default(0)
   type                String    @default("BOX") // BOX | SUITCASE | BARREL | TV | APPLIANCE | FURNITURE | PALLET | VEHICLE | DOCUMENTS | OTHER
   lengthCm            Float? // optional package dimensions, recorded together
@@ -768,6 +771,7 @@ model ConnectTrip {
   categories            String[]
   verificationReference String?
   verificationChecks    Json?
+  scheduleChange        Json?
   status                String              @default("PENDING_REVIEW")
   reviewNote            String?
   receivingLocationId   String?
@@ -877,11 +881,22 @@ model ConnectAssignment {
   acceptedAt   DateTime?
   confirmedAt  DateTime?
   declarations ConnectTravellerDeclaration[]
+  packageReceipts ConnectPackageReceipt[]
   booking      ConnectBooking                @relation(fields: [bookingId], references: [id], onDelete: Restrict)
   trip         ConnectTrip                   @relation(fields: [tripId], references: [id], onDelete: Restrict)
 
   @@index([tripId, status])
   @@index([bookingId, status])
+}
+
+model ConnectPackageReceipt {
+  assignmentId String
+  packageCode  String
+  actorId      String
+  scannedAt    DateTime          @default(now())
+  assignment   ConnectAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@id([assignmentId, packageCode])
 }
 
 model ConnectPayment {
@@ -1101,6 +1116,7 @@ model ShipForMeRequest {
   insuranceFeeMinor Int? // Optional insurance
   handlingFeeMinor  Int? // Warehouse handling fee
   totalQuoteMinor   Int? // Grand total
+  quoteAcceptedAt   DateTime?
   quoteValidUntil   DateTime? // Quote expiration
   quoteNotes        String?
 

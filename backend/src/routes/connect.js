@@ -4,6 +4,7 @@ import { Router, raw } from 'express';
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import { prisma } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { allocatePackageCodes } from '../package_custody.js';
 import { generateTrackingId, resolveOrganizationId } from '../tracking.js';
 import { CATEGORIES, ACTIVE_ASSIGNMENTS, routeKey, fail, text, number, future, quote, effectiveWeight, matchingError, approvedLocationMatches, usableReceivingLocation } from '../connect_rules.js';
 
@@ -16,23 +17,24 @@ const tripChecks = ['identityVerified', 'ticketVerified', 'baggageVerified', 'el
 const tripDocuments = { select: { kind: true, updatedAt: true } };
 const active = booking => booking.assignments.find(a => ACTIVE_ASSIGNMENTS.includes(a.status));
 const bookingInclude = {
-  parcel: { include: { customer: true, items: { orderBy: { position: 'asc' } }, events: { orderBy: { createdAt: 'asc' } } } },
-  assignments: { include: { declarations: { orderBy: { createdAt: 'desc' } }, trip: { include: { receivingLocation: true } } }, orderBy: { createdAt: 'desc' } },
+  parcel: { include: { customer: true, location: { select: { name: true } }, items: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }] }, events: { orderBy: { createdAt: 'asc' } } } },
+  assignments: { include: { packageReceipts: true, declarations: { orderBy: { createdAt: 'desc' } }, trip: { include: { receivingLocation: true } } }, orderBy: { createdAt: 'desc' } },
   receivingLocation: true, payment: true,
   declarations: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] },
   paymentSubmissions: { select: { id: true, userId: true, method: true, transactionId: true, instructionsVersion: true, instructionsSnapshot: true, fileName: true, contentType: true, status: true, reviewNote: true, reviewedAt: true, createdAt: true }, orderBy: { createdAt: 'desc' } },
 };
+const packageList = { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }] };
 const tripInclude = { verificationDocuments: tripDocuments, traveller: { select: { id: true, fullName: true, email: true, phone: true } }, receivingLocation: true,
-  assignments: { include: { declarations: { orderBy: { createdAt: 'desc' } }, booking: { include: { parcel: true, payment: true, receivingLocation: true } } } } };
+  assignments: { include: { declarations: { orderBy: { createdAt: 'desc' } }, packageReceipts: true, booking: { include: { parcel: { include: { items: packageList, customer: { select: { userId: true } } } }, payment: true, receivingLocation: true } } } } };
 const safeLocation = location => location && ({ id: location.id, name: location.name, address: location.address, city: location.city, country: location.country });
 const safeTrip = trip => ({ ...tripTiming(trip), id: trip.id, origin: trip.origin, destination: trip.destination, departureAt: trip.departureAt,
-  arrivalAt: trip.arrivalAt, airline: trip.airline, flightNumber: trip.flightNumber, capacityKg: trip.capacityKg, categories: trip.categories, status: trip.status,
+  arrivalAt: trip.arrivalAt, airline: trip.airline, flightNumber: trip.flightNumber, capacityKg: trip.capacityKg, categories: trip.categories, status: trip.status, scheduleChange: trip.scheduleChange,
   receivingLocation: safeLocation(trip.receivingLocation) });
 const remaining = trip => Math.round((trip.capacityKg - trip.assignments.filter(a => ACTIVE_ASSIGNMENTS.includes(a.status)).reduce((sum, a) => sum + effectiveWeight(a.booking), 0)) * 1000) / 1000;
 function customerBooking(b) {
   const { handoverCodeHash, handoverCodeExpiresAt, handoverAttempts, assignments, parcel, ...rest } = b;
   // The owner sees their own booking, never the traveller's private profile.
-  return { ...rest, declarations: rest.declarations?.map(({ audit, ...d }) => d), receivingLocation: safeLocation(b.receivingLocation), parcel: { ...parcel, customer: undefined, events: parcel.events.map(({id,status,note,createdAt})=>({id,status,note,createdAt})) },
+  return { ...rest, declarations: rest.declarations?.map(({ audit, ...d }) => d), receivingLocation: safeLocation(b.receivingLocation), parcel: { ...parcel, customer: undefined, location: undefined, events: parcel.events.map(({id,status,note,createdAt})=>({id,status,note,createdAt})) },
     assignments: assignments.map(a => ({ id: a.id, status: a.status, acceptedAt: a.acceptedAt, confirmedAt: a.confirmedAt, trip: safeTrip(a.trip) })) };
 }
 function staffBooking(b) {
@@ -46,7 +48,10 @@ function travellerAssignment(a) {
     weightKg: effectiveWeight(b), origin: b.parcel.origin, destination: b.parcel.destination,
     parcelStatus: b.parcel.status, collectedAt: b.collectedAt,
     travellerDeclaration: a.declarations?.[0] ? { id: a.declarations[0].id, legalName:a.declarations[0].legalName, createdAt:a.declarations[0].createdAt, termsVersion:a.declarations[0].termsVersion } : null,
-    contentsVerifiedAt: b.contentsVerifiedAt, receivingLocation: safeLocation(b.receivingLocation) };
+    contentsVerifiedAt: b.contentsVerifiedAt, originReceivedAt: b.originReceivedAt,
+    handoverAuthorized: Boolean(b.handoverCodeExpiresAt && b.handoverCodeExpiresAt > new Date() && b.handoverAttempts < 5),
+    expectedPackageCount: packageCodes(b).length, scannedPackageCount: a.packageReceipts?.length ?? 0,
+    receivingLocation: safeLocation(b.receivingLocation) };
 }
 const wrap = fn => async (req, res, next) => { try { await fn(req, res); } catch (error) { next(error); } };
 router.use(authenticate, requireRole('CUSTOMER', 'STAFF', 'ADMIN'), async (req, _res, next) => {
@@ -86,7 +91,8 @@ function facility(req, location) {
   if (!location || (connectReceivingApprovalRequired() && !location.connectReceiving)) fail(409, 'Select a D2F receiving location with the required approval.');
   if (warehouseFacilityAuthorizationRequired() && req.user.role === 'STAFF' && req.user.locationId !== location.id) fail(403, 'Your assigned facility must confirm this physical handover.');
 }
-function editable(b) {
+function editable(b, { continueHandover = false } = {}) {
+  if (!continueHandover && active(b)?.packageReceipts?.length) fail(409, 'Traveller package scans are recorded. Complete the existing handover or ask an administrator to reconcile custody.');
   if (b.collectedAt || b.deliveredAt || ['REJECTED', 'CANCELLED'].includes(b.parcel.status)) fail(409, 'This booking is closed to intake changes.');
   if (active(b)?.trip.status === 'DEPARTED' || active(b)?.trip.status === 'ARRIVED') fail(409, 'The traveller has departed. An audited exception review is required.');
 }
@@ -203,19 +209,54 @@ router.get('/trips/:id/verification/:kind', requireRole('CUSTOMER', 'ADMIN'), wr
 }));
 
 router.patch('/trips/:id/schedule', requireRole('ADMIN'), wrap(async (req, res) => {
+  const body = req.body || {};
   res.json(await transaction(req, async tx => {
     const t = await getTrip(tx, req);
     if (!['PENDING_REVIEW', 'APPROVED', 'REJECTED'].includes(t.status)) fail(409, 'A departed trip schedule cannot be changed.');
-    const departureTimezone = routeZone(t.origin, req.body.departureTimezone || t.departureTimezone);
-    const destinationTimezone = routeZone(t.destination, req.body.destinationTimezone || t.destinationTimezone);
-    const departureAt = req.body.departureLocal ? future(localToInstant(req.body.departureLocal, departureTimezone, req.body.departureOccurrence), 'a departure date') : t.departureAt;
-    const arrivalAt = req.body.arrivalLocal ? localToInstant(req.body.arrivalLocal, destinationTimezone, req.body.arrivalOccurrence) : t.arrivalAt;
+    const changeType = body.changeType;
+    if (changeType != null && !['DELAY', 'REBOOKED'].includes(changeType)) fail(400, 'Choose delay or rebooking.');
+    if (changeType && t.status !== 'APPROVED') fail(409, 'Report a delay or rebooking on an approved trip.');
+    const departureTimezone = routeZone(t.origin, body.departureTimezone || t.departureTimezone);
+    const destinationTimezone = routeZone(t.destination, body.destinationTimezone || t.destinationTimezone);
+    const departureAt = body.departureLocal ? future(localToInstant(body.departureLocal, departureTimezone, body.departureOccurrence), 'a departure date') : t.departureAt;
+    const arrivalAt = body.arrivalLocal ? localToInstant(body.arrivalLocal, destinationTimezone, body.arrivalOccurrence) : t.arrivalAt;
+    if (changeType && !body.departureLocal) fail(400, 'Enter the updated departure time.');
+    if (t.arrivalAt && changeType && !body.arrivalLocal) fail(400, 'Enter the updated arrival time.');
+    if (changeType === 'DELAY' && departureAt <= t.departureAt) fail(400, 'A delay needs a later departure time.');
     if (arrivalAt && (arrivalAt <= departureAt || arrivalAt - departureAt > 7 * 86400000)) fail(400, 'Arrival must be after departure and within seven days.');
     const bookings = t.assignments.filter(a => ACTIVE_ASSIGNMENTS.includes(a.status));
     if (bookings.some(a => departureAt < a.booking.preferredDate)) fail(409, 'This departure is earlier than an assigned customer’s preferred date. Reconcile those bookings first.');
-    const updated = await tx.connectTrip.update({ where: { id: t.id }, data: { departureAt, arrivalAt, departureTimezone, destinationTimezone } });
-    await audit(tx, req, 'ConnectTrip', t.id, 'SCHEDULE_UPDATED', JSON.stringify({ departureAt, departureTimezone, destinationTimezone }));
-    for (const a of bookings) await event(tx, req, a.booking, 'SCHEDULE_UPDATED', 'D2F updated your assigned trip schedule. Review the departure time in D2F Connect.', false);
+    const note = changeType ? text(body.note, 'the schedule change reason', 500) : null;
+    const flightNumber = changeType === 'REBOOKED' ? text(body.flightNumber, 'the replacement flight number') : t.flightNumber;
+    const airline = changeType === 'REBOOKED' ? text(body.airline, 'the replacement airline') : t.airline;
+    const capacityKg = changeType === 'REBOOKED' ? number(body.capacityKg, 'verified replacement baggage capacity', .1, 100) : t.capacityKg;
+    if (changeType === 'REBOOKED' && body.verified !== true) fail(400, 'Confirm the replacement ticket, route, baggage and goods eligibility.');
+    if (bookings.reduce((sum, a) => sum + effectiveWeight(a.booking), 0) > capacityKg + .00001) fail(409, 'The replacement flight has insufficient baggage capacity for existing bookings.');
+    const previous = { departureAt: t.departureAt, arrivalAt: t.arrivalAt, airline: t.airline, flightNumber: t.flightNumber, capacityKg: t.capacityKg, departureTimezone: t.departureTimezone, destinationTimezone: t.destinationTimezone };
+    const scheduleChange = changeType ? { type: changeType, recordedAt: new Date().toISOString() } : undefined;
+    const updated = await tx.connectTrip.update({ where: { id: t.id }, data: { departureAt, arrivalAt, departureTimezone, destinationTimezone, airline, flightNumber, capacityKg, scheduleChange } });
+    await audit(tx, req, 'ConnectTrip', t.id, 'SCHEDULE_UPDATED', JSON.stringify({ previous, departureAt, arrivalAt, departureTimezone, destinationTimezone, airline, flightNumber, capacityKg, changeType, note }));
+    const message = changeType === 'DELAY'
+      ? 'Your D2F Connect flight was delayed. Review the updated itinerary.'
+      : changeType === 'REBOOKED'
+        ? 'Your D2F Connect flight was rebooked. Review the updated itinerary.'
+        : 'D2F updated your assigned trip schedule. Review the departure time in D2F Connect.';
+    if (changeType) {
+      await tx.$executeRaw`SELECT d2f_alert(${t.travellerId}, 'CONNECT_FLIGHT_UPDATE', 'Flight schedule changed', ${message}, 'ConnectTrip', ${t.id})`;
+      await tx.$executeRaw`UPDATE "Notification" SET type = 'CONNECT_FLIGHT_UPDATE'
+        WHERE "eventKey" = concat(txid_current(), ':ConnectTrip:', ${t.id}, ':', ${t.travellerId})`;
+    }
+    for (const a of bookings) {
+      await event(tx, req, a.booking, 'SCHEDULE_UPDATED', message, false);
+      const userId = a.booking.parcel.customer.userId;
+      if (changeType && userId) {
+        // Enrich the transactional tracking alert with a link to this booking.
+        await tx.$executeRaw`UPDATE "Notification"
+          SET type = 'CONNECT_FLIGHT_UPDATE', title = 'Flight schedule changed',
+              "entityType" = 'ConnectBooking', "entityId" = ${a.bookingId}
+          WHERE "eventKey" = concat(txid_current(), ':Parcel:', ${a.booking.parcelId}, ':', ${userId})`;
+      }
+    }
     return safeTrip(updated);
   }));
 }));
@@ -247,6 +288,25 @@ router.post('/trips/:id/review', requireRole('ADMIN'), wrap(async (req, res) => 
     await audit(tx, req, 'ConnectTrip', t.id, 'TRIP_REVIEWED', `${status}: ${reviewNote}`);
     return safeTrip(trip);
   }));
+}));
+async function availableFacilities(organizationId, origin) {
+  const locations = await prisma.location.findMany({
+    where: { organizationId, address: { not: null } },
+    orderBy: [{ name: 'asc' }, { id: 'asc' }],
+  });
+  return {
+    locations: locations.filter(location => usableReceivingLocation(location, { origin })).map(safeLocation),
+    approvalRequired: connectReceivingApprovalRequired(),
+    route: origin,
+  };
+}
+router.get('/trips/:id/receiving-locations', requireRole('STAFF', 'ADMIN'), wrap(async (req, res) => {
+  const trip = await getTrip(prisma, req);
+  res.json(await availableFacilities(req.connectOrg, trip.origin));
+}));
+router.get('/bookings/:id/destination-locations', requireRole('STAFF', 'ADMIN'), wrap(async (req, res) => {
+  const booking = await getBooking(prisma, req);
+  res.json(await availableFacilities(req.connectOrg, booking.parcel.destination));
 }));
 router.patch('/trips/:id/receiving-location', requireRole('STAFF', 'ADMIN'), wrap(async (req, res) => {
   res.json(await transaction(req, async tx => {
@@ -305,12 +365,12 @@ router.post('/bookings', requireRole('CUSTOMER'), wrap(async (req, res) => {
       if (existing.customer.userId !== req.user.id || !existing.connectBooking) fail(409, 'Request identifier already used.');
       created = false; return getBooking(tx, req, existing.connectBooking.id);
     }
-    let requestedTripId = null;
+    let requestedTrip = null;
     if (b.requestedTripId) {
       text(b.requestedTripId, 'the requested trip identifier');
       const t = await tx.connectTrip.findFirst({ where: { id: b.requestedTripId, organizationId: req.connectOrg, status: 'APPROVED' } });
       if (!t || routeKey(t.origin) !== routeKey(origin) || routeKey(t.destination) !== routeKey(destination) || !t.categories.includes(b.category) || t.departureAt < preferredDate) fail(400, 'The requested trip does not match the route, category or preferred date.');
-      requestedTripId = t.id;
+      requestedTrip = t;
     }
     const rate = await tx.connectRate.findFirst({ where: { organizationId: req.connectOrg, origin, destination, category: b.category, isActive: true } });
     const internationalFeeMinor = b.category === 'OTHER' || (b.category === 'DOCUMENTS' && weightKg > 0.5) ? null : quote(rate, { weightKg, quantity });
@@ -324,12 +384,16 @@ router.post('/bookings', requireRole('CUSTOMER'), wrap(async (req, res) => {
       deliveryMode: b.handoverMode === 'PICKUP' ? 'PICKUP' : 'DROP_OFF', restrictionsAcknowledgedAt: new Date(),
       items: { create: { name: description.slice(0, 120), details: description, quantity, weightKg, type: b.category === 'DOCUMENTS' ? 'DOCUMENTS' : 'BOX' } } } });
     const booking = await tx.connectBooking.create({ data: { organizationId: req.connectOrg, parcelId: parcel.id, category: b.category, quantity,
-      declaredValueMinor, preferredDate, preferredTimezone, requestedTripId, handoverMode: b.handoverMode, senderCity, senderAddress, deliveryPreference: b.deliveryPreference,
+      declaredValueMinor, preferredDate, preferredTimezone, requestedTripId: requestedTrip?.id, handoverMode: b.handoverMode, senderCity, senderAddress, deliveryPreference: b.deliveryPreference,
       domesticStatus: b.handoverMode === 'DOMESTIC_SHIPPING' ? 'AWAITING_ADMIN_REVIEW' : 'NOT_REQUIRED',
       domesticCostMinor: b.handoverMode === 'DOMESTIC_SHIPPING' ? null : 0,
       internationalFeeMinor, pricingSnapshot: rate && internationalFeeMinor != null ? { rateId: rate.id, unit: rate.unit, amountMinor: rate.amountMinor, weightKg, quantity, quotedAt: new Date().toISOString() } : undefined } });
     await tx.trackingIndex.create({ data: { trackingId: tracking.trackingId, parcelId: parcel.id } });
     await event(tx, req, { ...booking, parcel }, 'REQUESTED', 'D2F Connect booking submitted. Awaiting parcel review, traveller acceptance and D2F confirmation.');
+    if (requestedTrip && requestedTrip.travellerId !== req.user.id) {
+      await tx.$executeRaw`SELECT d2f_alert(${requestedTrip.travellerId}, 'CONNECT_BOOKING_REQUESTED',
+        'Booking requested for your trip', 'D2F is reviewing a booking for your trip. You can respond once D2F sends the parcel for review.', 'ConnectTrip', ${requestedTrip.id})`;
+    }
     return getBooking(tx, req, booking.id);
   });
   res.status(created ? 201 : 200).json(customerBooking(result));
@@ -472,7 +536,7 @@ const TRAVELLER_CHECKS = [
  'I accept responsibility for my traveller declaration and the displayed D2F shipping terms.'
 ];
 async function travellerAssignmentRecord(tx,req){
- const a=await tx.connectAssignment.findFirst({where:{id:req.params.id,trip:{organizationId:req.connectOrg,travellerId:req.user.id}},include:{declarations:{orderBy:{createdAt:'desc'}},trip:true,booking:{include:bookingInclude}}});
+ const a=await tx.connectAssignment.findFirst({where:{id:req.params.id,trip:{organizationId:req.connectOrg,travellerId:req.user.id}},include:{packageReceipts:true,declarations:{orderBy:{createdAt:'desc'}},trip:true,booking:{include:bookingInclude}}});
  if(!a)fail(404,'Traveller assignment not found.');return a;
 }
 function requireTravellerDeclaration(a){
@@ -500,7 +564,7 @@ router.post('/assignments/:id/respond', requireRole('CUSTOMER'), wrap(async (req
   res.json(await transaction(req, async tx => {
     const a = await travellerAssignmentRecord(tx,req);
     if (!a) fail(404, 'Assignment not found.');
-    if (a.booking.collectedAt || a.trip.status !== 'APPROVED') fail(409, 'This parcel cannot be accepted or rejected at this stage. Contact D2F.');
+    if (a.booking.collectedAt || a.packageReceipts.length || a.trip.status !== 'APPROVED') fail(409, 'This parcel cannot be accepted or rejected at this stage. Contact D2F.');
     if (!['PROPOSED', 'ACCEPTED', 'CONFIRMED'].includes(a.status)) fail(409, 'This assignment is no longer available.');
     const accepted = req.body?.accepted;
     if (typeof accepted !== 'boolean') fail(400, 'Accept or decline the proposed parcel.');
@@ -587,18 +651,35 @@ router.post('/bookings/:id/domestic-dispatched', wrap(async (req, res) => {
   }));
 }));
 router.post('/bookings/:id/receive', requireRole('STAFF', 'ADMIN'), wrap(async (req, res) => {
-  res.json(await transaction(req, async tx => { const b = await getBooking(tx, req); requireDeclaration(b, { reviewed: true }); editable(b); facility(req, b.receivingLocation);
+  res.json(await transaction(req, async tx => { const b = await getBooking(tx, req); requireDeclaration(b, { reviewed: true }); editable(b, { continueHandover: true }); facility(req, b.receivingLocation);
     if (b.originReceivedAt) fail(409, 'The receiving location already confirmed this parcel.');
     if (!b.contentsVerifiedAt || active(b)?.status !== 'CONFIRMED' || !b.payment || !usableReceivingLocation(b.receivingLocation, active(b).trip)) fail(409, 'Verified contents, traveller confirmation and payment are required before intake.');
     if (b.handoverMode === 'DOMESTIC_SHIPPING' && !['LABEL_READY', 'IN_TRANSIT'].includes(b.domesticStatus)) fail(409, 'Record the domestic label and carrier tracking first.');
     const note = text(req.body?.note, 'the receiving inspection and package condition', 1000);
     await tx.connectBooking.update({ where: { id: b.id }, data: { originReceivedAt: new Date(), domesticStatus: b.handoverMode === 'DOMESTIC_SHIPPING' ? 'RECEIVED' : 'NOT_REQUIRED' } });
     await tx.parcel.update({ where: { id: b.parcelId }, data: { locationId: b.receivingLocationId } });
+    const physicalPackages = req.body?.physicalPackages;
+    if (physicalPackages != null) {
+      if (!Array.isArray(physicalPackages) || physicalPackages.length < 2 || physicalPackages.length > 20) fail(400, 'Enter 2 to 20 physical packages.');
+      const measured = physicalPackages.map(weight => number(weight, 'verified package weight', 0.001, 100));
+      if (Math.abs(measured.reduce((sum, weight) => sum + weight, 0) - b.verifiedWeightKg) > 0.0001) {
+        fail(400, 'Package weights must add up to the verified booking weight.');
+      }
+      const [first, ...rest] = measured;
+      const original = b.parcel.items[0];
+      if (!original || b.parcel.items.length !== 1) fail(409, 'This booking already has a physical package list.');
+      await tx.parcelItem.update({ where: { id: original.id }, data: { verifiedWeightKg: first, warehouseReceivedAt: new Date() } });
+      await tx.parcelItem.createMany({ data: rest.map((weight, index) => ({
+        parcelId: b.parcelId, name: original.type, type: original.type, position: index + 1,
+        verifiedWeightKg: weight, warehouseReceivedAt: new Date(),
+      })) });
+    }
+    await allocatePackageCodes(tx, b.parcel);
     await event(tx, req, b, 'RECEIVED_BY_D2F', `Approved receiving location confirmed the parcel: ${note}`); return staffBooking(await getBooking(tx, req));
   }));
 }));
 router.post('/bookings/:id/authorize-handover', requireRole('STAFF', 'ADMIN'), wrap(async (req, res) => {
-  res.json(await transaction(req, async tx => { const b = await getBooking(tx, req); requireDeclaration(b, { reviewed: true }); editable(b); facility(req, b.receivingLocation);
+  res.json(await transaction(req, async tx => { const b = await getBooking(tx, req); requireDeclaration(b, { reviewed: true }); editable(b, { continueHandover: true }); facility(req, b.receivingLocation);
     if (!b.originReceivedAt || !b.contentsVerifiedAt || !b.payment || active(b)?.status !== 'CONFIRMED' || !usableReceivingLocation(b.receivingLocation, active(b).trip)) fail(409, 'D2F intake, contents approval, payment and assignment confirmation are required.');
     const code = randomInt(0, 1000000).toString().padStart(6, '0');
     const expiresAt = new Date(Date.now() + 10 * 60000);
@@ -607,15 +688,55 @@ router.post('/bookings/:id/authorize-handover', requireRole('STAFF', 'ADMIN'), w
     return { code, expiresAt, trackingId: b.parcel.trackingId };
   }));
 }));
+function packageCodes(b) {
+  if (!b.parcel.items.length) return [b.parcel.trackingId];
+  return b.parcel.items.filter(item => !item.notCollectedReason).map(item => item.packageCode);
+}
+function verifyHandover(a) {
+  const b = a.booking;
+  requireDeclaration(b, { reviewed: true });
+  requireTravellerDeclaration(a);
+  if (a.status !== 'CONFIRMED' || a.trip.status !== 'APPROVED' ||
+      !b.originReceivedAt || !b.contentsVerifiedAt || !b.payment ||
+      !usableReceivingLocation(b.receivingLocation, a.trip)) {
+    fail(409, 'D2F must confirm the approved receiving location, contents, intake and payment before collection.');
+  }
+  return b;
+}
+function requireHandoverCode(b) {
+  if (!b.handoverCodeHash || !b.handoverCodeExpiresAt || b.handoverCodeExpiresAt <= new Date() || b.handoverAttempts >= 5) {
+    fail(409, 'Ask the D2F receiving team for a new collection code.');
+  }
+}
+router.post('/assignments/:id/package-receipts', requireRole('CUSTOMER'), wrap(async (req, res) => {
+  res.json(await transaction(req, async tx => {
+    const a = await travellerAssignmentRecord(tx, req);
+    const b = verifyHandover(a);
+    const expected = packageCodes(b);
+    if (!expected.length || expected.some(code => !code)) fail(409, 'Ask D2F to prepare labels for all packages.');
+    const scanned = text(req.body?.trackingId, 'the scanned package tracking number', 80).toUpperCase();
+    const code = expected.length === 1 && scanned === b.parcel.trackingId ? expected[0] : scanned;
+    if (!expected.includes(code)) fail(400, 'This package is not on your assignment. Scan the individual package label.');
+    const duplicate = a.packageReceipts.some(row => row.packageCode === code);
+    if (!duplicate) {
+      requireHandoverCode(b);
+      if (b.collectedAt) fail(409, 'This handover is already complete.');
+      await tx.connectPackageReceipt.create({ data: { assignmentId: a.id, packageCode: code, actorId: req.user.id } });
+      await audit(tx, req, 'ConnectAssignment', a.id, 'PACKAGE_RECEIPT_SCANNED', code);
+    }
+    return { packageCode: code, duplicate, scanned: a.packageReceipts.length + (duplicate ? 0 : 1), expected: expected.length };
+  }));
+}));
 router.post('/assignments/:id/collect', requireRole('CUSTOMER'), wrap(async (req, res) => {
   const result = await transaction(req, async tx => {
     const a = await travellerAssignmentRecord(tx,req);
-    if (!a) fail(404, 'Confirmed traveller assignment not found.');
-    const b = a.booking;
-    requireDeclaration(b, { reviewed: true });
-    requireTravellerDeclaration(a);
-    if (!b.originReceivedAt || !b.contentsVerifiedAt || !b.payment || !usableReceivingLocation(b.receivingLocation, active(b)?.trip)) fail(409, 'D2F must confirm the approved receiving location, contents, intake and payment before collection.');
-    if (b.collectedAt || !b.handoverCodeHash || !b.handoverCodeExpiresAt || b.handoverCodeExpiresAt < new Date() || b.handoverAttempts >= 5) fail(409, 'Ask the D2F receiving team for a new collection code.');
+    const b = verifyHandover(a);
+    if (b.collectedAt) fail(409, 'This handover is already complete.');
+    requireHandoverCode(b);
+    const expected = packageCodes(b);
+    if (!expected.length || expected.some(code => !code || !a.packageReceipts.some(row => row.packageCode === code))) {
+      fail(409, 'Scan every expected package before confirming handover.');
+    }
     if (req.body?.contentsAccepted !== true) fail(400, 'Verify the contents and confirm they are safe and permitted before collection.');
     const candidate = createHash('sha256').update(`${b.id}:${String(req.body?.code || '')}`).digest();
     if (!timingSafeEqual(candidate, Buffer.from(b.handoverCodeHash, 'hex'))) {

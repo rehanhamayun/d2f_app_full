@@ -5,6 +5,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../core/theme.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
+import 'invoice_screen.dart';
 import 'label_preview_screen.dart';
 import 'parcel_detail_screen.dart';
 
@@ -244,6 +245,11 @@ class ParcelSuccessScreen extends StatelessWidget {
                   builder: (_) => LabelPreviewScreen(parcel: parcel),
                 ),
               ),
+            ),
+            const SizedBox(height: 12),
+            OutlineButton2(
+              label: 'Print or share intake receipt',
+              onPressed: () => openIntakeReceipt(context, parcel),
             ),
             const SizedBox(height: 12),
             OutlineButton2(

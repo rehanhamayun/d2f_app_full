@@ -14,6 +14,86 @@ router.use(authenticate, requireRole('ADMIN'), async (req, res, next) => {
   try { req.organizationId = await resolveOrganizationId(prisma, req.user); next(); } catch (e) { next(e); }
 });
 
+const warehouseQuoteStatuses = ['SUBMITTED', 'RECEIVED', 'QUOTED', 'ACCEPTED', 'PAID'];
+const shipForMeQuoteSelect = {
+  id: true, status: true, paymentStatus: true, itemDescription: true, retailerName: true,
+  retailerTrackingId: true, customerWarehouseId: true, packageWeightKg: true, shippingMethod: true,
+  shippingFeeMinor: true, handlingFeeMinor: true, insuranceFeeMinor: true, totalQuoteMinor: true,
+  customer: { select: { displayName: true } },
+};
+router.get('/ship-for-me/quotes', async (req, res, next) => {
+  try {
+    res.json(await prisma.shipForMeRequest.findMany({
+      where: { organizationId: req.organizationId, status: { in: warehouseQuoteStatuses } },
+      select: shipForMeQuoteSelect, orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }], take: 100,
+    }));
+  } catch (error) { next(error); }
+});
+
+router.put('/ship-for-me/quotes/:id', async (req, res, next) => {
+  try {
+    const { shippingFeeMinor, handlingFeeMinor, insuranceFeeMinor, weightKg, method, received } = req.body || {};
+    const totalQuoteMinor = shippingFeeMinor + handlingFeeMinor + insuranceFeeMinor;
+    if (![shippingFeeMinor, handlingFeeMinor, insuranceFeeMinor, totalQuoteMinor].every(validAmount) ||
+        typeof weightKg !== 'number' || !Number.isFinite(weightKg) || weightKg <= 0 || weightKg > 10000 ||
+        !['AIR', 'SEA', 'ROAD'].includes(method) || received !== true) {
+      fail(400, 'Verify physical receipt and enter the measured weight, shipping method and itemized USD charges.');
+    }
+    const result = await prisma.$transaction(async tx => {
+      await warehouseLock(tx, req.organizationId);
+      const row = await tx.shipForMeRequest.findFirst({ where: { id: req.params.id, organizationId: req.organizationId } });
+      if (!row) fail(404, 'Ship For Me request not found.');
+      if (!['SUBMITTED', 'RECEIVED', 'QUOTED'].includes(row.status)) fail(409, 'The quote is locked after customer acceptance.');
+      const saved = await tx.shipForMeRequest.update({
+        where: { id: row.id },
+        data: {
+          status: 'QUOTED', receivedAt: row.receivedAt ?? new Date(), receivedBy: row.receivedBy ?? req.user.id,
+          shippingFeeMinor, handlingFeeMinor, insuranceFeeMinor, totalQuoteMinor,
+          shippingMethod: method, packageWeightKg: weightKg, quoteValidUntil: null,
+        },
+        select: shipForMeQuoteSelect,
+      });
+      await audit(tx, req, 'ShipForMeRequest', row.id, 'SHIP_FOR_ME_QUOTED', JSON.stringify({
+        shippingFeeMinor, handlingFeeMinor, insuranceFeeMinor, totalQuoteMinor, weightKg, method,
+      }));
+      return saved;
+    });
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
+router.post('/ship-for-me/quotes/:id/payment', async (req, res, next) => {
+  try {
+    const { reference, amountMinor } = req.body || {};
+    if (!validText(reference, 120) || !validAmount(amountMinor)) fail(400, 'Enter the verified payment reference and amount.');
+    const result = await prisma.$transaction(async tx => {
+      await warehouseLock(tx, req.organizationId);
+      const row = await tx.shipForMeRequest.findFirst({ where: { id: req.params.id, organizationId: req.organizationId } });
+      if (!row) fail(404, 'Ship For Me request not found.');
+      if (!['ACCEPTED', 'PAID'].includes(row.status) || row.totalQuoteMinor !== amountMinor) fail(409, 'Payment must match the accepted shipping quote.');
+      const existing = await tx.payment.findFirst({
+        where: { organizationId: req.organizationId, providerReference: reference.trim(), status: 'COMPLETED' },
+      });
+      if (existing?.shipForMeRequestId === row.id && row.status === 'PAID') {
+        return tx.shipForMeRequest.findUnique({ where: { id: row.id }, select: shipForMeQuoteSelect });
+      }
+      if (existing || row.status === 'PAID') fail(409, 'This payment or request already has a verified record.');
+      const now = new Date();
+      const payment = await tx.payment.create({ data: {
+        shipForMeRequestId: row.id, customerId: row.customerId, organizationId: row.organizationId,
+        amountMinor, currency: 'USD', paymentMethod: 'MANUAL', providerReference: reference.trim(),
+        purpose: 'QUOTE_PAYMENT', status: 'COMPLETED', verifiedBy: req.user.id, verifiedAt: now, completedAt: now,
+      } });
+      const saved = await tx.shipForMeRequest.update({
+        where: { id: row.id }, data: { status: 'PAID', paymentStatus: 'PAID', paidAt: now }, select: shipForMeQuoteSelect,
+      });
+      await audit(tx, req, 'ShipForMeRequest', row.id, 'SHIP_FOR_ME_PAYMENT_VERIFIED', JSON.stringify({ paymentId: payment.id, amountMinor }));
+      return saved;
+    });
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
 router.get('/retailers', async (req, res, next) => {
   try {
     const { retailerLinks } = await prisma.organization.findUniqueOrThrow({ where: { id: req.organizationId }, select: { retailerLinks: true } });

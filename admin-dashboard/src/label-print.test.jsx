@@ -57,3 +57,18 @@ test('a prior local print requires a reprint reason before another job is sent',
  localJobs=[{parcelId:'p1',clientJobId:'earlier',status:'UNKNOWN'}];await open();fireEvent.click(screen.getByRole('button',{name:'Print one label'}));
  await screen.findByRole('alert');expect(screen.getByRole('alert')).toHaveTextContent('enter a reprint reason');expect(sent.filter(r=>r.options.method==='POST')).toHaveLength(0);expect(window.confirm).not.toHaveBeenCalled();
 });
+
+test('a three-package shipment prints exactly three package images in order', async () => {
+ request.mockResolvedValueOnce({ id: 'p1', trackingId: 'D2F1', destination: 'Lomé', status: 'RECEIVED',
+  items: ['P01', 'P02', 'P03'].map(code => ({ packageCode: `D2F1-${code}`, type: 'BOX', verifiedWeightKg: 2, quantity: 7 })) });
+ render(<LabelPrintPanel parcelId="p1" token={token}/>);
+ fireEvent.click(screen.getByRole('button', { name: 'Print Label' }));
+ fireEvent.click(await screen.findByRole('button', { name: 'Print 3 labels · 4 × 6' }));
+ const frame = screen.getByTitle('4 × 6 shipping label');
+ const print = vi.spyOn(frame.contentWindow, 'print').mockImplementation(() => {});
+ const labels = [...frame.contentDocument.querySelectorAll('img')];
+ expect(labels.map(label => label.alt)).toEqual(['Shipping label for D2F1-P01', 'Shipping label for D2F1-P02', 'Shipping label for D2F1-P03']);
+ labels.forEach(label => fireEvent.load(label));
+ expect(print).toHaveBeenCalledOnce();
+ frame.contentWindow.dispatchEvent(new frame.contentWindow.Event('afterprint'));
+});

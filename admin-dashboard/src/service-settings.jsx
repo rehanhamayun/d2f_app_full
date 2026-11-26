@@ -84,6 +84,7 @@ export function ShipForMeSettings({ token, notify }) {
         <details><summary>Read full terms</summary><p style={{ whiteSpace: 'pre-wrap' }}>{agreement.content}</p></details>
       </div>)}
     </section></LoadState>
+    <ShipForMeQuotes token={token} notify={notify} />
     {editing && <Modal title="Publish Ship For Me terms" onClose={() => setEditing(false)} busy={busy}>
       <form className="modal-body invite-form" onSubmit={publish}>
         <label>Version<input name="version" required maxLength={50} placeholder="ship-for-me-v1" /></label>
@@ -95,4 +96,77 @@ export function ShipForMeSettings({ token, notify }) {
       </form>
     </Modal>}
   </>;
+}
+
+function ShipForMeQuotes({ token, notify }) {
+  const path = `${services}/ship-for-me/quotes`;
+  const remote = useRemote(path, token);
+  const [selected, setSelected] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const payment = selected?.status === 'ACCEPTED';
+  const dollars = minor => minor == null ? '' : (minor / 100).toFixed(2);
+
+  async function save(event) {
+    event.preventDefault();
+    if (busy) return;
+    const fields = new FormData(event.currentTarget);
+    const cents = name => Math.round(Number(fields.get(name)) * 100);
+    setBusy(true);
+    setError('');
+    try {
+      const body = payment
+        ? { reference: fields.get('reference'), amountMinor: cents('amount') }
+        : {
+            shippingFeeMinor: cents('shipping'), handlingFeeMinor: cents('handling'),
+            insuranceFeeMinor: cents('insurance'), method: fields.get('method'),
+            weightKg: Number(fields.get('weight')), received: fields.get('received') === 'on',
+          };
+      await request(`${path}/${selected.id}${payment ? '/payment' : ''}`, {
+        token, method: payment ? 'POST' : 'PUT', body: JSON.stringify(body),
+      });
+      setSelected(null);
+      remote.reload();
+      notify(payment ? 'Verified Ship For Me payment recorded.' : 'Ship For Me quote sent to the customer.');
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+
+  return <section className="panel table-panel">
+    <div className="modal-body"><h2>Shipping quotes and invoices</h2>
+      <LoadState remote={remote}>
+        {!remote.data?.length && <p>No submitted Ship For Me requests.</p>}
+        {remote.data?.map(row => <div key={row.id} className="connect-cargo">
+          <h3>{row.itemDescription || row.retailerName}</h3>
+          <p>{row.customer.displayName} · {row.customerWarehouseId || row.id}</p>
+          {row.retailerTrackingId && <p>Retailer tracking · {row.retailerTrackingId}</p>}
+          <p>{row.status.toLowerCase()}{row.totalQuoteMinor != null ? ` · USD ${dollars(row.totalQuoteMinor)}` : ''}</p>
+          {row.status !== 'PAID' && <button type="button" className="button secondary" onClick={() => { setSelected(row); setError(''); }}>
+            {row.status === 'ACCEPTED' ? 'Record verified payment' : row.status === 'QUOTED' ? 'Edit shipping quote' : 'Verify receipt and quote'}
+          </button>}
+        </div>)}
+      </LoadState>
+    </div>
+    {selected && <Modal title={payment ? 'Record verified Ship For Me payment' : 'Quote Ship For Me shipping'} onClose={() => setSelected(null)} busy={busy}>
+      <form className="modal-body invite-form" onSubmit={save}>
+        {payment ? <>
+          <label>Verified amount (USD)<input name="amount" type="number" min="0" step=".01" required defaultValue={dollars(selected.totalQuoteMinor)} /></label>
+          <label>Payment reference<input name="reference" maxLength={120} required /></label>
+        </> : <>
+          <div className="form-row">
+            <label>Measured weight (kg)<input name="weight" type="number" min=".001" max="10000" step="any" defaultValue={selected.packageWeightKg || ''} required /></label>
+            <label>Shipping method<select name="method" defaultValue={selected.shippingMethod || ''} required>
+              <option value="">Select method</option><option>AIR</option><option>SEA</option><option>ROAD</option>
+            </select></label>
+          </div>
+          <label>Shipping charge (USD)<input name="shipping" type="number" min="0" step=".01" required defaultValue={dollars(selected.shippingFeeMinor)} /></label>
+          <label>Handling charge (USD)<input name="handling" type="number" min="0" step=".01" required defaultValue={dollars(selected.handlingFeeMinor ?? 0)} /></label>
+          <label>Insurance charge (USD)<input name="insurance" type="number" min="0" step=".01" required defaultValue={dollars(selected.insuranceFeeMinor ?? 0)} /></label>
+          <label className="checkbox-label"><input name="received" type="checkbox" required /> I verified physical receipt at the warehouse.</label>
+        </>}
+        {error && <p role="alert">{error}</p>}
+        <button className="button primary" disabled={busy}>{busy ? 'Saving…' : payment ? 'Confirm verified payment' : 'Send shipping quote'}</button>
+      </form>
+    </Modal>}
+  </section>;
 }

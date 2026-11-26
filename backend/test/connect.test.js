@@ -6,6 +6,7 @@ import jwt from 'jsonwebtoken';
 import app from '../src/app.js';
 import { prisma } from '../src/db.js';
 import { JWT_SECRET } from '../src/config.js';
+import { remindConnectTravellers } from '../src/connect_reminders.js';
 import { quote, matchingError } from '../src/connect_rules.js';
 
 test('Connect pricing uses actual kg for capacity and category-specific fees', () => {
@@ -72,6 +73,8 @@ test('Connect domestic → traveller → destination workflow preserves privacy 
       assert.equal((await ok('/customer/parcels', sender)).length, 0);
       assert.match(booking.parcel.trackingId, new RegExp(`^${prefix}\\d{12}$`)); assert.equal(booking.parcel.awbNumber, null);
       assert.equal((await ok('/connect/bookings', sender, data)).id, booking.id);
+      assert.equal(await prisma.notification.count({ where: { userId: traveller.id, entityId: trip.id, type: 'CONNECT_BOOKING_REQUESTED' } }), 1);
+
       assert.equal((await call('/connect/bookings', stranger, data)).status, 409);
       assert.equal((await call(`/connect/bookings/${booking.id}`, traveller)).status, 404);
       assert.equal((await call('/connect/operations', traveller)).status, 403);
@@ -87,8 +90,14 @@ test('Connect domestic → traveller → destination workflow preserves privacy 
       const myTrips = await ok('/connect/trips', traveller); const a = myTrips[0].assignments[0];
       const raw = JSON.stringify(myTrips); for (const forbidden of [sender.email, 'PRIVATE-SENDER-RETURN-ADDRESS', 'PRIVATE-RECIPIENT-ADDRESS', 'recipientPhone', 'recipientName', 'senderAddress', 'customerId']) assert.ok(!raw.includes(forbidden), forbidden);
       assert.equal((await call(`/connect/assignments/${a.id}/respond`, stranger, { accepted: true, note: 'unsafe access' })).status, 404);
+      assert.ok(await prisma.notification.findFirst({ where: { userId: traveller.id, entityType: 'ConnectAssignment', entityId: a.id } }));
+      const reminderTime = new Date(Date.now() + 25 * 3600000);
+      await Promise.all([remindConnectTravellers(reminderTime), remindConnectTravellers(reminderTime)]);
+      assert.equal(await prisma.notification.count({ where: { entityId: a.id, type: 'CONNECT_OFFER_REMINDER' } }), 1);
       await acknowledgeTraveller(a.id);
       await ok(`/connect/assignments/${a.id}/respond`, traveller, { accepted: true, note: 'Permitted clothing accepted for D2F handover' });
+      await remindConnectTravellers(reminderTime);
+      assert.equal(await prisma.notification.count({ where: { entityId: a.id, type: 'CONNECT_OFFER_REMINDER' } }), 1);
       await ok(`/connect/bookings/${booking.id}/confirm-assignment`, admin, {});
       const manifest = await ok(`/connect/trips/${trip.id}/manifest`, traveller); assert.equal(manifest.parcels.length, 1); assert.ok(!JSON.stringify(manifest).includes('PRIVATE-SENDER-RETURN-ADDRESS'));
       assert.equal((await call(`/parcels/${booking.parcelId}/events`, admin, { status: 'RECEIVED' })).status, 409);
@@ -131,19 +140,45 @@ test('Connect domestic → traveller → destination workflow preserves privacy 
       await ok(`/connect/bookings/${booking.id}/domestic`, admin, { carrier: 'UPS', trackingNumber: '1Z-TEST', labelUrl: 'https://example.com/secure-label' });
       await ok(`/connect/bookings/${booking.id}/domestic-dispatched`, sender, {});
       assert.equal((await call(`/connect/bookings/${booking.id}/receive`, destinationStaff, { note: 'Wrong warehouse' })).status, 403);
-      await ok(`/connect/bookings/${booking.id}/receive`, originStaff, { note: 'Sealed parcel and inspected clothing received' });
+      const received = await ok(`/connect/bookings/${booking.id}/receive`, originStaff, { note: 'Inspected three packages', physicalPackages: [1, 2, 2] });
+      assert.equal(received.parcel.items.length, 3);
       const otp = await ok(`/connect/bookings/${booking.id}/authorize-handover`, originStaff, {}); assert.match(otp.code, /^\d{6}$/);
       const b = await ok(`/connect/bookings/${booking.id}`, sender); assert.ok(!('handoverCodeHash' in b)); assert.ok(!('handoverCodeExpiresAt' in b));
       const a = activeAssignment(b);
       await ok(`/connect/locations/${origin.id}`, admin, { address: origin.address, connectReceiving: false }, 'PATCH');
       assert.equal((await call(`/connect/assignments/${a.id}/collect`, traveller, { code: otp.code, contentsAccepted: true })).status, 409);
       await ok(`/connect/locations/${origin.id}`, admin, { address: origin.address, connectReceiving: true }, 'PATCH');
+      const scans = `/connect/assignments/${a.id}/package-receipts`;
+      const packages = received.parcel.items.map(item => item.packageCode);
+      assert.equal((await call(scans, stranger, { trackingId: packages[0] })).status, 404);
+      assert.equal((await call(scans, traveller, { trackingId: b.parcel.trackingId })).status, 400);
+      assert.equal((await ok(scans, traveller, { trackingId: packages[0] })).scanned, 1);
+      assert.equal((await ok(scans, traveller, { trackingId: packages[0] })).duplicate, true);
+      assert.equal((await call(`/connect/bookings/${b.id}/unassign`, admin, { note: 'Cannot remove partial custody' })).status, 409);
+      assert.equal((await call(`/connect/assignments/${a.id}/collect`, traveller, { code: otp.code, contentsAccepted: true })).status, 409);
+      assert.equal((await ok(`/connect/bookings/${b.id}`, sender)).collectedAt, null);
+      assert.equal((await ok(scans, traveller, { trackingId: packages[1] })).scanned, 2);
+      assert.equal((await ok(scans, traveller, { trackingId: packages[2] })).scanned, 3);
       const wrong = otp.code === '000000' ? '999999' : '000000';
       assert.equal((await call(`/connect/assignments/${a.id}/collect`, traveller, { code: wrong, contentsAccepted: true })).status, 400);
       assert.equal((await prisma.connectBooking.findUnique({ where: { id: b.id } })).handoverAttempts, 1);
       assert.equal((await call(`/connect/assignments/${a.id}/collect`, traveller, { code: otp.code, contentsAccepted: false })).status, 400);
       await ok(`/connect/assignments/${a.id}/collect`, traveller, { code: otp.code, contentsAccepted: true });
       assert.equal((await call(`/connect/assignments/${a.id}/collect`, traveller, { code: otp.code, contentsAccepted: true })).status, 409);
+    });
+    await t.test('approved flight delays and replacements preserve collected custody and alert affected parties', async () => {
+      const day = new Date(Date.now() + 16 * 86400000).toISOString().slice(0, 10);
+      const patch = { departureLocal: `${day}T13:00`, note: 'Carrier advised a departure change' };
+      const delay = await ok(`/connect/trips/${trip.id}/schedule`, admin, { ...patch, changeType: 'DELAY' }, 'PATCH');
+      assert.equal(delay.scheduleChange.type, 'DELAY');
+      const rebook = { ...patch, changeType: 'REBOOKED', airline: 'Replacement Air', flightNumber: 'RA104', verified: true, capacityKg: 4 };
+      assert.equal((await call(`/connect/trips/${trip.id}/schedule`, admin, rebook, 'PATCH')).status, 409);
+      const replacement = await ok(`/connect/trips/${trip.id}/schedule`, admin, { ...rebook, capacityKg: 10 }, 'PATCH');
+      assert.equal(replacement.flightNumber, 'RA104');
+      assert.equal(replacement.scheduleChange.type, 'REBOOKED');
+      assert.equal(await prisma.notification.count({ where: { userId: traveller.id, entityId: trip.id, type: 'CONNECT_FLIGHT_UPDATE' } }), 2);
+      assert.equal(await prisma.notification.count({ where: { userId: sender.id, entityId: booking.id, type: 'CONNECT_FLIGHT_UPDATE' } }), 2);
+      assert.ok((await ok(`/connect/bookings/${booking.id}`, sender)).collectedAt);
     });
     await t.test('actual departure freezes manifest, destination team receives and actual recipient handover completes delivery', async () => {
       assert.equal((await call(`/connect/bookings/${booking.id}/deliver`, admin, { recipientName: 'Recipient', evidence: 'ID checked', confirmed: true })).status, 409);
@@ -182,6 +217,10 @@ test('Connect domestic → traveller → destination workflow preserves privacy 
       const publicFacility = await prisma.location.create({ data: { organizationId: org.id, name: 'Public New York facility', code: 'NY2', city: 'New York', country: 'United States', address: 'Public receiving address', connectReceiving: false } });
       assert.equal((await call(`/connect/trips/${t3.id}/receiving-location`, sender, { locationId: publicFacility.id }, 'PATCH')).status, 403);
       assert.equal((await call(`/connect/trips/${t3.id}/receiving-location`, originStaff, { locationId: destination.id }, 'PATCH')).status, 400);
+      const facilities = await ok(`/connect/trips/${t3.id}/receiving-locations`, originStaff);
+      assert.ok(facilities.locations.some(location => location.id === publicFacility.id));
+      assert.ok(!facilities.locations.some(location => location.id === destination.id));
+      assert.equal((await call(`/connect/trips/${t3.id}/receiving-locations`, sender)).status, 403);
       await ok(`/connect/trips/${t3.id}/receiving-location`, originStaff, { locationId: publicFacility.id }, 'PATCH');
       assert.equal((await ok(`/connect/bookings/${b.id}`, sender)).receivingLocation.id, publicFacility.id);
       await ok(`/connect/bookings/${b.id}/quote`, admin, { internationalFeeMinor: 12500, domesticCostMinor: 2200, note: 'Verified fees' });

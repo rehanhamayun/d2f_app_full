@@ -3,8 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api.dart';
 import '../../core/theme.dart';
+import '../../models/marketplace.dart';
 import '../../models/models.dart';
 import '../../providers/auth_provider.dart';
+import '../../widgets/common.dart';
+import '../invoice_screen.dart';
 import 'ship_for_me_request_form.dart';
 import 'ship_for_me_terms.dart';
 import 'ship_for_me_warehouse.dart';
@@ -84,7 +87,10 @@ class _ShipForMeShopState extends ConsumerState<ShipForMeShop> {
 
   Future<void> _loadTerms() async {
     if (_loadingTerms) return;
-    setState(() { _loadingTerms = true; _termsError = null; });
+    setState(() {
+      _loadingTerms = true;
+      _termsError = null;
+    });
     try {
       final terms = await Api.I.getShipForMeTerms();
       if (!mounted) return;
@@ -95,7 +101,11 @@ class _ShipForMeShopState extends ConsumerState<ShipForMeShop> {
     } on ApiException catch (e) {
       if (mounted) setState(() => _termsError = e.message);
     } catch (_) {
-      if (mounted) setState(() => _termsError = 'Could not load terms. Retry or contact D2F support.');
+      if (mounted)
+        setState(
+          () => _termsError =
+              'Could not load terms. Retry or contact D2F support.',
+        );
     } finally {
       if (mounted) setState(() => _loadingTerms = false);
     }
@@ -510,8 +520,11 @@ class _ShipForMeShopState extends ConsumerState<ShipForMeShop> {
               ),
               const SizedBox(height: 2),
               Text(
-                _loadingTerms ? 'Loading the current terms…' : _terms == null
-                    ? (_termsError ?? 'The current Ship For Me terms are required.')
+                _loadingTerms
+                    ? 'Loading the current terms…'
+                    : _terms == null
+                    ? (_termsError ??
+                          'The current Ship For Me terms are required.')
                     : 'Accept the Ship For Me terms before registering a purchase.',
                 style: const TextStyle(
                   fontSize: 11,
@@ -523,7 +536,11 @@ class _ShipForMeShopState extends ConsumerState<ShipForMeShop> {
           ),
         ),
         TextButton(
-          onPressed: _loadingTerms ? null : _terms == null ? _loadTerms : _acceptTerms,
+          onPressed: _loadingTerms
+              ? null
+              : _terms == null
+              ? _loadTerms
+              : _acceptTerms,
           child: Text(
             _terms == null ? 'Retry' : 'Accept terms',
             style: TextStyle(
@@ -700,22 +717,18 @@ class _ShipForMeShopState extends ConsumerState<ShipForMeShop> {
                   ),
                 ],
                 const Spacer(),
-                if (status == 'QUOTED' || status == 'ACCEPTED')
+                if (status == 'QUOTED')
                   TextButton(
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ShipForMePaymentScreen(request: r),
-                      ),
-                    ),
-                    child: const Text(
-                      'Pay shipping',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.coral,
-                      ),
-                    ),
+                    onPressed: () async {
+                      await Navigator.push<bool>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ShipForMePaymentScreen(request: r),
+                        ),
+                      );
+                      if (mounted) await _load();
+                    },
+                    child: const Text('Review quote'),
                   ),
                 if (status == 'SHIPPED' &&
                     (r['carrierTrackingId'] as String?) != null)
@@ -733,6 +746,23 @@ class _ShipForMeShopState extends ConsumerState<ShipForMeShop> {
               ],
             ),
           ),
+          if (r['totalQuoteMinor'] != null &&
+              const [
+                'ACCEPTED',
+                'PAID',
+                'SHIPPED',
+                'COMPLETED',
+              ].contains(status))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: InvoiceButton(
+                  type: 'ship-for-me',
+                  id: r['id'] as String,
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -753,231 +783,94 @@ class _ShipForMeShopState extends ConsumerState<ShipForMeShop> {
   };
 }
 
-class ShipForMePaymentScreen extends StatelessWidget {
+class ShipForMePaymentScreen extends StatefulWidget {
   final Map<String, dynamic> request;
   const ShipForMePaymentScreen({super.key, required this.request});
 
   @override
+  State<ShipForMePaymentScreen> createState() => _ShipForMePaymentScreenState();
+}
+
+class _ShipForMePaymentScreenState extends State<ShipForMePaymentScreen> {
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _accept() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await Api.I.shipmentOperation(
+        '/ship-for-me/requests/${Uri.encodeComponent(widget.request['id'] as String)}/accept-quote',
+        method: 'POST',
+        data: {
+          'totalMinor': widget.request['totalQuoteMinor'],
+          'updatedAt': widget.request['updatedAt'],
+        },
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (error) {
+      if (mounted) setState(() => _error = '$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final total = (request['totalQuoteMinor'] as int?) ?? 0;
+    final request = widget.request;
     return Scaffold(
-      backgroundColor: AppColors.cream,
-      appBar: AppBar(title: const Text('Pay shipping quote')),
-      body: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: AppColors.goldSoft,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Shipping quote',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.navy,
+      appBar: AppBar(title: const Text('Ship For Me quote')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(18),
+          children: [
+            SectionCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    request['itemDescription'] as String? ?? 'Shipment charges',
+                    style: AppTheme.sectionTitle,
                   ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Shipping fee',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.textGrey,
+                  const SizedBox(height: 12),
+                  for (final (title, field) in [
+                    ('Shipping', 'shippingFeeMinor'),
+                    ('Handling', 'handlingFeeMinor'),
+                    ('Insurance', 'insuranceFeeMinor'),
+                    ('Total', 'totalQuoteMinor'),
+                  ])
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(title),
+                      trailing: Text(
+                        formatMoney(request[field] as int?, 'USD'),
                       ),
                     ),
-                    Text(
-                      '\$${((request['shippingFeeMinor'] as int?) ?? 0) / 100}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Handling fee',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.textGrey,
-                      ),
-                    ),
-                    Text(
-                      '\$${((request['handlingFeeMinor'] as int?) ?? 0) / 100}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Insurance',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.textGrey,
-                      ),
-                    ),
-                    Text(
-                      '\$${((request['insuranceFeeMinor'] as int?) ?? 0) / 100}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-                const Divider(),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Total',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.navy,
-                      ),
-                    ),
-                    Text(
-                      '\$${total / 100}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.coral,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 20),
-          Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Payment method', style: AppTheme.sectionTitle),
-                const SizedBox(height: 12),
-                _PaymentOption(
-                  Icons.credit_card,
-                  'Credit / Debit Card',
-                  'Pay with your card',
-                ),
-                const SizedBox(height: 10),
-                _PaymentOption(
-                  Icons.account_balance,
-                  'Bank Transfer / ACH',
-                  'Bank transfer details',
-                ),
-                const SizedBox(height: 10),
-                _PaymentOption(
-                  Icons.phone_android,
-                  'Mobile Money (Togo)',
-                  'Flooz / T-Money',
-                ),
-                const SizedBox(height: 22),
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: FilledButton(
-                    onPressed: () {},
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.coral,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(17),
-                      ),
-                    ),
-                    child: const Text(
-                      'Pay now',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w900,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+            const SizedBox(height: 14),
+            const Text(
+              'Accept the charges to open your invoice. D2F will update the invoice after verifying payment.',
             ),
-          ),
-        ],
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  _error!,
+                  style: const TextStyle(color: AppColors.coral),
+                ),
+              ),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: _busy ? null : _accept,
+              child: Text(_busy ? 'Accepting…' : 'Accept shipping quote'),
+            ),
+          ],
+        ),
       ),
     );
   }
-}
-
-class _PaymentOption extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  const _PaymentOption(this.icon, this.title, this.subtitle);
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: AppColors.border),
-    ),
-    child: Row(
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: AppColors.blueSoft,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Center(child: Icon(icon, size: 20, color: AppColors.blue)),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.navy,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                style: const TextStyle(
-                  fontSize: 10.5,
-                  color: AppColors.textGrey,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const Icon(
-          Icons.arrow_forward_ios,
-          size: 14,
-          color: AppColors.textGrey,
-        ),
-      ],
-    ),
-  );
 }

@@ -14,6 +14,7 @@ import '../../models/marketplace.dart';
 import '../../models/models.dart';
 import '../../providers/auth_provider.dart';
 import '../../widgets/order_timeline.dart';
+import '../invoice_screen.dart';
 import 'buy_for_me_request_form.dart';
 import 'marketplace_shop.dart';
 import 'storefronts.dart';
@@ -1137,6 +1138,8 @@ class _RequestDetailSheetState extends State<_RequestDetailSheet>
                       ),
                   ],
                   const SizedBox(height: 10),
+                  if (o.amountMinor != null && const ['ACCEPTED', 'PAYMENT_CONFIRMED', 'PURCHASED', 'RECEIVED', 'SHIPPED', 'COMPLETED'].contains(o.status))
+                    InvoiceButton(type: 'buy-for-me', id: o.id),
                   if (o.status == 'QUOTED') ...[
                     SizedBox(
                       height: 54,

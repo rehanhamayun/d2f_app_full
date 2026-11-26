@@ -41,6 +41,9 @@ it('temporary mode proposes a traveller without receiving approval and allows a 
       return json({});
     }
     if (path.endsWith('/matches')) return json([trip]);
+    if (path.endsWith('/receiving-locations')) return json({ route: 'New York, USA', approvalRequired: false, locations: [
+      { id: 'ny', name: 'New York public facility', city: 'New York', country: 'United States' },
+    ] });
     return json({ policy: { receivingApprovalRequired: false, facilityAuthorizationRequired: false },
       bookings: [{ ...booking, assignments: assigned ? [{ status: 'PROPOSED', trip }] : [] }], trips: [], rates: [],
       locations: [
@@ -61,7 +64,7 @@ it('temporary mode proposes a traveller without receiving approval and allows a 
   await user.click(screen.getByRole('button', { name: 'Set receiving facility' }));
   dialog = screen.getByRole('dialog', { name: 'Choose the public receiving facility' });
   const select = within(dialog).getByLabelText('Receiving facility near departure');
-  expect(within(select).getByRole('option', { name: /New York public facility/ })).toBeInTheDocument();
+  expect(await within(select).findByRole('option', { name: /New York public facility/ })).toBeInTheDocument();
   expect(within(select).queryByRole('option', { name: /Wrong city/ })).toBeNull();
   await user.selectOptions(select, 'ny');
   await user.click(within(dialog).getByRole('button', { name: 'Confirm & record' }));

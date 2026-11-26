@@ -1,4 +1,4 @@
-import '../../services/marketplace_invoice.dart';
+import '../invoice_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -515,13 +515,8 @@ class _OrderDetailSheetState extends State<_OrderDetailSheet> {
                   if (o.marketplacePaymentNote != null) _detailRow('Payment rejection reason', o.marketplacePaymentNote!),
                   _detailRow('Delivery method', o.deliveryMethodLabel),
                   _copyRow('Order ID', o.id),
-                  if (o.marketplaceInvoice != null) OutlinedButton.icon(
-                    onPressed: () async {
-                      try { await printMarketplaceInvoice(o); }
-                      catch (_) { if (context.mounted) authMessage(context, 'Could not open the invoice.'); }
-                    },
-                    icon: const Icon(Icons.receipt_long_outlined), label: const Text('Print or save invoice PDF'),
-                  ),
+                  if (o.marketplaceInvoice != null)
+                    InvoiceButton(type: 'marketplace', id: o.id),
                   if (o.delivery != null) _detailRow('Deliver to', o.delivery!),
                   if ((o.deliveryAddress ?? '').isNotEmpty) _detailRow('Address', o.deliveryAddress!),
                   if ((o.notes ?? '').isNotEmpty) _detailRow('Your note', o.notes!),

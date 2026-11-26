@@ -43,6 +43,23 @@ class _LabelPreviewScreenState extends State<LabelPreviewScreen> {
       title: const Text('Shipping label'),
       actions: [
         IconButton(
+          tooltip: 'Share label PDF',
+          onPressed: () async {
+            try {
+              await ParcelLabel.share(widget.parcel);
+            } catch (_) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Could not share shipping labels.'),
+                  ),
+                );
+              }
+            }
+          },
+          icon: const Icon(Icons.share_outlined),
+        ),
+        IconButton(
           tooltip: 'Save PDF',
           onPressed: _saving ? null : _save,
           icon: _saving

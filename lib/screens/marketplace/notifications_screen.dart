@@ -9,6 +9,7 @@ import '../../core/api.dart';
 import '../../core/theme.dart';
 import '../../models/marketplace.dart';
 import '../../widgets/auth_widgets.dart';
+import '../connect_screen.dart';
 
 /// In-app notification center for D2F users.
 ///
@@ -260,7 +261,14 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: () => !n.read ? _markRead(n.id) : null,
+        onTap: () async {
+          if (!n.read) await _markRead(n.id);
+          if (!mounted) return;
+          final destination = connectNotificationDestination(n.entityType, n.entityId);
+          if (destination != null) {
+            await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => destination));
+          }
+        },
         child: Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(

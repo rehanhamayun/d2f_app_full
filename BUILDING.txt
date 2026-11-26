@@ -20,14 +20,20 @@ Backend: npm ci in backend/, configure a private .env from .env.example,
 run npx prisma generate and npx prisma migrate deploy, then npm start.
 Use an isolated PostgreSQL database for npm test.
 Admin dashboard: npm ci, npm test and npm run build in admin-dashboard/.
-Windows connector: install Python 3.9+ and the official Brother Windows driver,
+Windows connector: install Python 3.9+ and the manufacturer's Windows driver,
 then run tools/windows-print-connector/start.cmd. Enter its local pairing key
 in the production D2F dashboard's Print Label panel. Configure the correct 4x6
 paper and verify physical output. The connector binds only to 127.0.0.1:18441.
 
-Printing targets Brother QL-1110NWB/QL-1110NWBc. Other Bluetooth brands require
-separate integration. Actual printer output and Android Play Protect results
-remain unverified without physical test hardware. Local release reports record
+Android direct printing uses the Brother QL-1110NWB/QL-1110NWBc bridge.
+For a KNAON Y41BT, save the D2F 4×6 label or intake-receipt PDF and import it
+in FlashLabel Pro. A supported desktop driver can print from the browser.
+Use one copy per page. A three-package shipment has three separate labels.
+Update the Windows connector to print multiple packages through direct printing.
+
+Zeturn 4×6 printing requires confirmation of the model, PDF import or driver
+support, and a physical print-and-scan test. The 4×6 receipt uses label media.
+Android Play Protect and physical output require device verification. Local release reports record
 118 Flutter, 79 backend, 29 dashboard, 4 connector and 74 live API checks passed.
 
 The repository's existing publishing rules exclude Markdown, design inputs and

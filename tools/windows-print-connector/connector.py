@@ -72,7 +72,7 @@ class PrintStore:
                     if any(old[k] != body[k] for k in ('parcelId', 'printerName', 'labelHash', 'ownerId')):
                         raise ValueError('Job ID already used for another label.')
                     return old
-            if body.get('reprint') is not True and any(r['parcelId'] == body['parcelId'] for r in rows):
+            if body.get('reprint') is not True and any(r['parcelId'] == body['parcelId'] and r['trackingId'] == body['trackingId'] for r in rows):
                 raise ValueError('This parcel already has a print job. Check the physical output and use explicit Reprint if necessary.')
             row = {k: body[k] for k in ('clientJobId', 'parcelId', 'trackingId', 'printerName', 'ownerId')}
             row.update(labelHash=digest, reason=reason.strip(), pages=1, source='WINDOWS_LOCAL_CONNECTOR', status='PRINTING', deviceTimeMs=int(time.time()*1000))
@@ -164,7 +164,7 @@ def make_handler(store, origins=ORIGINS):
         def do_GET(self):
             if not self.allowed(): return
             try:
-                if self.path == '/health': self.reply(200, {'ready': True, 'version': '1.1.11'})
+                if self.path == '/health': self.reply(200, {'ready': True, 'version': '1.1.12', 'packagePrinting': True})
                 elif self.path == '/printers': self.reply(200, store.printers())
                 elif self.path == '/jobs': self.reply(200, store.history())
                 else: self.reply(404, {'error': 'Unknown connector endpoint.'})
@@ -189,7 +189,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dev-origin', choices=['http://localhost:5173', 'http://127.0.0.1:5173'])
     args = parser.parse_args()
-    if os.name != 'nt': raise SystemExit('Run this connector on Windows with the Brother printer driver installed.')
+    if os.name != 'nt': raise SystemExit('Run this connector on Windows with a printer driver configured for 4×6 media.')
     folder = Path(os.environ['LOCALAPPDATA']) / 'D2F' / 'LabelPrint'
     store = PrintStore(folder, windows_printers, windows_send)
     origins = ORIGINS | ({args.dev_origin} if args.dev_origin else set())

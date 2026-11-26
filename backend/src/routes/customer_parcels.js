@@ -37,6 +37,7 @@ const MAX_IMAGES_PER_PARCEL = 8;
 const parcelSelect = {
   id: true,
   trackingId: true,
+  shipmentInvoice: true,
   customerId: true,
   containerId: true,
   container: { select: { id: true, code: true, status: true } },
@@ -119,7 +120,7 @@ router.get('/', async (req, res, next) => {
       ...(!tracking ? { take: 100 } : {}),
       select: { ...parcelSelect, ...(tracking ? { connectBooking: { select: { id: true } } } : {}) },
     });
-    res.json(parcels);
+    res.json(parcels.map(({ shipmentInvoice, ...p }) => ({ ...p, hasInvoice: Boolean(shipmentInvoice) })));
   } catch (error) {
     next(error);
   }
@@ -134,7 +135,8 @@ router.get('/:parcelId', async (req, res, next) => {
       select: parcelSelect,
     });
     if (!parcel) return res.status(404).json({ error: 'Shipment not found.' });
-    res.json(parcel);
+    const { shipmentInvoice, ...detail } = parcel;
+    res.json({ ...detail, hasInvoice: Boolean(shipmentInvoice) });
   } catch (error) {
     next(error);
   }
@@ -500,7 +502,8 @@ router.post('/', async (req, res, next) => {
       });
     });
 
-    res.status(createdNew ? 201 : 200).json(parcel);
+    const { shipmentInvoice, ...detail } = parcel;
+    res.status(createdNew ? 201 : 200).json({ ...detail, hasInvoice: Boolean(shipmentInvoice) });
   } catch (error) {
     next(error);
   }

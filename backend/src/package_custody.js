@@ -5,7 +5,7 @@ export async function recordCollection(tx, parcel, missedItems) {
   }
   const items = await tx.parcelItem.findMany({
     where: { parcelId: parcel.id },
-    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
   });
   if (!items.length) return null;
   const missed = [];
@@ -45,7 +45,7 @@ export async function recordCollection(tx, parcel, missedItems) {
 export async function allocatePackageCodes(tx, parcel) {
   const items = await tx.parcelItem.findMany({
     where: { parcelId: parcel.id },
-    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
   });
   for (const [index, item] of items.entries()) {
     if (item.packageCode || item.notCollectedReason) continue;

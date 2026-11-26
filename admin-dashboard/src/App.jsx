@@ -2,7 +2,8 @@ import { ShipForMeSettings } from './service-settings.jsx';
 import { WorldClocks, DashboardTimezone } from './world-clocks.jsx';
 import { NotificationBell } from './notification-bell.jsx';
 import { dashboardTimezone } from './timezones.js';
-import { LabelPrintPanel } from './label-print';
+import { ShipmentInvoice } from './shipment-invoice.jsx';
+import { LabelPrintPanel, RecordPhysicalPackages } from './label-print';
 import { StructuredAddress, isUsRoute } from './structured-address.jsx';
 import { OperationalNotes, OperationalNoteField } from './operational-notes.jsx';
 import { CustodyActions } from './custody.jsx';
@@ -672,6 +673,7 @@ function ShipmentFormModal({ token, notify, onClose, onCreated, staffAccess = fa
   const [customerLoading, setCustomerLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [additionalPackages, setAdditionalPackages] = useState([]);
   const [rescheduleReason, setRescheduleReason] = useState('');
   const [pickupWhenEdit, setPickupWhenEdit] = useState(parcel?.pickupScheduledAt ? localInputValue(new Date(parcel.pickupScheduledAt)) : '');
   const routeLocked = parcel?.container && parcel.container.status !== 'ARRIVED';
@@ -747,6 +749,10 @@ function ShipmentFormModal({ token, notify, onClose, onCreated, staffAccess = fa
           ...Object.fromEntries(Object.entries(form).filter(([key]) => key !== 'orderType')),
           ...(form.orderType || parcel?.orderType ? { orderType: form.orderType || null } : {}),
           weightKg: Number(form.weightKg),
+          ...(!parcel && additionalPackages.length > 0 ? {
+            physicalPackages: [{ type: form.packageType, weightKg: Number(form.weightKg) },
+              ...additionalPackages.map(p => ({ ...p, weightKg: Number(p.weightKg) }))],
+          } : {}),
           ...(parcel && form.deliveryMode === 'PICKUP' && pickupWhenEdit.trim() ? { pickupScheduledAt: new Date(pickupWhenEdit).toISOString(), rescheduleReason: rescheduleReason.trim() } : {}),
           ...(parcel ? { updatedAt: parcel.updatedAt } : {}),
         }),
@@ -789,6 +795,17 @@ function ShipmentFormModal({ token, notify, onClose, onCreated, staffAccess = fa
             <label>Weight (kg)<input type="number" min="0.01" max="10000" step="0.01" required value={form.weightKg} onChange={(event) => setForm({ ...form, weightKg: event.target.value })} /></label>
             <label>Shipping method<select disabled={routeLocked} value={form.method} onChange={(event) => setForm({ ...form, method: event.target.value })}><option value="AIR">Air</option><option value="SEA">Sea</option><option value="ROAD">Road</option></select></label>
           </div>
+          {!parcel && <>
+            {additionalPackages.map((p, index) => <fieldset key={index} className="form-row">
+              <legend>Package {index + 2}</legend>
+              <label>Package {index + 2} type<select value={p.type} onChange={e => setAdditionalPackages(rows => rows.map((row, i) => i === index ? { ...row, type: e.target.value } : row))}>
+                {['BOX', 'SUITCASE', 'BARREL', 'TV', 'APPLIANCE', 'FURNITURE', 'PALLET', 'VEHICLE', 'DOCUMENTS', 'OTHER'].map(type => <option key={type}>{type}</option>)}
+              </select></label>
+              <label>Package {index + 2} weight (kg)<input type="number" min="0.01" max="10000" step="0.01" required value={p.weightKg} onChange={e => setAdditionalPackages(rows => rows.map((row, i) => i === index ? { ...row, weightKg: e.target.value } : row))} /></label>
+              <button type="button" className="button secondary" onClick={() => setAdditionalPackages(rows => rows.filter((_, i) => i !== index))}>Remove package {index + 2}</button>
+            </fieldset>)}
+            <button type="button" className="button secondary" disabled={additionalPackages.length >= 19} onClick={() => setAdditionalPackages(rows => [...rows, { type: 'BOX', weightKg: '' }])}>Add physical package</button>
+          </>}
           <div className="form-row">
             <label>Origin<input disabled={routeLocked} list="d2f-route-locations" required pattern=".*\S.*" maxLength={120} value={form.origin} onChange={(event) => setForm({ ...form, origin: event.target.value })} /></label>
             <label>Destination<input disabled={routeLocked} list="d2f-route-locations" required pattern=".*\S.*" maxLength={120} value={form.destination} onChange={(event) => setForm({ ...form, destination: event.target.value })} /></label>
@@ -1044,8 +1061,16 @@ function ShipmentModal({ parcel, loading, busy, onClose, onUpdate, onEdit, token
             <div><small>Goods pieces</small><b>{goodsCount ? `${goodsCount} package${goodsCount === 1 ? '' : 's'}` : '—'}</b></div>
           </div>
           <div className="detail-grid"><div><small>Service</small><b>{parcel.serviceType === 'AIR_CARGO' ? 'D2F Air Cargo' : parcel.serviceType === 'AIR_TRAVELLER' ? 'D2F Connect · Air Traveller' : parcel.method}</b></div><div><small>Customer contents declaration</small><b>{parcel.restrictionsAcknowledgedAt ? formatDate(parcel.restrictionsAcknowledgedAt, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Not recorded on this legacy / staff registration'}</b></div></div>
+          {(parcel.location || parcel.container || parcel.flightNumber) && <div className="detail-grid">
+            {parcel.location && <div><small>Current facility</small><b>{parcel.location.name}</b></div>}
+            {parcel.container && <div><small>Assigned container</small><b>{parcel.container.code}</b></div>}
+            {parcel.flightNumber && <div><small>Flight</small><b>{[parcel.airline, parcel.flightNumber].filter(Boolean).join(' ')}</b></div>}
+          </div>}
           {missingGoods.length > 0 && <div className="alert error-alert" role="status">Collected {goods.length - missingGoods.length} of {goods.length} packages. Missing packages remain recorded below.</div>}
+          <RecordPhysicalPackages parcel={parcel} token={token} onSaved={onRefreshDetail} />
           <LabelPrintPanel parcelId={parcel.id} token={token} />
+          {canEditAllNotes && parcel.serviceType !== 'AIR_TRAVELLER' && !['REJECTED', 'CANCELLED'].includes(parcel.status) &&
+            <ShipmentInvoice parcel={parcel} token={token} notify={notify} onSaved={onRefreshDetail} />}
           <CustodyActions parcel={parcel} token={token} onSaved={onRefreshDetail} isAdmin={canEditAllNotes} />
           <AirCargoReference parcel={parcel} token={token} notify={notify} onSaved={onRefreshDetail} />
       {goods.length > 0 && <div className="goods-list">{goods.map((item, index) => <div className="goods-row" key={item.id || index}>
