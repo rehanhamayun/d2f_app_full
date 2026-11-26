@@ -143,9 +143,10 @@ void main() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(DirectLabelPrint.channel, (call) async {
             calls.add(call.method);
-            if (call.method == 'settings')
+            if (call.method == 'settings') {
               return {'sdkVersion': '4.13.2', 'defaultPrinter': null};
-            if (call.method == 'paired')
+            }
+            if (call.method == 'paired') {
               return [
                 {
                   'address': 'AA:BB:CC:DD:EE:FF',
@@ -153,6 +154,7 @@ void main() {
                   'paired': true,
                 },
               ];
+            }
             return call.method == 'permissions' ? true : [];
           });
       addTearDown(

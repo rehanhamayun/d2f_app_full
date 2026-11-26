@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -67,12 +66,13 @@ class _ConnectPaymentEvidenceFormState
         });
       }
     } on PlatformException catch (e) {
-      if (mounted)
+      if (mounted) {
         setState(
           () => _error = e.code.toLowerCase().contains('denied')
               ? 'Photo access was denied. Enable photo access in Android Settings (or your device settings), then try again.'
               : 'Could not open your photos. Please try again.',
         );
+      }
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }

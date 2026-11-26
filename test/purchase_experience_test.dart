@@ -106,10 +106,11 @@ void main() {
               loadRequests: () async => [order()],
               decideRequest: (id, decision) async {
                 decisions.add(decision);
-                if (fail)
+                if (fail) {
                   throw ApiException(
                     'Connection interrupted. Please try again.',
                   );
+                }
                 state = 'ACCEPTED';
                 return order();
               },

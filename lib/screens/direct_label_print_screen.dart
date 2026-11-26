@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -80,7 +79,7 @@ class _DirectLabelPrintScreenState
       }
       final cached = await DirectLabelPrint.rows('cachedLabels', user!),
           history = await DirectLabelPrint.rows('history', user);
-      if (mounted)
+      if (mounted) {
         setState(() {
           _settings = settings;
           _cached = cached;
@@ -88,6 +87,7 @@ class _DirectLabelPrintScreenState
           _media = settings['defaultPrinter']?['media'] ?? _media;
           _error = null;
         });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = _message(e));
     } finally {
@@ -117,29 +117,32 @@ class _DirectLabelPrintScreenState
     await DirectLabelPrint.call('permissions');
     final rows =
         await DirectLabelPrint.call(scan ? 'discover' : 'paired') as List;
-    if (mounted)
+    if (mounted) {
       setState(
         () => _devices = rows.map((v) => Map<String, dynamic>.from(v)).toList(),
       );
+    }
   });
   Future<void> _selectCached(Map<String, dynamic> row) async {
     final bytes = await DirectLabelPrint.call('cachedPdf', {
       'ownerId': DirectLabelPrint.owner(_user!),
       'parcelId': row['parcelId'],
     }) as Uint8List?;
-    if (mounted)
+    if (mounted) {
       setState(() {
         _selectedParcel = row['parcelId'];
         _tracking = row['trackingId'];
         _pdf = bytes;
       });
+    }
   }
 
   Future<void> _print() => _run(() async {
-    if (Api.I.offlinePrintingOnly && Api.I.offlinePrintingUser == null)
+    if (Api.I.offlinePrintingOnly && Api.I.offlinePrintingUser == null) {
       throw StateError(
         'Offline printing access expired. Reconnect and sign in again.',
       );
+    }
     final prior = _history
         .where((j) => j['parcelId'] == _selectedParcel)
         .toList();
@@ -211,24 +214,26 @@ class _DirectLabelPrintScreenState
       reprint: reprint,
       reason: approved,
     );
-    if (mounted)
+    if (mounted) {
       setState(() => _notice = outcome['message'] ?? outcome['status']);
+    }
     await _load();
     try {
       await DirectLabelPrint.sync(_user!);
       await _load();
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(
           () => _notice =
               '${outcome['message']} History saved on this phone; use Sync history when online.',
         );
+      }
     }
   });
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authControllerProvider).valueOrNull;
-    if (!DirectLabelPrint.permitted(user))
+    if (!DirectLabelPrint.permitted(user)) {
       return Scaffold(
         appBar: AppBar(title: const Text('Label printer')),
         body: const Center(
@@ -237,7 +242,8 @@ class _DirectLabelPrintScreenState
           ),
         ),
       );
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android)
+    }
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
       return Scaffold(
         appBar: AppBar(title: const Text('Label printer')),
         body: const Padding(
@@ -247,6 +253,7 @@ class _DirectLabelPrintScreenState
           ),
         ),
       );
+    }
     final printer = _settings['defaultPrinter'];
     return Scaffold(
       appBar: AppBar(
@@ -521,7 +528,7 @@ class _DirectLabelPrintScreenState
                     final license = await rootBundle.loadString(
                       'assets/licenses/Brother-SDK-EULA.txt',
                     );
-                    if (context.mounted)
+                    if (context.mounted) {
                       showDialog<void>(
                         context: context,
                         builder: (c) => AlertDialog(
@@ -535,6 +542,7 @@ class _DirectLabelPrintScreenState
                           ],
                         ),
                       );
+                    }
                   },
                   child: const Text('Brother SDK license & notices'),
                 ),

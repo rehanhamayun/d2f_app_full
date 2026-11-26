@@ -40,12 +40,14 @@ class _ConnectDeclarationFormState extends State<ConnectDeclarationForm> {
         '${widget.resourcePath ?? '/bookings/${widget.bookingId}'}/declaration-policy',
         method: 'GET',
       );
-      if (mounted)
+      if (mounted) {
         setState(() {
           _policy = Map<String, dynamic>.from(p);
-          if (widget.traveller)
+          if (widget.traveller) {
             _contents.text = p['contents'] ?? widget.contents;
+          }
         });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
@@ -61,12 +63,14 @@ class _ConnectDeclarationFormState extends State<ConnectDeclarationForm> {
     final missing = <String>[];
     if (_contents.text.trim().isEmpty) missing.add('itemized contents');
     final remaining = _checks.where((c) => !c).length;
-    if (remaining > 0)
+    if (remaining > 0) {
       missing.add(
         '$remaining declaration checkbox${remaining == 1 ? '' : 'es'}',
       );
-    if (_name.text.trim().isEmpty)
+    }
+    if (_name.text.trim().isEmpty) {
       missing.add('full legal name (one or more words)');
+    }
     if (!_electronic) missing.add('electronic acknowledgment');
     return 'To confirm, complete: ${missing.join(', ')}.';
   }

@@ -102,11 +102,12 @@ class _SellerStudioScreenState extends ConsumerState<SellerStudioScreen>
       );
       await _load();
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         authMessage(
           context,
           'The shop photo could not be saved. Please try again.',
         );
+      }
       rethrow;
     }
   }
@@ -247,8 +248,9 @@ class _SellerStudioScreenState extends ConsumerState<SellerStudioScreen>
         await _loadAdminSellers();
         if (mounted) authMessage(context, 'Seller registered.');
       } catch (_) {
-        if (mounted)
+        if (mounted) {
           authMessage(context, 'Registration failed. Please try again.');
+        }
       }
     }
   }
@@ -315,12 +317,13 @@ class _SellerStudioScreenState extends ConsumerState<SellerStudioScreen>
       );
     }
     final profile = _me?.profile;
-    if (profile == null)
+    if (profile == null) {
       return Scaffold(
         backgroundColor: AppColors.cream,
         appBar: AppBar(title: const Text('Sell on D2F')),
         body: _Pitch(onApply: _openApplication),
       );
+    }
     return Scaffold(
       backgroundColor: AppColors.cream,
       appBar: AppBar(
@@ -1410,11 +1413,12 @@ class _AdminSellerBodyState extends State<_AdminSellerBody> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.loading)
+    if (widget.loading) {
       return const Center(
         child: CircularProgressIndicator(color: AppColors.coral),
       );
-    if (widget.failed)
+    }
+    if (widget.failed) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1434,6 +1438,7 @@ class _AdminSellerBodyState extends State<_AdminSellerBody> {
           ],
         ),
       );
+    }
     final filtered = widget.sellers.where((s) {
       if (_filter == 'ALL') return true;
       return (s['status'] as String?) == _filter;
@@ -1522,7 +1527,7 @@ class _AdminSellerBodyState extends State<_AdminSellerBody> {
                         size: 48,
                         color: AppColors.textGrey,
                       ),
-                      const SizedBox(height: 10),
+                      SizedBox(height: 10),
                       Text(
                         'No sellers found.',
                         style: TextStyle(color: AppColors.textGrey),
@@ -1533,7 +1538,7 @@ class _AdminSellerBodyState extends State<_AdminSellerBody> {
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
                   itemCount: filtered.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 6),
+                  separatorBuilder: (_, _) => const SizedBox(height: 6),
                   itemBuilder: (context, index) => _SellerRow(
                     seller: filtered[index],
                     onUpdate: widget.onUpdate,

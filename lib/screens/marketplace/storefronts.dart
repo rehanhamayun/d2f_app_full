@@ -26,8 +26,10 @@ class _MarketplaceStorefrontsState extends State<MarketplaceStorefronts> {
       future: _shops,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
-        if (snapshot.hasError) return Center(child: OutlinedButton(
+        if (snapshot.hasError) {
+          return Center(child: OutlinedButton(
           onPressed: () => setState(() => _shops = Api.I.marketplaceStorefronts()), child: const Text('Retry storefronts')));
+        }
         final shops = snapshot.data ?? [];
         if (shops.isEmpty) return const Center(child: Text('No storefronts are listed yet.'));
         return ListView(
@@ -98,8 +100,10 @@ class _MarketplaceStorefrontState extends State<MarketplaceStorefront> {
       future: _shop,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
-        if (snapshot.hasError) return Center(child: OutlinedButton(
+        if (snapshot.hasError) {
+          return Center(child: OutlinedButton(
           onPressed: () => setState(() => _shop = Api.I.marketplaceStorefront(widget.id)), child: const Text('Retry storefront')));
+        }
         final shop = snapshot.data!;
         final products = (shop['products'] as List).cast<Map<String, dynamic>>().map(MarketplaceProduct.fromJson);
         return ListView(
